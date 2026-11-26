@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { resolve } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { startServer, type RunningServer } from '../../server.js';
@@ -41,10 +42,10 @@ export async function bootServer(env: Record<string, string> = {}): Promise<Runn
 
 export async function keyFor(s: RunningServer, server: string, env: string, scopes: Array<'tools:read' | 'tools:write' | 'code:run'>, extra: { profile?: string; purpose?: 'user' | 'eval' } = {}): Promise<string> {
   const svc = s.services;
-  const srv = (await svc.servers.bySlug(svc.tenantId, server))!;
+  const srv = (await svc.servers.bySlug(DEFAULT_TENANT_ID, server))!;
   const envRow = (await svc.servers.environments(srv.id)).find((e) => e.slug === env)!;
   const admin = await svc.users.ensureBootstrapAdmin();
-  const { token } = await svc.apiKeys.create({ tenantId: svc.tenantId, name: `test ${env}`, serverId: srv.id, environmentId: envRow.id, scopes, ownerUserId: admin.id, ...extra });
+  const { token } = await svc.apiKeys.create({ tenantId: DEFAULT_TENANT_ID, name: `test ${env}`, serverId: srv.id, environmentId: envRow.id, scopes, ownerUserId: admin.id, ...extra });
   return token;
 }
 

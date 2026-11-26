@@ -2,6 +2,7 @@ import type { Kysely } from 'kysely';
 import type { MainDB } from '../db/schema.js';
 import type { Clock } from '../lib/clock.js';
 import type { BuiltinSecretProvider } from './builtin.provider.js';
+import type { EnvRefGate } from './env-refs.js';
 
 export type SecretOwner = 'environment' | 'settings' | 'oauth_client';
 
@@ -22,9 +23,9 @@ export class NamedSecrets {
 
   async set(tenantId: string, owner: SecretOwner, ownerId: string, name: string, value: string, updatedBy: string | null): Promise<{ updatedAt: number }> {
     const existing = await this.row(tenantId, owner, ownerId, name);
-    const ref = await this.provider.put({ purpose: `${owner}:${name}`, value: Buffer.from(value, 'utf8'), ...(existing ? { id: existing.id } : {}) });
+    const ref = await this.provider.put({ tenantId, purpose: `${owner}:${name}`, value: Buffer.from(value, 'utf8'), ...(existing ? { id: existing.id } : {}) });
     const now = this.clock.now();
-    await this.db.updateTable('secrets').set({ tenant_id: tenantId, owner_type: owner, owner_id: ownerId, name, updated_by: updatedBy, updated_at: now }).where('id', '=', ref.id).execute();
+    await this.db.updateTable('secrets').set({ owner_type: owner, owner_id: ownerId, name, updated_by: updatedBy, updated_at: now }).where('id', '=', ref.id).where('tenant_id', '=', tenantId).execute();
     return { updatedAt: now };
   }
 
@@ -55,14 +56,15 @@ export class NamedSecrets {
     return rows.map((r) => ({ name: r.name ?? '', updatedAt: Number(r.updated_at) }));
   }
 
-  /** `env:NAME` → process env at call time; `secret:NAME` → the environment's stored secret. */
-  resolver(tenantId: string, env: NodeJS.ProcessEnv = process.env) {
-    return async (ref: string, scope: { environmentId: string }): Promise<string | null> => {
-      if (ref.startsWith('env:')) {
-        const v = env[ref.slice(4)];
-        return v === undefined || v === '' ? null : v;
-      }
-      if (ref.startsWith('secret:')) return this.get(tenantId, 'environment', scope.environmentId, ref.slice(7));
+  /**
+   * `env:NAME` → process env at call time, through the tenant's env-ref gate (spec §4.9 G12: never a
+   * gateway-internal variable; off when the tenant's SecretRefPolicy says so); `secret:NAME` → the
+   * environment's stored secret in the same tenant.
+   */
+  resolver(envRefs: Pick<EnvRefGate, 'read'>) {
+    return async (ref: string, scope: { tenantId: string; environmentId: string }): Promise<string | null> => {
+      if (ref.startsWith('env:')) return envRefs.read(scope.tenantId, ref.slice(4));
+      if (ref.startsWith('secret:')) return this.get(scope.tenantId, 'environment', scope.environmentId, ref.slice(7));
       return null;
     };
   }

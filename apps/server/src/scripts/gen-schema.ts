@@ -2,6 +2,7 @@
 import { createDatabases, migrateAll } from '../kernel/db/index.js';
 import { MAIN_MIGRATIONS, AUDIT_MIGRATIONS } from '../kernel/db/migrations/index.js';
 import fs from 'node:fs';
+import { TENANT_ID_OPTIONAL_TABLES } from '../kernel/db/tenant-scope.js';
 
 const dbs = createDatabases({ databaseUrl: 'sqlite::memory:' });
 await migrateAll(dbs, { embeddingDims: 384 });
@@ -43,7 +44,8 @@ for (const t of tables) {
     else ty = 'string';
     if (['json'].includes(type)) ty = 'JsonColumn';
     // json columns are declared as 'text' on sqlite; detect via migration usage of T.json
-    const generated = c.dflt_value !== null || (c.pk === 1 && type === 'integer' && cols.filter((x) => x.pk).length === 1 && (c.name === 'seq'));
+    // tenant_id is required on every insert into a tenant table (multi-tenancy spec §4.2), whatever the column default says
+    const generated = (c.name !== 'tenant_id' || TENANT_ID_OPTIONAL_TABLES.includes(t.name)) && (c.dflt_value !== null || (c.pk === 1 && type === 'integer' && cols.filter((x) => x.pk).length === 1 && (c.name === 'seq')));
     const nullable = c.notnull === 0 && c.pk === 0;
     let full = nullable ? `${ty} | null` : ty;
     if (generated && t.name !== 'audit_log') full = `Generated<${full}>`;

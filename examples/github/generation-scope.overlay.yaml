@@ -1,0 +1,23 @@
+# Generation scope only (NOT the curated overlay): hides tools outside a repo-triage slice so suite
+# generation does not send all 1281 tool schemas (~516k tokens) on every generator call.
+# Tool names are untouched, so the generated tasks run unchanged against the full raw spec.
+overlay: 1
+defaults:
+  hidden: true
+tools:
+  "tag:issues": { hidden: false }
+  "tag:pulls": { hidden: false }
+  "tag:search": { hidden: false }
+  "operationId:repos/get": { hidden: false }
+  "operationId:repos/list-for-org": { hidden: false }
+  "operationId:repos/list-for-user": { hidden: false }
+  "operationId:repos/list-branches": { hidden: false }
+  "operationId:repos/list-commits": { hidden: false }
+  "operationId:repos/get-commit": { hidden: false }
+  "operationId:repos/list-contributors": { hidden: false }
+  "operationId:repos/list-releases": { hidden: false }
+  "operationId:repos/get-latest-release": { hidden: false }
+  "operationId:repos/list-tags": { hidden: false }
+  "operationId:repos/get-readme": { hidden: false }
+  "operationId:repos/list-languages": { hidden: false }
+  "operationId:users/get-by-username": { hidden: false }

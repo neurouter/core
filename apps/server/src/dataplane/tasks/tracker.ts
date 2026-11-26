@@ -37,7 +37,8 @@ export class TaskTracker {
   constructor(
     private readonly db: Kysely<MainDB>,
     private readonly now: () => number,
-    private readonly onChange?: (taskId: string) => void,
+    /** Task changed (SSE `task.updated`); carries the task's tenant so only that tenant's consoles hear it (spec §4.7). */
+    private readonly onChange?: (taskId: string, tenantId: string) => void,
   ) {}
 
   private key(o: Pick<TaskOwner, 'environmentId' | 'credentialKey' | 'clientName'>): string {
@@ -48,20 +49,21 @@ export class TaskTracker {
   async resolve(o: TaskOwner, metaTaskId: string | null, opts: { create: boolean; framing?: TaskFraming } = { create: true }): Promise<{ taskId: string | null; created: boolean; framing: TaskFraming | null }> {
     const t = this.now();
     if (metaTaskId) {
-      const row = await this.db.selectFrom('tasks').select(['id', 'credential_key', 'status', 'framing']).where('id', '=', metaTaskId).executeTakeFirst();
+      const row = await this.db.selectFrom('tasks').select(['id', 'credential_key', 'status', 'framing']).where('id', '=', metaTaskId).where('tenant_id', '=', o.tenantId).executeTakeFirst();
       if (row && row.credential_key === o.credentialKey && row.status === 'open') return { taskId: row.id, created: false, framing: row.framing };
     }
     const k = this.key(o);
     const hit = this.cache.get(k);
     let open: { id: string; framing: TaskFraming } | null = null;
     if (hit && t - hit.at < 5000 && hit.taskId) {
-      const row = await this.db.selectFrom('tasks').select(['id', 'framing', 'status', 'last_activity_at']).where('id', '=', hit.taskId).executeTakeFirst();
+      const row = await this.db.selectFrom('tasks').select(['id', 'framing', 'status', 'last_activity_at']).where('id', '=', hit.taskId).where('tenant_id', '=', o.tenantId).executeTakeFirst();
       if (row && row.status === 'open' && row.last_activity_at > t - TASK_IDLE_MS) open = { id: row.id, framing: row.framing };
     }
     if (!open) {
       let q = this.db
         .selectFrom('tasks')
         .select(['id', 'framing'])
+        .where('tenant_id', '=', o.tenantId)
         .where('credential_key', '=', o.credentialKey)
         .where('environment_id', '=', o.environmentId)
         .where('status', '=', 'open')
@@ -112,7 +114,7 @@ export class TaskTracker {
       })
       .execute();
     this.cache.set(this.key(o), { at: t, taskId: id });
-    this.onChange?.(id);
+    this.onChange?.(id, o.tenantId);
     return id;
   }
 
@@ -121,10 +123,10 @@ export class TaskTracker {
     const t = this.now();
     // an inferred task that has only just started (no explicit framing yet) is upgraded instead of replaced
     if (currentTaskId) {
-      const cur = await this.db.selectFrom('tasks').select(['id', 'framing', 'call_count', 'goal']).where('id', '=', currentTaskId).executeTakeFirst();
+      const cur = await this.db.selectFrom('tasks').select(['id', 'framing', 'call_count', 'goal']).where('id', '=', currentTaskId).where('tenant_id', '=', o.tenantId).executeTakeFirst();
       if (cur && cur.framing === 'inferred') {
-        await this.db.updateTable('tasks').set({ framing: 'explicit', goal, last_activity_at: t }).where('id', '=', cur.id).execute();
-        this.onChange?.(cur.id);
+        await this.db.updateTable('tasks').set({ framing: 'explicit', goal, last_activity_at: t }).where('id', '=', cur.id).where('tenant_id', '=', o.tenantId).execute();
+        this.onChange?.(cur.id, o.tenantId);
         return { taskId: cur.id, attachedCalls: cur.call_count };
       }
       if (cur && cur.framing === 'explicit') await this.close(cur.id, 'abandoned', null);
@@ -135,10 +137,13 @@ export class TaskTracker {
 
   async close(taskId: string, outcome: TaskOutcome, notes: string | null): Promise<void> {
     const t = this.now();
-    await this.db.updateTable('tasks').set({ status: 'closed', outcome, notes, ended_at: t, last_activity_at: t }).where('id', '=', taskId).where('status', '=', 'open').execute();
+    // tenant-scope: tenant-from-row (task ids come from a tenant-scoped resolve; the row's tenant labels the event)
+    const row = await this.db.selectFrom('tasks').select('tenant_id').where('id', '=', taskId).executeTakeFirst();
+    if (!row) return;
+    await this.db.updateTable('tasks').set({ status: 'closed', outcome, notes, ended_at: t, last_activity_at: t }).where('id', '=', taskId).where('tenant_id', '=', row.tenant_id).where('status', '=', 'open').execute();
     for (const [k, v] of this.cache) if (v.taskId === taskId) this.cache.delete(k);
     this.history.delete(taskId);
-    this.onChange?.(taskId);
+    this.onChange?.(taskId, row.tenant_id);
   }
 
   /** Counter bump + activity (fire-and-forget from the hot path). */
@@ -146,27 +151,30 @@ export class TaskTracker {
     if (!taskId) return;
     const t = this.now();
     const work = async () => {
+      // tenant-scope: child-of-scoped (task id from a tenant-scoped resolve)
       const row = await this.db.selectFrom('tasks').selectAll().where('id', '=', taskId).executeTakeFirst();
       if (!row) return;
       const set: Record<string, number> = { last_activity_at: t };
       for (const [k, v] of Object.entries(fields)) set[k] = Number(row[k as CounterField] ?? 0) + (v ?? 0);
-      await this.db.updateTable('tasks').set(set).where('id', '=', taskId).execute();
-      this.onChange?.(taskId);
+      await this.db.updateTable('tasks').set(set).where('id', '=', taskId).where('tenant_id', '=', row.tenant_id).execute();
+      this.onChange?.(taskId, row.tenant_id);
     };
     void work().catch(() => {});
   }
 
   async bumpNow(taskId: string | null, fields: Partial<Record<CounterField, number>>): Promise<void> {
     if (!taskId) return;
+    // tenant-scope: child-of-scoped (task id from a tenant-scoped resolve)
     const row = await this.db.selectFrom('tasks').selectAll().where('id', '=', taskId).executeTakeFirst();
     if (!row) return;
     const set: Record<string, number> = { last_activity_at: this.now() };
     for (const [k, v] of Object.entries(fields)) set[k] = Number(row[k as CounterField] ?? 0) + (v ?? 0);
-    await this.db.updateTable('tasks').set(set).where('id', '=', taskId).execute();
+    await this.db.updateTable('tasks').where('tenant_id', '=', row.tenant_id).set(set).where('id', '=', taskId).execute();
   }
 
   /** Returns true the first time it is called for a task (one-time begin_task tip on inferred tasks). */
   async takeHint(taskId: string): Promise<boolean> {
+    // tenant-scope: child-of-scoped (task id from a tenant-scoped resolve)
     const res = await this.db.updateTable('tasks').set({ hinted: 1 }).where('id', '=', taskId).where('hinted', '=', 0).executeTakeFirst();
     return Number(res.numUpdatedRows) > 0;
   }
@@ -187,6 +195,7 @@ export class TaskTracker {
   /** Job `tasks.close-idle`: explicit → abandoned, inferred/script → unknown. */
   async closeIdle(): Promise<number> {
     const cutoff = this.now() - TASK_IDLE_MS;
+    // tenant-scope: system-job (idle tasks of every tenant)
     const rows = await this.db.selectFrom('tasks').select(['id', 'framing']).where('status', '=', 'open').where('last_activity_at', '<=', cutoff).limit(1000).execute();
     for (const r of rows) await this.close(r.id, r.framing === 'explicit' ? 'abandoned' : 'unknown', null);
     return rows.length;

@@ -26,6 +26,8 @@ export class SinkDispatcher {
       db: Kysely<AuditDB>;
       store: AuditStore;
       sinks: () => Promise<AuditSink[]>;
+      /** The tenant whose rows the sinks receive (spec §3.7); absent = every row (tests, single-tenant tools). */
+      tenant?: () => Promise<string | null>;
       clock: Clock;
       log: { warn(o: object, m: string): void };
       batchSize?: number;
@@ -49,6 +51,8 @@ export class SinkDispatcher {
 
   async runOnce(): Promise<Record<string, { delivered: number; error: string | null; skipped?: boolean }>> {
     const out: Record<string, { delivered: number; error: string | null; skipped?: boolean }> = {};
+    const tenantId = this.o.tenant ? await this.o.tenant() : undefined;
+    if (tenantId === null) return out;
     for (const sink of await this.o.sinks()) {
       const now = this.o.clock.now();
       const b = this.backoff.get(sink.name);
@@ -60,7 +64,7 @@ export class SinkDispatcher {
       let delivered = 0;
       let error: string | null = null;
       for (let i = 0; i < (this.o.maxBatchesPerRun ?? 20); i++) {
-        const batch = await this.o.store.readAfter(seq, this.o.batchSize ?? SINK_BATCH);
+        const batch = await this.o.store.readAfter(seq, this.o.batchSize ?? SINK_BATCH, tenantId);
         if (!batch.rows.length) break;
         try {
           await sink.deliver(batch);

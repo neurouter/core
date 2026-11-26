@@ -96,7 +96,8 @@ export interface ConfigSyncDeps {
   settings: SettingsService;
   audit: AuditRecorder;
   fetchSpec: SpecFetcher;
-  tenantId: string;
+  /** The tenant neurouter.yaml applies to (instance configuration: the deployment's default tenant). */
+  tenant: () => Promise<string | null>;
 }
 
 /**
@@ -107,6 +108,12 @@ export interface ConfigSyncDeps {
  */
 export class ConfigSync {
   constructor(private readonly d: ConfigSyncDeps) {}
+
+  private async tid(): Promise<string> {
+    const t = await this.d.tenant();
+    if (!t) throw new Error('neurouter.yaml needs a default tenant on this deployment');
+    return t;
+  }
 
   async loadFile(path: string, opts: { dryRun?: boolean } = {}): Promise<ReconcileResult> {
     let text: string;
@@ -158,7 +165,7 @@ export class ConfigSync {
     }
     if (opts.dryRun) return out;
 
-    const tenantId = this.d.tenantId;
+    const tenantId = await this.tid();
     const seenServers = new Set<string>();
     for (const r of resolved) {
       const { s, index } = r;
@@ -189,13 +196,13 @@ export class ConfigSync {
           for (const d of created.build.result.diagnostics.filter((x) => x.severity === 'error')) out.diagnostics.push({ ...d, message: `${s.slug}: ${d.message}` });
         } else {
           await this.d.db
-            .updateTable('servers')
+            .updateTable('servers').where('tenant_id', '=', tenantId)
             .set({ name: s.name ?? s.slug, description: s.description ?? '', spec_source: toJsonColumn(specSource), exposure: toJsonColumn(exposure), ops_tools: toJsonColumn({ ...this.d.servers.opsTools(server), ...(s.opsTools ?? {}) }), public_report: s.publicReport ? 1 : 0, overlay_path: s.overlay ?? null, status: 'active', managed_by: 'file', config_path: path, config_line: line, updated_at: this.d.clock.now() })
             .where('id', '=', server.id)
             .execute();
           const re = await this.d.servers.reimport(tenantId, server.id, { bytes: r.bytes, sourceUrl: r.sourceUrl }, null);
           if (r.overlay !== null) {
-            const cur = await this.d.db.selectFrom('overlay_revisions').select(['hash']).where('id', '=', server.published_overlay_revision_id ?? '').executeTakeFirst();
+            const cur = await this.d.db.selectFrom('overlay_revisions').select(['hash']).where('id', '=', server.published_overlay_revision_id ?? '').where('tenant_id', '=', tenantId).executeTakeFirst();
             if (cur?.hash !== sha256Hex(r.overlay)) await this.d.servers.publishOverlay(tenantId, server.id, r.overlay, { message: `from ${s.overlay}`, source: 'file', createdBy: null, basedOnRev: null });
           }
           if (!re.unchanged || r.overlay !== null) out.servers.updated.push(s.slug);
@@ -206,7 +213,7 @@ export class ConfigSync {
         continue;
       }
       seenServers.add(server.id);
-      const env = await this.reconcileEnvironments(server.id, s, index, parsed, path);
+      const env = await this.reconcileEnvironments(tenantId, server.id, s, index, parsed, path);
       out.environments.created += env.created;
       out.environments.updated += env.updated;
       out.environments.removed += env.removed;
@@ -215,30 +222,30 @@ export class ConfigSync {
     const managed = await this.d.db.selectFrom('servers').select(['id', 'slug']).where('tenant_id', '=', tenantId).where('managed_by', '=', 'file').where('status', '!=', 'removed_from_config').execute();
     for (const m of managed) {
       if (seenServers.has(m.id)) continue;
-      await this.d.db.updateTable('servers').set({ status: 'removed_from_config', updated_at: this.d.clock.now() }).where('id', '=', m.id).execute();
-      await this.d.db.updateTable('environments').set({ status: 'removed_from_config' }).where('server_id', '=', m.id).where('managed_by', '=', 'file').execute();
+      await this.d.db.updateTable('servers').set({ status: 'removed_from_config', updated_at: this.d.clock.now() }).where('id', '=', m.id).where('tenant_id', '=', tenantId).execute();
+      await this.d.db.updateTable('environments').set({ status: 'removed_from_config' }).where('server_id', '=', m.id).where('tenant_id', '=', tenantId).where('managed_by', '=', 'file').execute();
       out.servers.removed.push(m.slug);
     }
-    await this.applySettings(cfg);
+    await this.applySettings(tenantId, cfg);
     out.ok = !out.diagnostics.some((d) => d.severity === 'error');
     await this.saveState(path, parsed.hash, out.ok ? 'ok' : 'error', out.diagnostics);
-    this.d.audit.system('config.apply', { kind: 'config_apply', targetType: 'config', targetId: path, changes: { servers: out.servers, environments: out.environments } });
-    await this.d.coord.publish(CONFIG_CHANGED, {});
+    this.d.audit.system(tenantId, 'config.apply', { kind: 'config_apply', targetType: 'config', targetId: path, changes: { servers: out.servers, environments: out.environments } });
+    await this.d.coord.publish(CONFIG_CHANGED, { tenantId });
     return out;
   }
 
-  private async reconcileEnvironments(serverId: string, s: YamlServer, index: number, parsed: ParsedConfig, path: string): Promise<{ created: number; updated: number; removed: number }> {
+  private async reconcileEnvironments(tenantId: string, serverId: string, s: YamlServer, index: number, parsed: ParsedConfig, path: string): Promise<{ created: number; updated: number; removed: number }> {
     const res = { created: 0, updated: 0, removed: 0 };
     const now = this.d.clock.now();
     const existing = await this.d.servers.environments(serverId);
     const seen = new Set<string>();
-    const latest = (await this.d.db.selectFrom('servers').select('latest_build_id').where('id', '=', serverId).executeTakeFirst())?.latest_build_id ?? null;
+    const latest = (await this.d.db.selectFrom('servers').select('latest_build_id').where('id', '=', serverId).where('tenant_id', '=', tenantId).executeTakeFirst())?.latest_build_id ?? null;
     for (const [ei, e] of (s.environments ?? []).entries()) {
       const line = parsed.lines.get(`servers.${index}.environments.${ei}`) ?? 1;
       const row = this.envColumns(e);
       let buildId: string | null | undefined;
       if (e.build) {
-        const b = await this.d.db.selectFrom('builds').select('id').where('server_id', '=', serverId).where('hash', 'like', `${e.build}%`).where('status', '=', 'ok').executeTakeFirst();
+        const b = await this.d.db.selectFrom('builds').select('id').where('tenant_id', '=', tenantId).where('server_id', '=', serverId).where('hash', 'like', `${e.build}%`).where('status', '=', 'ok').executeTakeFirst();
         buildId = b?.id ?? null;
       }
       const cur = existing.find((x) => x.slug === e.slug);
@@ -248,19 +255,20 @@ export class ConfigSync {
           .updateTable('environments')
           .set({ ...row, status: 'active', managed_by: 'file', config_path: path, config_line: line, builtin: 0, updated_at: now, ...(buildId ? { build_id: buildId } : {}) })
           .where('id', '=', cur.id)
+          .where('tenant_id', '=', tenantId)
           .execute();
         res.updated++;
       } else {
         await this.d.db
           .insertInto('environments')
-          .values({ id: newId(), tenant_id: this.d.tenantId, server_id: serverId, slug: e.slug, ...row, build_id: buildId ?? latest, status: 'active', managed_by: 'file', config_path: path, config_line: line, created_at: now, updated_at: now })
+          .values({ id: newId(), tenant_id: tenantId, server_id: serverId, slug: e.slug, ...row, build_id: buildId ?? latest, status: 'active', managed_by: 'file', config_path: path, config_line: line, created_at: now, updated_at: now })
           .execute();
         res.created++;
       }
     }
     for (const x of existing) {
       if (seen.has(x.slug) || x.managed_by !== 'file' || x.builtin === 1) continue;
-      await this.d.db.updateTable('environments').set({ status: 'removed_from_config', updated_at: now }).where('id', '=', x.id).execute();
+      await this.d.db.updateTable('environments').set({ status: 'removed_from_config', updated_at: now }).where('id', '=', x.id).where('tenant_id', '=', tenantId).execute();
       res.removed++;
     }
     return res;
@@ -284,43 +292,46 @@ export class ConfigSync {
     };
   }
 
-  private async applySettings(cfg: NeurouterYaml): Promise<void> {
+  private async applySettings(tenantId: string, cfg: NeurouterYaml): Promise<void> {
     const st = cfg.settings;
+    const t = tenantId;
+    if (cfg.instance?.name) await this.d.settings.set('orgName', cfg.instance.name, null, t);
     if (!st) return;
-    if (st.codeMode?.enabled !== undefined) await this.d.settings.set('codeModeEnabled', st.codeMode.enabled);
-    if (st.evals?.model) await this.d.settings.set('evalModel', st.evals.model);
-    if (st.evals?.judgeModel) await this.d.settings.set('judgeModel', st.evals.judgeModel);
-    if (st.evals?.generatorModel) await this.d.settings.set('generatorModel', st.evals.generatorModel);
-    if (st.evals?.fallbacks) await this.d.settings.set('evalFallbacks', st.evals.fallbacks);
+    if (st.codeMode?.enabled !== undefined) await this.d.settings.set('codeModeEnabled', st.codeMode.enabled, null, t);
+    if (st.evals?.model) await this.d.settings.set('evalModel', st.evals.model, null, t);
+    if (st.evals?.judgeModel) await this.d.settings.set('judgeModel', st.evals.judgeModel, null, t);
+    if (st.evals?.generatorModel) await this.d.settings.set('generatorModel', st.evals.generatorModel, null, t);
+    if (st.evals?.fallbacks) await this.d.settings.set('evalFallbacks', st.evals.fallbacks, null, t);
     if (st.discovery) await this.d.settings.set('nativeSearchClients', st.discovery.nativeSearchClients);
-    if (st.audit?.storeOutputs !== undefined) await this.d.settings.set('auditStoreFullOutput', st.audit.storeOutputs);
+    if (st.audit?.storeOutputs !== undefined) await this.d.settings.set('auditStoreFullOutput', st.audit.storeOutputs, null, t);
     if (st.audit?.webhook !== undefined || st.audit?.otelLogs !== undefined) {
-      const cur = await this.d.settings.get('auditSinks');
+      const cur = await this.d.settings.get('auditSinks', t);
       const w = st.audit.webhook;
       const secretRef = w?.secret && parseSecretRef(w.secret)?.kind === 'env' ? w.secret : null;
       await this.d.settings.set('auditSinks', {
         webhook: w ? { url: w.url, secretRef, enabled: w.enabled } : cur.webhook,
         otelLogs: { enabled: st.audit.otelLogs ?? cur.otelLogs.enabled },
-      });
+      }, null, t);
     }
     // settings.tasks: deprecated, ignored (warned by parseConfigYaml); evals.apiKey is read at boot (file-env.ts)
-    if (st.evals?.effort) await this.d.settings.set('evalEffort', st.evals.effort);
-    if (st.evals?.repeats) await this.d.settings.set('evalRepeats', st.evals.repeats);
-    if (st.retentionDays) await this.d.settings.set('retentionDays', st.retentionDays);
-    if (cfg.instance?.name) await this.d.settings.set('orgName', cfg.instance.name);
+    if (st.evals?.effort) await this.d.settings.set('evalEffort', st.evals.effort, null, t);
+    if (st.evals?.repeats) await this.d.settings.set('evalRepeats', st.evals.repeats, null, t);
+    if (st.retentionDays) await this.d.settings.set('retentionDays', st.retentionDays, null, t);
   }
 
   private async saveState(path: string, hash: string | null, status: 'ok' | 'error', diagnostics: Diagnostic[]): Promise<void> {
     const row = { path, hash, applied_at: this.d.clock.now(), status, diagnostics: toJsonColumn(diagnostics) };
     await this.d.db
       .insertInto('config_state')
-      .values({ tenant_id: this.d.tenantId, ...row })
+      .values({ tenant_id: await this.tid(), ...row })
       .onConflict((oc) => oc.column('tenant_id').doUpdateSet(row))
       .execute();
   }
 
   async state(): Promise<{ path: string | null; hash: string | null; appliedAt: number | null; status: 'ok' | 'error' | null; diagnostics: Diagnostic[] }> {
-    const r = await this.d.db.selectFrom('config_state').selectAll().where('tenant_id', '=', this.d.tenantId).executeTakeFirst();
+    const t = await this.d.tenant();
+    if (!t) return { path: null, hash: null, appliedAt: null, status: null, diagnostics: [] };
+    const r = await this.d.db.selectFrom('config_state').selectAll().where('tenant_id', '=', t).executeTakeFirst();
     if (!r) return { path: null, hash: null, appliedAt: null, status: null, diagnostics: [] };
     return { path: r.path, hash: r.hash, appliedAt: r.applied_at, status: r.status, diagnostics: parseJsonColumn<Diagnostic[]>(r.diagnostics) ?? [] };
   }

@@ -11,6 +11,8 @@ import { parseScope, SCOPE_DESCRIPTIONS, type McpOAuthScope } from './metadata.j
 import { PKCE_CHALLENGE_RE } from './pkce.js';
 import { isLoopbackRedirect, redirectUriMatches, withParams } from './redirect-uri.js';
 import { resolveResource, type ResolvedResource } from './resource.js';
+import { isClientBlocked } from '../../kernel/tenancy/client-blocks.js';
+import type { TenantResolver } from '../../kernel/tenancy/types.js';
 import type { ConsoleSessionUser } from './session.js';
 import type { OAuthTokensService } from './tokens.service.js';
 
@@ -69,9 +71,23 @@ export class AuthorizationService {
     private readonly clients: OAuthClientsService,
     private readonly tokens: OAuthTokensService,
     private readonly audit: AuditRecorder,
-    private readonly o: { issuer: string; publicUrl: string; pepper: string; codeModeEnabled: () => Promise<boolean>; loginUrl: (returnTo: string) => string },
+    private readonly o: {
+      issuer: string;
+      publicUrl: string;
+      pepper: string;
+      codeModeEnabled: (tenantId: string) => Promise<boolean>;
+      /** Spec §3.4: consent needs a membership in the resource's tenant. */
+      isMember: (tenantId: string, userId: string) => Promise<boolean>;
+      tenancy: Pick<TenantResolver, 'forMcp'>;
+      resourceAliases?: readonly string[];
+      loginUrl: (returnTo: string) => string;
+    },
   ) {
     this.cookieKey = hmacSha256(o.pepper, 'neurouter-core:oauth-consent-cookie');
+  }
+
+  private base() {
+    return { publicUrl: this.o.publicUrl, aliases: this.o.resourceAliases ?? [], tenancy: this.o.tenancy };
   }
 
   consentCookieValue(requestId: string, userId: string): string {
@@ -104,12 +120,15 @@ export class AuthorizationService {
     if (!q.code_challenge || !PKCE_CHALLENGE_RE.test(q.code_challenge)) return back('invalid_request', 'code_challenge (PKCE S256) is required');
     if (q.code_challenge_method !== 'S256') return back('invalid_request', 'code_challenge_method must be S256');
     if (!q.resource) return back('invalid_target', `resource is required (RFC 8707); use ${this.o.publicUrl}/mcp/{server}/{environment}`);
-    const target = await resolveResource(this.db, this.o.publicUrl, q.resource);
+    const target = await resolveResource(this.db, this.base(), q.resource);
     if (!target) return back('invalid_target', 'Unknown or disabled resource; expected an MCP endpoint of this server');
     const requested = parseScope(q.scope);
     if (!requested) return back('invalid_scope', 'Unsupported scope; supported: mcp:tools mcp:write mcp:code');
     if (!user) return { kind: 'login', location: this.o.loginUrl(resumeUrl) };
-    const grantable = grantableScopes(target, await this.o.codeModeEnabled());
+    // the signed-in user must belong to the resource's tenant; a client blocked by that tenant gets no code (G2, G14)
+    if (!(await this.o.isMember(target.tenantId, user.id))) return page('access_denied', `You are not a member of the organization that owns ${target.server.slug}/${target.environment.slug}. Sign in with another account.`, 403);
+    if (await isClientBlocked(this.db, target.tenantId, client.row.id)) return back('access_denied', 'This client has been blocked by an administrator');
+    const grantable = grantableScopes(target, await this.o.codeModeEnabled(target.tenantId));
     const id = newId();
     const params: AuthzParams = { redirect_uri: redirectUri, requested, grantable, state, code_challenge: q.code_challenge, resource: target.resource, environment_id: target.environment.id, server_id: target.server.id };
     await this.db.insertInto('oauth_authz_requests').values({ id, tenant_id: target.tenantId, client_id: client.row.id, params: toJsonColumn(params), user_id: user.id, csrf_token: randomToken(16), expires_at: this.clock.now() + AUTHZ_REQUEST_TTL_MS }).execute();
@@ -117,6 +136,7 @@ export class AuthorizationService {
   }
 
   private async request(requestId: string, viewer: ConsoleSessionUser) {
+    // tenant-scope: tenant-from-row (request bound to the signed-in user; its tenant drives the checks)
     const r = await this.db.selectFrom('oauth_authz_requests').selectAll().where('id', '=', requestId).executeTakeFirst();
     if (!r) throw new OAuthError('invalid_request', 'Unknown authorization request; start again from your MCP client', 404);
     if (r.user_id !== viewer.id) throw new OAuthError('access_denied', 'This authorization request belongs to another user', 403);
@@ -128,7 +148,7 @@ export class AuthorizationService {
 
   async view(requestId: string, viewer: ConsoleSessionUser): Promise<ConsentView> {
     const { client, params } = await this.request(requestId, viewer);
-    const target = await resolveResource(this.db, this.o.publicUrl, params.resource);
+    const target = await resolveResource(this.db, this.base(), params.resource);
     if (!target) throw new OAuthError('invalid_target', 'The environment is no longer available', 410);
     const cimd = client.registration_type === 'cimd';
     const redirectUris = parseJsonColumn<string[]>(client.redirect_uris) ?? [];
@@ -158,13 +178,15 @@ export class AuthorizationService {
     const { client, params, r } = await this.request(requestId, viewer);
     if (!body.csrf || !timingSafeEqualStr(body.csrf, viewer.csrfToken)) throw new OAuthError('access_denied', 'The consent form is missing its CSRF token; restart from your MCP client', 403);
     if (!this.cookieMatches(consentCookie, requestId, viewer.id)) throw new OAuthError('access_denied', 'The consent cookie is missing or does not match this request; restart the authorization from your MCP client', 403);
-    const del = await this.db.deleteFrom('oauth_authz_requests').where('id', '=', requestId).executeTakeFirst();
+    const del = await this.db.deleteFrom('oauth_authz_requests').where('id', '=', requestId).where('tenant_id', '=', r.tenant_id).executeTakeFirst();
     if (!Number(del.numDeletedRows)) throw new OAuthError('invalid_request', 'This authorization request was already decided', 409);
     const base = { state: params.state, iss: this.o.issuer };
     if (body.decision !== 'approve') {
-      this.audit.auth({ userId: viewer.id, action: 'oauth.consent.deny', decision: 'denied_acl', status: 'blocked', reason: `client ${client.client_id} → ${params.resource}`, ...meta });
+      this.audit.auth({ tenantId: r.tenant_id, userId: viewer.id, action: 'oauth.consent.deny', decision: 'denied_acl', status: 'blocked', reason: `client ${client.client_id} → ${params.resource}`, ...meta });
       return { redirectTo: withParams(params.redirect_uri, { error: 'access_denied', error_description: 'The user denied the request', ...base }) };
     }
+    if (!(await this.o.isMember(r.tenant_id, viewer.id))) throw new OAuthError('access_denied', 'You are not a member of the organization that owns this resource', 403);
+    if (await isClientBlocked(this.db, r.tenant_id, client.id)) throw new OAuthError('access_denied', 'This client has been blocked by an administrator', 403);
     // granted = mcp:tools ∪ (checked ∩ grantable); never wider than what this environment allows
     const scopes = [...new Set(['mcp:tools', ...(body.scopes ?? []).filter((s): s is McpOAuthScope => params.grantable.includes(s as McpOAuthScope))])];
     const now = this.clock.now();
@@ -174,7 +196,7 @@ export class AuthorizationService {
       .onConflict((oc) => oc.columns(['user_id', 'client_id', 'environment_id']).doUpdateSet({ scopes: scopes.join(' '), redirect_uri: params.redirect_uri, created_at: now, revoked_at: null }))
       .execute();
     const code = await this.tokens.issueCode({ tenantId: r.tenant_id, clientRowId: client.id, userId: viewer.id, serverId: params.server_id, environmentId: params.environment_id, redirectUri: params.redirect_uri, codeChallenge: params.code_challenge, scopes, resource: params.resource });
-    this.audit.auth({ userId: viewer.id, action: 'oauth.consent.approve', reason: `client ${client.client_id} → ${params.resource} (${scopes.join(' ')})`, ...meta });
+    this.audit.auth({ tenantId: r.tenant_id, userId: viewer.id, action: 'oauth.consent.approve', reason: `client ${client.client_id} → ${params.resource} (${scopes.join(' ')})`, ...meta });
     return { redirectTo: withParams(params.redirect_uri, { code, ...base }) };
   }
 }

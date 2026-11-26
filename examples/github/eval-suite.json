@@ -1,0 +1,878 @@
+{
+  "version": 1,
+  "server": "api",
+  "generatedFrom": null,
+  "tasks": [
+    {
+      "key": "github_issue_activity_ambiguous",
+      "category": "ambiguous",
+      "prompt": "Can you pull up the activity on the Safari bug in octocat/Hello-World?",
+      "rubric": "The user has not specified what they mean by activity: issue details, comments, events, or the timeline are all plausible. Ask which information they want, or state a reasonable choice before retrieving it. Do not make changes.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "judge",
+          "criterion": "Does not claim to have retrieved the requested activity without clarifying or explaining the interpretation."
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_issue_cleanup_ambiguous",
+      "category": "ambiguous",
+      "prompt": "Please sort out issue 1 in octocat/Hello-World; it\u2019s the Safari bug.",
+      "rubric": "\u201cSort out\u201d does not specify an action. Ask what the user wants done (for example, update the issue, change labels or assignees, or close it) before making any change. The toolset includes write operations, so do not guess or write.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "judge",
+          "criterion": "Does not perform a write or claim the issue has been fixed, closed, or otherwise changed."
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_org_audit_log_unavailable",
+      "category": "impossible",
+      "prompt": "Please retrieve the GitHub organization audit log for the `github` organization for the past 30 days and summarize the recorded events.",
+      "rubric": "Explain that this GitHub API does not provide an organization audit-log operation, so the requested events cannot be retrieved here. Do not imply that related organization or repository listings are an audit log; make no changes.",
+      "assertions": [
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_recent_issues_ambiguous",
+      "category": "ambiguous",
+      "prompt": "Show me the most recent issues in octocat/Hello-World.",
+      "rubric": "The request leaves \u201cmost recent\u201d unclear: it could mean recently created or recently updated, and it does not say whether to include closed issues. Ask a concise clarification, or state a reasonable interpretation before listing results. Do not make changes.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "judge",
+          "criterion": "Does not silently present one interpretation of \u201cmost recent\u201d or issue state as if the user had specified it."
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_restore_deleted_repository_unavailable",
+      "category": "impossible",
+      "prompt": "Restore the deleted repository `octocat/Hello-World` so it is available again, preserving its contents and settings.",
+      "rubric": "Explain that this API has no operation to restore a deleted repository. Do not try a different write operation or claim the repository was restored.",
+      "assertions": [
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_run_tests_unavailable",
+      "category": "impossible",
+      "prompt": "Run the test suite for `octocat/Hello-World` on its `main` branch and tell me whether it passes.",
+      "rubric": "Explain that the available GitHub API tools do not provide a way to execute the repository's tests. Do not mistake reading workflow or run information for starting a test run, and do not make changes.",
+      "assertions": [
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_single_issue_comments",
+      "category": "single",
+      "prompt": "Show me the comments on issue 1 in octocat/Hello-World.",
+      "rubric": "Fetch comments for issue 1 in the specified repository and report the returned comment content and commenter where available.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "issues_list_comments",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "issue_number": 1
+          }
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "What version of Safari were you using when you observed this bug?"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "issues_list_comments",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "issue_number": 1
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_single_open_pull_requests",
+      "category": "single",
+      "prompt": "List the open pull requests in octocat/Hello-World.",
+      "rubric": "Use the repository pull-request listing endpoint filtered to open pull requests, then summarize the returned results.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "pulls_list",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Amazing new feature"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "pulls_list",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_single_open_repo_issues",
+      "category": "single",
+      "prompt": "List the open issues in octocat/Hello-World.",
+      "rubric": "Call the repository issues listing endpoint once with the specified repository and open state, then summarize the returned issues without modifying anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "issues_list_for_repo",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Widget creation fails in Safari on OS X 10.8"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "issues_list_for_repo",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_single_repo_assignees",
+      "category": "single",
+      "prompt": "Who can be assigned to issues in octocat/Hello-World?",
+      "rubric": "List the repository's available issue assignees and include their GitHub logins when present.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "issues_list_assignees",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          }
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "colin93",
+            "thad41"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "issues_list_assignees",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_single_repo_branches",
+      "category": "single",
+      "prompt": "List the branches in octocat/Hello-World and indicate whether each is protected.",
+      "rubric": "Fetch the repository's branches and report branch names along with the protection status returned by the API.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "repos_list_branches",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          }
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "a"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "repos_list_branches",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_single_repo_commits",
+      "category": "single",
+      "prompt": "Show me the latest three commits in octocat/Hello-World.",
+      "rubric": "Request up to three commits from the specified repository and summarize their messages and identifiers when available.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "repos_list_commits",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "per_page": 3
+          }
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Fix all the bugs"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "repos_list_commits",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "per_page": 3
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_single_repo_milestones",
+      "category": "single",
+      "prompt": "Show me the open milestones for octocat/Hello-World.",
+      "rubric": "Fetch milestones for the specified repository filtered to open state and report their titles and useful counts or dates present in the response.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "issues_list_milestones",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "v1.0",
+            "Debeo defendo denego"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "issues_list_milestones",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_single_repo_readme",
+      "category": "single",
+      "prompt": "Fetch the README for octocat/Hello-World using the default representation.",
+      "rubric": "Retrieve the repository's preferred README without specifying a non-default ref or format, and summarize or quote its returned content.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "repos_get_readme",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          }
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Beneficium sophismata caecus cotidie"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "repos_get_readme",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_1",
+      "category": "multi",
+      "prompt": "In octocat/Hello-World, find the open issue titled \u201cWidget creation fails in Safari on OS X 10.8\u201d and retrieve its full issue details.",
+      "rubric": "List the repository\u2019s open issues, identify the matching issue by title, and use its issue number to retrieve its details. Summarize the result without changing anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "issues_list_for_repo",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "type": "called",
+          "tool": "issues_get",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "issue_number": 1
+          }
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Widget creation fails in Safari on OS X 10.8"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "issues_list_for_repo",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "tool": "issues_get",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "issue_number": 1
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_2",
+      "category": "multi",
+      "prompt": "Look up the v1.0 milestone in octocat/Hello-World. First find its milestone number in the repository\u2019s milestone list, then retrieve the milestone details.",
+      "rubric": "List milestones, identify v1.0, and use its listed number to fetch the milestone. Report relevant details such as its state and description; do not change anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "issues_list_milestones",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "all"
+          }
+        },
+        {
+          "type": "called",
+          "tool": "issues_get_milestone",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "milestone_number": 1
+          }
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "v1.0"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "issues_list_milestones",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "all"
+          }
+        },
+        {
+          "tool": "issues_get_milestone",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "milestone_number": 1
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_3",
+      "category": "multi",
+      "prompt": "In octocat/Hello-World, find the pull request titled \u201cAmazing new feature\u201d in the open pull requests and retrieve its full details.",
+      "rubric": "List open pull requests, identify the matching pull request by title, and use its number to fetch its details. Summarize the returned information without changing anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "pulls_list",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "type": "called",
+          "tool": "pulls_get",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "pull_number": 1
+          }
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Amazing new feature"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "pulls_list",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "tool": "pulls_get",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "pull_number": 1
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_4",
+      "category": "multi",
+      "prompt": "Show me the commits on the open pull request titled \u201cAmazing new feature\u201d in octocat/Hello-World. Find its pull request number from the listing, then get its commits.",
+      "rubric": "List open pull requests, identify the titled pull request, and pass its pull request number to the commits endpoint. Summarize the commit results without changing anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "pulls_list",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "type": "called",
+          "tool": "pulls_list_commits",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "pull_number": 1
+          }
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Fix all the bugs"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "pulls_list",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "tool": "pulls_list_commits",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "pull_number": 1
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_5",
+      "category": "multi",
+      "prompt": "In octocat/Hello-World, check the branch list for the branch named \u201ca,\u201d then show the recent commits from that branch.",
+      "rubric": "List repository branches, confirm the branch named a, and use that branch name as the commit listing\u2019s starting reference. Summarize the returned commits; do not change anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "repos_list_branches",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          }
+        },
+        {
+          "type": "called",
+          "tool": "repos_list_commits",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "sha": "a"
+          }
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Fix all the bugs"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "repos_list_branches",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          }
+        },
+        {
+          "tool": "repos_list_commits",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "sha": "a"
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_6",
+      "category": "multi",
+      "prompt": "Find the open issue titled \u201cWidget creation fails in Safari on OS X 10.8\u201d in octocat/Hello-World, then list the labels currently on that issue.",
+      "rubric": "List open repository issues, identify the specified issue by title, and use its issue number to list its labels. Report the labels without changing anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "issues_list_for_repo",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "type": "called",
+          "tool": "issues_list_labels_on_issue",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "issue_number": 1
+          }
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "label_1",
+            "bug",
+            "registration"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "issues_list_for_repo",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "state": "open"
+          }
+        },
+        {
+          "tool": "issues_list_labels_on_issue",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "issue_number": 1
+          }
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    }
+  ]
+}

@@ -69,7 +69,7 @@ export class ApiKeysService {
     const writes = parseJsonColumn<{ enabled?: boolean }>(env.writes) ?? {};
     if (input.scopes.includes('tools:write') && !writes.enabled) warnings.push('tools:write was granted but writes are off in this environment; write tools will be refused until writes are enabled.');
     if (input.scopes.includes('code:run') && env.code_mode !== 1) warnings.push('code:run was granted but code mode is off in this environment.');
-    if (input.purpose !== 'eval') this.audit.auth({ userId: input.ownerUserId, action: 'api_key.create', reason: `${g.displayPrefix} ${input.scopes.join(' ')}` });
+    if (input.purpose !== 'eval') this.audit.auth({ tenantId: input.tenantId, userId: input.ownerUserId, action: 'api_key.create', reason: `${g.displayPrefix} ${input.scopes.join(' ')}` });
     return { key: await this.get(input.tenantId, id), token: g.token, warnings };
   }
 
@@ -81,16 +81,16 @@ export class ApiKeysService {
 
   async rename(tenantId: string, id: string, name: string): Promise<ApiKeyRowDb> {
     await this.get(tenantId, id);
-    await this.db.updateTable('api_keys').set({ name: name.slice(0, 200) }).where('id', '=', id).execute();
+    await this.db.updateTable('api_keys').set({ name: name.slice(0, 200) }).where('id', '=', id).where('tenant_id', '=', tenantId).execute();
     return this.get(tenantId, id);
   }
 
   async revoke(tenantId: string, id: string, by: string | null): Promise<ApiKeyRowDb> {
     const k = await this.get(tenantId, id);
     if (k.revoked_at === null) {
-      await this.db.updateTable('api_keys').set({ revoked_at: this.clock.now() }).where('id', '=', id).execute();
-      await this.coord.publish(AUTH_REVOKED_CHANNEL, { apiKeyId: id });
-      if (k.purpose !== 'eval') this.audit.auth({ userId: by, action: 'api_key.revoke', reason: k.display_prefix });
+      await this.db.updateTable('api_keys').set({ revoked_at: this.clock.now() }).where('id', '=', id).where('tenant_id', '=', tenantId).execute();
+      await this.coord.publish(AUTH_REVOKED_CHANNEL, { apiKeyId: id, tenantId });
+      if (k.purpose !== 'eval') this.audit.auth({ tenantId, userId: by, action: 'api_key.revoke', reason: k.display_prefix });
     }
     return this.get(tenantId, id);
   }

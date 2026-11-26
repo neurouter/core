@@ -12,8 +12,10 @@ import type { MainDB } from '../../kernel/db/schema.js';
  * their API key's purpose. The audit log keeps every eval call (the scorer reads it).
  */
 export async function recordUsage(db: Kysely<MainDB>, rows: readonly CommittedAuditRow[]): Promise<void> {
-  const keyIds = [...new Set(rows.filter((r) => r.kind === 'tool_call' && r.api_key_id && r.via !== 'eval').map((r) => r.api_key_id!))];
-  const evalKeys = new Set(keyIds.length ? (await db.selectFrom('api_keys').select('id').where('id', 'in', keyIds).where('purpose', '=', 'eval').execute()).map((k) => k.id) : []);
+  const keyRows = rows.filter((r) => r.kind === 'tool_call' && r.api_key_id && r.via !== 'eval');
+  const keyIds = [...new Set(keyRows.map((r) => r.api_key_id!))];
+  const tenantIds = [...new Set(keyRows.map((r) => r.tenant_id))];
+  const evalKeys = new Set(keyIds.length ? (await db.selectFrom('api_keys').select('id').where('tenant_id', 'in', tenantIds).where('id', 'in', keyIds).where('purpose', '=', 'eval').execute()).map((k) => k.id) : []);
   const agg = new Map<string, { tenant: string; server: string; env: string; tool: string; day: string; calls: number; errors: number; script: number }>();
   for (const r of rows) {
     if (r.kind !== 'tool_call' || !r.environment_id || !r.server_id || !r.tool_name) continue;
@@ -43,6 +45,7 @@ export async function recordUsage(db: Kysely<MainDB>, rows: readonly CommittedAu
 
 /** Top-N tools by 7-day calls for an environment (pinned-by-usage, §9.4). */
 export async function topToolsByUsage(db: Kysely<MainDB>, environmentId: string, sinceDay: string, n = 5): Promise<string[]> {
+  // tenant-scope: child-of-scoped (environment id of a tenant-scoped bundle)
   const rows = await db.selectFrom('usage_daily').select(['tool_name', (eb) => eb.fn.sum<number>('calls').as('c')]).where('environment_id', '=', environmentId).where('day', '>=', sinceDay).groupBy('tool_name').orderBy('c', 'desc').limit(n).execute();
   return rows.map((r) => r.tool_name);
 }

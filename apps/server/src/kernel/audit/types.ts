@@ -8,7 +8,8 @@ export interface AuditEventInput {
   ts: number;
   kind: AuditKind;
   requestId?: string | null;
-  tenantId?: string;
+  /** Owning tenant (multi-tenancy spec §4.5, G15); `INSTANCE_SCOPE_ID` for platform events. */
+  tenantId: string;
   userId?: string | null;
   apiKeyId?: string | null;
   principalType?: PrincipalType | null;
@@ -57,6 +58,8 @@ export interface AuditEventInput {
 
 /** Search filters (addendum 4: a time range is always required). Ids are already scope-checked. */
 export interface AuditQuery {
+  /** Mandatory tenant scope (multi-tenancy spec §4.5, G3): rows of other tenants never match. */
+  tenantId: string;
   /** epoch ms, inclusive */
   from: number;
   /** epoch ms, exclusive */

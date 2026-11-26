@@ -24,6 +24,7 @@ export class TracesService {
 
   async principal(type: string | null, userId: string | null, apiKeyId: string | null, credentialKey: string | null): Promise<PrincipalView | null> {
     if (type === 'api_key' && apiKeyId) {
+      // tenant-scope: child-of-scoped (ids from tenant-scoped audit or task rows)
       const k = await this.db.selectFrom('api_keys').select(['name']).where('id', '=', apiKeyId).executeTakeFirst();
       return { type: 'api_key', id: apiKeyId, name: k?.name ?? DELETED };
     }
@@ -36,7 +37,9 @@ export class TracesService {
   }
 
   async refs(serverId: string | null, environmentId: string | null) {
+    // tenant-scope: child-of-scoped (ids from tenant-scoped audit or task rows)
     const s = serverId ? await this.db.selectFrom('servers').select(['id', 'slug', 'name']).where('id', '=', serverId).executeTakeFirst() : null;
+    // tenant-scope: child-of-scoped (ids from tenant-scoped audit or task rows)
     const e = environmentId ? await this.db.selectFrom('environments').select(['id', 'slug', 'name', 'kind']).where('id', '=', environmentId).executeTakeFirst() : null;
     return { server: s ?? (serverId ? { id: serverId, slug: '', name: DELETED } : null), environment: e ?? (environmentId ? { id: environmentId, slug: '', name: DELETED, kind: 'dev' as const } : null) };
   }
@@ -93,6 +96,7 @@ export class TracesService {
   /** Timeline (§12.2): audit rows + decisions + unmet needs + issues, script inner calls nested under their script. */
   async timeline(taskId: string): Promise<{ items: TimelineItem[]; truncated: boolean }> {
     await this.c.auditStore.flush().catch(() => {});
+    // tenant-scope: child-of-scoped (task id from a tenant-scoped task)
     const rows = (await this.c.dbs.audit.db.selectFrom('audit_log').selectAll().where('task_id', '=', taskId).orderBy('seq').limit(TIMELINE_CAP + 1).execute()) as Audit[];
     const truncated = rows.length > TIMELINE_CAP;
     const audit = rows.slice(0, TIMELINE_CAP);
@@ -115,8 +119,11 @@ export class TracesService {
     for (const [sid, children] of orphans) out.push({ id: sid, kind: 'script', ts: children[0]!.ts, tool: 'run_script', summary: 'run_script (running)', scriptRunId: sid, children });
     out.push(...scripts.values());
     const [decs, needs, issues] = await Promise.all([
+      // tenant-scope: child-of-scoped (task id from a tenant-scoped task)
       this.db.selectFrom('decisions').selectAll().where('task_id', '=', taskId).execute(),
+      // tenant-scope: child-of-scoped (task id from a tenant-scoped task)
       this.db.selectFrom('unmet_needs').selectAll().where('task_id', '=', taskId).execute(),
+      // tenant-scope: child-of-scoped (task id from a tenant-scoped task)
       this.db.selectFrom('issues').selectAll().where('task_id', '=', taskId).execute(),
     ]);
     // ops audit rows for these duplicate the domain rows; keep the richer domain item
@@ -147,13 +154,13 @@ export class TracesService {
     const r = await this.refs(a.server_id, a.environment_id);
     let error: CallDetail['error'] = null;
     if (a.error_id) {
-      const ev = await this.db.selectFrom('error_events').select(['code', 'detail']).where('error_id', '=', a.error_id).executeTakeFirst();
+      const ev = await this.db.selectFrom('error_events').where('tenant_id', '=', a.tenant_id).select(['code', 'detail']).where('error_id', '=', a.error_id).executeTakeFirst();
       const code = (ev?.code ?? a.error_code ?? 'upstream_error') as ErrorCode;
       const cat = ERROR_CATALOG[code];
       const detail = parseJsonColumn<Record<string, unknown>>(ev?.detail) ?? {};
       error = cat ? { code, title: cat.title, explanation: fillTemplate(cat.explanation, detail) } : { code, title: code, explanation: a.error_message ?? '' };
     } else if (a.error_code) error = { code: a.error_code, title: ERROR_CATALOG[a.error_code as ErrorCode]?.title ?? a.error_code, explanation: a.error_message ?? '' };
-    const storeOutputs = await this.c.settings.get('auditStoreFullOutput');
+    const storeOutputs = await this.c.settings.get('auditStoreFullOutput', a.tenant_id);
     return {
       auditId: a.id,
       ts: toIso(Number(a.ts)),

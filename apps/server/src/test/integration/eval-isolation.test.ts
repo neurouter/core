@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../kernel/lib/ids.js';
 import { consoleOn, type TestContext } from '../fakes/app-context.js';
@@ -99,12 +100,12 @@ describe('eval traffic isolation', () => {
     const evalTask = (await d.selectFrom('tasks').select(['id', 'server_id', 'environment_id', 'credential_key']).where('origin', '=', 'eval').executeTakeFirstOrThrow());
     const now = s.services.clock.now();
     const g = newId();
-    await d.insertInto('need_groups').values({ id: g, tenant_id: s.services.tenantId, server_id: evalTask.server_id, label: 'Planted eval group', intent_norm_hash: 'planted', count: 1, distinct_principals: 1, first_seen_at: now, last_seen_at: now, status: 'open', note: null, centroid: null }).execute();
-    await d.insertInto('unmet_needs').values({ id: newId(), tenant_id: s.services.tenantId, group_id: g, server_id: evalTask.server_id, environment_id: evalTask.environment_id, task_id: evalTask.id, user_id: null, credential_key: evalTask.credential_key, client_name: null, intent: 'Planted eval need', attempted: '[]', created_at: now, audit_id: null }).execute();
+    await d.insertInto('need_groups').values({ id: g, tenant_id: DEFAULT_TENANT_ID, server_id: evalTask.server_id, label: 'Planted eval group', intent_norm_hash: 'planted', count: 1, distinct_principals: 1, first_seen_at: now, last_seen_at: now, status: 'open', note: null, centroid: null }).execute();
+    await d.insertInto('unmet_needs').values({ id: newId(), tenant_id: DEFAULT_TENANT_ID, group_id: g, server_id: evalTask.server_id, environment_id: evalTask.environment_id, task_id: evalTask.id, user_id: null, credential_key: evalTask.credential_key, client_name: null, intent: 'Planted eval need', attempted: '[]', created_at: now, audit_id: null }).execute();
     // an eval report in the live group too
     const liveGroup = (await d.selectFrom('need_groups').select('id').where('label', '!=', 'Planted eval group').executeTakeFirstOrThrow()).id;
-    await d.insertInto('unmet_needs').values({ id: newId(), tenant_id: s.services.tenantId, group_id: liveGroup, server_id: evalTask.server_id, environment_id: evalTask.environment_id, task_id: null, user_id: null, credential_key: evalTask.credential_key, client_name: null, intent: 'Planted eval need in live group', attempted: '[]', created_at: now, audit_id: null }).execute();
-    await d.insertInto('issues').values({ id: newId(), tenant_id: s.services.tenantId, server_id: evalTask.server_id, environment_id: evalTask.environment_id, task_id: evalTask.id, tool_name: 'get_pet_by_id', problem: 'Planted eval issue', evidence: null, related_audit_id: null, status: 'open', note: null, created_at: now, updated_at: now }).execute();
+    await d.insertInto('unmet_needs').values({ id: newId(), tenant_id: DEFAULT_TENANT_ID, group_id: liveGroup, server_id: evalTask.server_id, environment_id: evalTask.environment_id, task_id: null, user_id: null, credential_key: evalTask.credential_key, client_name: null, intent: 'Planted eval need in live group', attempted: '[]', created_at: now, audit_id: null }).execute();
+    await d.insertInto('issues').values({ id: newId(), tenant_id: DEFAULT_TENANT_ID, server_id: evalTask.server_id, environment_id: evalTask.environment_id, task_id: evalTask.id, tool_name: 'get_pet_by_id', problem: 'Planted eval issue', evidence: null, related_audit_id: null, status: 'open', note: null, created_at: now, updated_at: now }).execute();
 
     expect(await t.json(t.admin, { url: '/api/inbox/summary' }, 200)).toMatchObject({ needs: { open: 1 }, issues: { open: 1 } });
     const groups = await t.json(t.admin, { url: '/api/inbox/needs' }, 200);

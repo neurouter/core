@@ -13,6 +13,8 @@ export const AuthConfig = z.object({
   localLink: z.boolean(),
   demoReadOnly: z.boolean(),
   orgName: z.string(),
+  /** Deployment feature flags from server extensions (multi-tenancy spec §1.4, e.g. `{ tenancy: { multi: true } }`); `{}` in OSS. */
+  features: z.record(z.string(), z.unknown()).optional(),
 });
 export type AuthConfig = z.infer<typeof AuthConfig>;
 

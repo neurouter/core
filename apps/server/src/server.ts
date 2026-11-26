@@ -15,6 +15,7 @@ import { systemClock } from './kernel/lib/clock.js';
 import { createLogger } from './kernel/lib/logger.js';
 import { SERVER_VERSION } from './version.js';
 import { routePlugins } from './routes.js';
+import type { NeurouterExtensions } from './extensions.js';
 
 export { ConfigError };
 
@@ -54,6 +55,8 @@ export interface StartOptions {
   /** Start the background job scheduler (default true when listening). */
   jobs?: boolean;
   loadDotenv?: boolean;
+  /** Extension points (multi-tenancy spec §1.4): tenancy, policies, executor decorator, routes, migrations, jobs, features. */
+  extensions?: NeurouterExtensions;
 }
 
 export interface RunningServer {
@@ -90,7 +93,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const dbs = createDatabases({ databaseUrl: config.databaseUrl, auditDatabaseUrl: config.auditDatabaseUrl, poolMax: config.env.DB_POOL_MAX, auditPoolMax: config.env.AUDIT_DB_POOL_MAX, onWarn: (msg, err) => logger.warn({ err }, msg) });
   logger.info({ dialect: dbs.main.dialect, database: redactDatabaseUrl(config.databaseUrl) }, 'database configured');
   if (config.env.MIGRATE_ON_START) {
-    const applied = await migrateAll(dbs, { embeddingDims: config.env.EMBEDDINGS_DIMS });
+    const applied = await migrateAll(dbs, { embeddingDims: config.env.EMBEDDINGS_DIMS }, opts.extensions?.migrations ?? {});
     if (applied.main.length + applied.audit.length) logger.info({ main: applied.main, audit: applied.audit }, 'migrations applied');
   }
   let coordination: CoordinationStore = new MemoryCoordination(systemClock);
@@ -100,7 +103,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     await pgc.start();
     coordination = pgc;
   }
-  const services = createServices({ config, logger, dbs, clock: systemClock, coordination, version: SERVER_VERSION, ...(opts.services ?? {}) });
+  const services = createServices({ config, logger, dbs, clock: systemClock, coordination, version: SERVER_VERSION, ...(opts.services ?? {}), ...(opts.extensions ? { extensions: opts.extensions } : {}) });
   await initServices(services);
   if (config.env.NEUROUTER_CONFIG && config.env.NEUROUTER_CONFIG_MODE !== 'console') {
     const r = await services.configSync.loadFile(config.env.NEUROUTER_CONFIG);

@@ -1,4 +1,5 @@
-import type { FastifyInstance } from 'fastify';
+import { tenantOf } from '../../auth/guards.js';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { api, readinessBand, type ReadinessBand } from '@neurouter/shared';
 import { toIso } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
@@ -20,22 +21,22 @@ export function badgeSvg(label: string, value: string, color: string): string {
 /** `public.report`, `public.badge` (§14.14): only for servers with `publicReport` and a measured run. */
 export async function publicRoutes(app: FastifyInstance, c: ApiContext): Promise<void> {
   const db = c.dbs.main.db;
-  const measured = async (slug: string) => {
+  const measured = async (req: FastifyRequest, slug: string) => {
     if (!c.config.env.NEUROUTER_PUBLIC_REPORTS) throw AppError.notFound('Report');
-    const s = await db.selectFrom('servers').selectAll().where('tenant_id', '=', c.tenantId).where('slug', '=', slug).executeTakeFirst();
+    const s = await db.selectFrom('servers').selectAll().where('tenant_id', '=', tenantOf(req)).where('slug', '=', slug).executeTakeFirst();
     if (!s || s.public_report !== 1 || s.status !== 'active') throw AppError.notFound('Report');
-    const run = await db.selectFrom('eval_runs').selectAll().where('server_id', '=', s.id).where('status', '=', 'succeeded').where('trigger', '!=', 'suggestion_verify').where('headline', 'is not', null).orderBy('created_at', 'desc').limit(1).executeTakeFirst();
+    const run = await db.selectFrom('eval_runs').where('tenant_id', '=', tenantOf(req)).selectAll().where('server_id', '=', s.id).where('status', '=', 'succeeded').where('trigger', '!=', 'suggestion_verify').where('headline', 'is not', null).orderBy('created_at', 'desc').limit(1).executeTakeFirst();
     if (!run) throw AppError.notFound('Report');
     return { s, run };
   };
 
   route(app, 'public.report', api.public.report, async (req, reply) => {
-    const { s, run } = await measured(req.params.slug);
+    const { s, run } = await measured(req, req.params.slug);
     const score = parseJsonColumn<{ modeScores?: { tool?: number; code?: number }; cells?: Array<{ model: string; mode: 'tool' | 'code'; score: number }> }>(run.score) ?? {};
     const models = parseJsonColumn<string[]>(run.models) ?? [];
     const cells = score.cells ?? [];
-    const spec = s.current_spec_revision_id ? await db.selectFrom('spec_revisions').select('title').where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
-    const build = await db.selectFrom('builds').select('visible_count').where('id', '=', run.build_id).executeTakeFirst();
+    const spec = s.current_spec_revision_id ? await db.selectFrom('spec_revisions').where('tenant_id', '=', tenantOf(req)).select('title').where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
+    const build = await db.selectFrom('builds').where('tenant_id', '=', tenantOf(req)).select('visible_count').where('id', '=', run.build_id).executeTakeFirst();
     const names = models.length ? models : [...new Set(cells.map((x) => x.model))];
     const cell = (m: string, mode: 'tool' | 'code') => {
       const x = cells.find((y) => y.model === m && y.mode === mode);
@@ -60,7 +61,7 @@ export async function publicRoutes(app: FastifyInstance, c: ApiContext): Promise
   route(app, 'public.badge', api.public.badge, async (req, reply) => {
     let svg: string;
     try {
-      const { run } = await measured(req.params.slug);
+      const { run } = await measured(req, req.params.slug);
       const sc = Math.round(run.headline!);
       svg = badgeSvg('agent-ready', String(sc), BAND_COLOR[readinessBand(sc)]);
     } catch (err) {

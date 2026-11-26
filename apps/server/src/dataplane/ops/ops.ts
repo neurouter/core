@@ -126,7 +126,7 @@ export interface OpsDeps {
   log: { warn: (o: object, m: string) => void };
   /** Optional embedding similarity for need grouping (≥ 0.88 cosine to a group centroid). */
   embed?: (text: string) => Promise<Float32Array | null>;
-  onInboxChanged?: () => void;
+  onInboxChanged?: (tenantId: string) => void;
 }
 
 const cap = (s: unknown, n = TEXT_CAP): string => (typeof s === 'string' ? s : s === undefined || s === null ? '' : JSON.stringify(s)).slice(0, n);
@@ -216,14 +216,14 @@ export class OpsTools {
         const outcome = a.outcome === 'success' || a.outcome === 'partial' || a.outcome === 'failure' ? a.outcome : 'success';
         let taskId = typeof a.task_id === 'string' ? a.task_id : ctx.taskId;
         if (taskId) {
-          const own = await db.selectFrom('tasks').select(['credential_key']).where('id', '=', taskId).executeTakeFirst();
+          const own = await db.selectFrom('tasks').where('tenant_id', '=', ctx.tenantId).select(['credential_key']).where('id', '=', taskId).executeTakeFirst();
           if (!own || own.credential_key !== ctx.credentialKey) taskId = ctx.taskId;
         }
         if (!taskId) return { recorded: false, reason: 'no open task' };
         await this.d.tracker.bumpNow(taskId, { ops_count: 1 });
         const notes = a.notes === undefined ? null : await this.redactText(cap(a.notes));
         await this.d.tracker.close(taskId, outcome, notes);
-        const t = await db.selectFrom('tasks').select(['call_count', 'error_count', 'started_at', 'ended_at', 'framing', 'server_id']).where('id', '=', taskId).executeTakeFirst();
+        const t = await db.selectFrom('tasks').where('tenant_id', '=', ctx.tenantId).select(['call_count', 'error_count', 'started_at', 'ended_at', 'framing', 'server_id']).where('id', '=', taskId).executeTakeFirst();
         if (ctx.origin !== 'eval') this.d.metrics?.tasksTotal.inc({ server: ctx.server.slug, framing: t?.framing ?? 'explicit', outcome });
         return { task_id: taskId, calls: t?.call_count ?? 0, errors: t?.error_count ?? 0, duration_ms: t ? Number(t.ended_at ?? now) - Number(t.started_at) : 0 };
       }
@@ -240,10 +240,10 @@ export class OpsTools {
         if (ctx.origin === 'eval') return { recorded: true, group_id: newId(), similar_reports: 0 };
         const groupId = await this.groupFor(ctx, intent, now);
         await db.insertInto('unmet_needs').values({ id: newId(), tenant_id: ctx.tenantId, group_id: groupId, server_id: ctx.server.id, environment_id: ctx.environment.id, task_id: ctx.taskId, user_id: principalUserId(ctx.principal), credential_key: ctx.credentialKey, client_name: ctx.client.name, intent, attempted: toJsonColumn(attempted), created_at: now, audit_id: auditId }).execute();
-        const agg = await db.selectFrom('unmet_needs').select([(eb) => eb.fn.countAll<number>().as('n'), (eb) => eb.fn.count<number>('credential_key').distinct().as('p')]).where('group_id', '=', groupId).executeTakeFirst();
-        await db.updateTable('need_groups').set({ count: Number(agg?.n ?? 1), distinct_principals: Number(agg?.p ?? 1), last_seen_at: now }).where('id', '=', groupId).execute();
+        const agg = await db.selectFrom('unmet_needs').where('tenant_id', '=', ctx.tenantId).select([(eb) => eb.fn.countAll<number>().as('n'), (eb) => eb.fn.count<number>('credential_key').distinct().as('p')]).where('group_id', '=', groupId).executeTakeFirst();
+        await db.updateTable('need_groups').where('tenant_id', '=', ctx.tenantId).set({ count: Number(agg?.n ?? 1), distinct_principals: Number(agg?.p ?? 1), last_seen_at: now }).where('id', '=', groupId).execute();
         this.d.metrics?.unmetNeeds.inc({ server: ctx.server.slug });
-        this.d.onInboxChanged?.();
+        this.d.onInboxChanged?.(ctx.tenantId);
         return { recorded: true, group_id: groupId, similar_reports: Math.max(0, Number(agg?.n ?? 1) - 1) };
       }
       case 'report_issue': {
@@ -261,7 +261,7 @@ export class OpsTools {
         const id = newId();
         await db.insertInto('issues').values({ id, tenant_id: ctx.tenantId, server_id: ctx.server.id, environment_id: ctx.environment.id, task_id: ctx.taskId, tool_name: tool, problem, evidence: evidence === null ? null : toJsonColumn(evidence), related_audit_id: related, status: 'open', note: null, created_at: now, updated_at: now }).execute();
         this.d.metrics?.issues.inc({ server: ctx.server.slug });
-        this.d.onInboxChanged?.();
+        this.d.onInboxChanged?.(ctx.tenantId);
         return { recorded: true, issue_id: id };
       }
       case 'explain_error': {
@@ -273,7 +273,7 @@ export class OpsTools {
       case 'get_examples': {
         const toolName = cap(a.tool, 64);
         const kind = a.kind === 'script' ? 'script' : 'call';
-        const rows = await db.selectFrom('examples').select(['arguments', 'code', 'source']).where('server_id', '=', ctx.server.id).where('tool_name', '=', toolName).where('kind', '=', kind).orderBy('success_count', 'desc').limit(5).execute();
+        const rows = await db.selectFrom('examples').where('tenant_id', '=', ctx.tenantId).select(['arguments', 'code', 'source']).where('server_id', '=', ctx.server.id).where('tool_name', '=', toolName).where('kind', '=', kind).orderBy('success_count', 'desc').limit(5).execute();
         const t = ctx.bundle.build.tools.find((x) => x.name === toolName && !x.hidden);
         const out: Array<Record<string, unknown>> = rows.map((r) => (kind === 'call' ? { arguments: parseJsonColumn(r.arguments) } : { code: r.code }));
         if (kind === 'call' && t) for (const e of t.examples) if (out.length < 5) out.unshift({ ...(e.title ? { title: e.title } : {}), arguments: e.arguments });
@@ -330,7 +330,7 @@ export class OpsTools {
       if (best && best.sim >= 0.88) {
         const n = best.n + 1;
         const merged = best.c.map((x, i) => (x * best!.n + vec![i]!) / n);
-        await db.updateTable('need_groups').set({ centroid: Buffer.from(new Uint8Array(merged.buffer)) }).where('id', '=', best.id).execute();
+        await db.updateTable('need_groups').where('tenant_id', '=', ctx.tenantId).set({ centroid: Buffer.from(new Uint8Array(merged.buffer)) }).where('id', '=', best.id).execute();
         return best.id;
       }
     }
