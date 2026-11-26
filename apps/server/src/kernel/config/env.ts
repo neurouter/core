@@ -154,6 +154,12 @@ export const EnvFields = z
     NEUROUTER_RESOURCE_ALIASES: zCsv.default([]),
     /** Maintenance window (spec §11 M3): 503 on `/mcp` and on mutating `/api` calls. */
     NEUROUTER_MAINTENANCE: zBool.default(false),
+    /**
+     * Per-tool `outputSchema` in tools/list: `none` (default; MCP makes it optional, and a declared schema
+     * obliges every structuredContent to conform) or `typed` (the shaped upstream schema; experimental,
+     * kept for the v2 `exposure.outputSchema` setting).
+     */
+    NEUROUTER_OUTPUT_SCHEMA: z.enum(['none', 'typed']).default('none'),
   });
 
 const DB_URL = /^(sqlite:|postgres:\/\/|postgresql:\/\/)/;

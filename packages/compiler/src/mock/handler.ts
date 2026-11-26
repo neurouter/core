@@ -7,7 +7,8 @@ import { isObj, type Obj } from '../util.js';
 import { generateValue, hashSeed, seededFaker } from './generate.js';
 import { handleGraphqlMock } from './graphql.js';
 import type { MockModel, MockOperation, OpenApiMockModel } from './model.js';
-import { asStateStore, MockLimitError, mockSeedKey, newItem, toMockNs, type MockNs, type MockStateStore, type MockStore } from './store.js';
+import { asStateStore, DEFAULT_SEED, MockLimitError, newItem, toMockNs, type MockNs, type MockStateStore, type MockStore } from './store.js';
+import { defsOf } from '../openapi/schema.js';
 
 export interface MockRequest {
   method: string;
@@ -85,6 +86,24 @@ function checkBody(schema: JsonSchema | null, body: unknown): string[] {
   return errors;
 }
 
+/**
+ * A list response wrapped in an object (`{total_count, items}`, Stripe's `{object, data, has_more, url}`):
+ * the envelope's other fields are generated from its schema so required ones are present.
+ */
+function listEnvelope(op: MockOperation, nsSeed: number, page: Obj[], total: number, more: boolean): Obj {
+  const w = op.listWrapper!;
+  const props = isObj(w.schema.properties) ? (w.schema.properties as Obj) : {};
+  const { [w.arrayProp]: _items, ...rest } = props;
+  const faker = seededFaker(hashSeed(nsSeed, op.method, op.pathTemplate, 'envelope'));
+  const base = generateValue({ ...w.schema, properties: rest, required: ((w.schema.required as string[] | undefined) ?? []).filter((r) => r !== w.arrayProp) }, 'result', { faker, defs: defsOf(w.schema), depth: 0, index: 1 });
+  const out: Obj = isObj(base) ? base : {};
+  const closed = w.schema.additionalProperties === false;
+  if (!closed || 'total_count' in props) out.total_count = total;
+  if ('has_more' in props) out.has_more = more;
+  out[w.arrayProp] = page;
+  return out;
+}
+
 function nowIso(store: MockStateStore): string {
   return new Date(store.now()).toISOString();
 }
@@ -127,8 +146,14 @@ export async function handleMockRequest(model: MockModel, store: MockStateStore 
   return matchedPath ? problem(405, 'Method Not Allowed', `${method} is not supported on ${rawPath}`) : problem(404, 'Not Found', `No mock operation for ${method} ${rawPath}`);
 }
 
+/** Params in a seed: case-insensitive values (`Hello-World` and `hello-world` name the same repo). */
+function seedParams(params: Record<string, string>): string {
+  return JSON.stringify(Object.keys(params).sort().map((k) => [k, String(params[k]).toLowerCase()]));
+}
+
 async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: MockNs, op: MockOperation, params: Record<string, string>, query: Record<string, string | string[] | undefined>, body: unknown): Promise<MockResponse> {
-  const namespace = mockSeedKey(ns);
+  // derived from the namespace seed, not its name: an eval attempt sees what generation saw
+  const nsSeed = (await store.seedOf?.(ns)) ?? DEFAULT_SEED;
   const resource = op.resource ? model.resources[op.resource] : undefined;
   if (!resource || op.kind === 'action') {
     if (op.requestSchema && op.method !== 'GET') {
@@ -136,7 +161,7 @@ async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: Mock
       if (errs.length) return problem(422, 'Unprocessable Entity', errs.join('; '), { errors: errs });
     }
     if (op.successStatus === 204 || !op.responseSchema) return { status: op.successStatus, headers: op.successStatus === 204 ? {} : JSON_HEADERS, body: op.successStatus === 204 ? null : {} };
-    const faker = seededFaker(hashSeed(namespace, op.method, op.pathTemplate, JSON.stringify(params)));
+    const faker = seededFaker(hashSeed(nsSeed, op.method, op.pathTemplate, seedParams(params)));
     const defs = isObj(op.responseSchema.$defs) ? (op.responseSchema.$defs as Obj) : {};
     return { status: op.successStatus, headers: JSON_HEADERS, body: generateValue(op.responseSchema, 'result', { faker, defs, depth: 0, index: 1 }) };
   }
@@ -162,14 +187,14 @@ async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: Mock
       const page = items.slice(offset, offset + limit);
       const headers: Record<string, string> = { ...JSON_HEADERS };
       if (offset + limit < total && op.paging.page) headers.link = `<?${op.paging.page}=${Math.floor(offset / limit) + 2}&${op.paging.limit ?? 'per_page'}=${limit}>; rel="next"`;
-      if (op.listWrapper) return { status: 200, headers, body: { total_count: total, [op.listWrapper.arrayProp]: page } };
+      if (op.listWrapper) return { status: 200, headers, body: listEnvelope(op, nsSeed, page, total, offset + page.length < total) };
       return { status: op.successStatus, headers, body: page };
     }
     case 'create': {
       const errs = checkBody(op.requestSchema, body);
       if (errs.length) return problem(422, 'Unprocessable Entity', errs.join('; '), { errors: errs });
       const item = await store.create(ns, resource, scope, (id) => {
-        const it = { ...newItem(resource, hashSeed(namespace, resource.key, id), id, scope), ...(isObj(body) ? body : {}) };
+        const it = { ...newItem(resource, hashSeed(nsSeed, resource.key, id), id, scope), ...(isObj(body) ? body : {}) };
         it[resource.idField] = resource.idType === 'integer' ? id : `${resource.name}_${id}`;
         touch(it, store, true);
         return it;

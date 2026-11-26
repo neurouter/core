@@ -29,7 +29,7 @@ const STATEMENT_KEYWORDS = new Set([
 const ASSIGN_OPS = new Set(['=', '+=', '-=', '*=', '/=', '//=', '%=', '**=', '>>=', '<<=', '&=', '|=', '^=', '@=']);
 
 export function wrapScript(source: string): WrappedScript {
-  const src = source.replace(/\r\n/g, '\n');
+  const src = iterGeneratorsInNext(source.replace(/\r\n/g, '\n'));
   const userLines = src.split('\n');
   const { tokens } = tokenize(src);
   const sig = tokens.filter((t) => t.type !== 'COMMENT');
@@ -112,4 +112,39 @@ function isExpressionStatement(stmt: Token[]): boolean {
     if (t.value === ':' && !hasLambda) return false;
   }
   return true;
+}
+
+/**
+ * Monty evaluates generator expressions to lists, so `next(x for x in xs if …)` (and
+ * `next((x for …), default)`) failed with "'list' object is not an iterator". The first argument of such a
+ * `next(...)` call is wrapped in `iter(...)`, which gives Python's result. Other code is unchanged.
+ */
+export function iterGeneratorsInNext(src: string): string {
+  const toks = tokenize(src).tokens.filter((t) => t.type !== 'COMMENT');
+  const edits: Array<{ at: number; text: string }> = [];
+  for (let k = 0; k < toks.length - 1; k++) {
+    const t = toks[k]!;
+    if (t.type !== 'NAME' || t.value !== 'next' || t.inFString) continue;
+    const prev = toks[k - 1];
+    if (prev?.type === 'OP' && prev.value === '.') continue;
+    const open = toks[k + 1]!;
+    if (open.type !== 'OP' || open.value !== '(') continue;
+    let end = -1;
+    let hasFor = false;
+    let j = k + 2;
+    for (; j < toks.length; j++) {
+      const x = toks[j]!;
+      if (x.depth <= open.depth && x.type === 'OP' && x.value === ')') break;
+      if (x.depth === open.depth + 1 && x.type === 'OP' && x.value === ',') break;
+      if (x.type === 'NAME' && x.value === 'for' && !x.inFString) hasFor = true;
+      end = x.end;
+    }
+    const first = toks[k + 2];
+    // a list comprehension is a list in Python too (next([...]) is an error there as well)
+    if (!hasFor || end < 0 || !first || (first.type === 'OP' && first.value === '[')) continue;
+    edits.push({ at: first.start, text: 'iter(' }, { at: end, text: ')' });
+  }
+  let out = src;
+  for (const e of edits.sort((a, b) => b.at - a.at)) out = `${out.slice(0, e.at)}${e.text}${out.slice(e.at)}`;
+  return out;
 }

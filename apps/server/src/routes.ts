@@ -40,6 +40,7 @@ export function routePlugins(s: Services, extra: Array<(app: FastifyInstance) =>
         executorHealthy: () => s.executorHealth.healthy,
         usagePinned,
         nativeSearchClients: () => nativeClients,
+        outputSchema: s.config.env.NEUROUTER_OUTPUT_SCHEMA,
         externalIssuer: s.config.externalAs?.issuer ?? null,
         now: () => s.clock.now(),
         onAuthFailure: (reason, method) => s.metrics.authFailure(method, reason),

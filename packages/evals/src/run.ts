@@ -12,6 +12,11 @@ export interface RunSettings {
   fallbacks: boolean;
   maxTokens?: number;
   cache?: boolean;
+  /**
+   * Max characters kept per transcript item (user/assistant text, tool result, error). `null` keeps
+   * everything (`eval --transcripts`); default `TRANSCRIPT_ITEM_MAX` (what the console stores).
+   */
+  transcriptMaxChars?: number | null;
 }
 
 export interface RunLimits {
@@ -23,7 +28,7 @@ export interface RunLimits {
 
 export const DEFAULT_LIMITS: RunLimits = { maxTurns: 25, maxToolCalls: 60, maxTotalTokens: 200_000, wallMs: 5 * 60_000 };
 export const DEFAULT_SETTINGS: RunSettings = { effort: 'medium', fallbacks: true };
-const TRANSCRIPT_ITEM_MAX = 4096;
+export const TRANSCRIPT_ITEM_MAX = 4096;
 
 export interface RunAttemptOptions {
   llm: LlmClient;
@@ -42,8 +47,9 @@ export interface RunAttemptOptions {
 
 const isOps = (n: string) => n.startsWith('neurouter_');
 
-function cut(s: string): string {
-  return s.length > TRANSCRIPT_ITEM_MAX ? `${s.slice(0, TRANSCRIPT_ITEM_MAX)}…` : s;
+/** Trims a transcript text to `max` characters (`null`: untrimmed). */
+export function cutTranscript(s: string, max: number | null = TRANSCRIPT_ITEM_MAX): string {
+  return max !== null && s.length > max ? `${s.slice(0, max)}… [${s.length - max} more characters trimmed]` : s;
 }
 
 /** The agent loop (§15.4 step 3): MCP tools 1:1 as LLM tools (each provider adapter maps them), tool_choice auto, parallel tool_use blocks. */
@@ -54,6 +60,8 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
   const settings = { ...DEFAULT_SETTINGS, ...(opts.settings ?? {}) };
   const limits = { ...DEFAULT_LIMITS, ...(opts.limits ?? {}) };
   const started = now();
+  const maxChars = settings.transcriptMaxChars === undefined ? TRANSCRIPT_ITEM_MAX : settings.transcriptMaxChars;
+  const cut = (s: string) => cutTranscript(s, maxChars);
   const transcript: TranscriptItem[] = [{ kind: 'user', text: cut(opts.prompt) }];
   const agentCalls: AgentCall[] = [];
   const out: AttemptRun = {
@@ -65,6 +73,7 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     inputTokens: 0,
     outputTokens: 0,
     cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     latencyMs: 0,
     servedByModel: null,
     fallbackUsed: false,
@@ -116,6 +125,7 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     out.inputTokens += (res.usage.input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
     out.outputTokens += res.usage.output_tokens ?? 0;
     out.cacheReadTokens += res.usage.cache_read_input_tokens ?? 0;
+    out.cacheWriteTokens += res.usage.cache_creation_input_tokens ?? 0;
     out.servedByModel = res.model;
     if (fallbackUsed(res)) {
       out.fallbackUsed = true;
@@ -316,6 +326,8 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext): Promise<TaskR
       scripts: run.scripts,
       inputTokens: run.inputTokens,
       outputTokens: run.outputTokens,
+      cacheReadTokens: run.cacheReadTokens,
+      cacheWriteTokens: run.cacheWriteTokens,
       latencyMs: run.latencyMs,
       servedByModel: run.servedByModel,
       fallbackUsed: run.fallbackUsed,

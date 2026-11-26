@@ -2,7 +2,7 @@
  * Versioned prompts. Generator and judge prompts carry a machine-readable marker plus a JSON input
  * block, so the deterministic stub provider reads exactly what a real model reads.
  */
-export const GENERATOR_PROMPT_VERSION = 'gen-1';
+export const GENERATOR_PROMPT_VERSION = 'gen-2';
 export const AGENT_PROMPT_VERSION = 'agent-1';
 export const JUDGE_PROMPT_VERSION = 'judge-1';
 export const SUGGEST_PROMPT_VERSION = 'suggest-1';
@@ -23,6 +23,8 @@ export function readMarkerInput(text: string, marker: string): unknown | null {
 
 export const GENERATOR_SYSTEM = `You write evaluation tasks that measure how well an AI agent can use an API through MCP tools.
 Each task is a realistic user request. Tasks must be answerable with the listed tools (except category "impossible").
+Use the tools in "tools" (they have full schemas) for called assertions and reference_calls. "otherTools", when present, only
+names further tools of the API: they exist, so do not write "impossible" tasks that one of them could solve.
 Reference ids and values that exist in the provided sample entities so the tasks can be checked against the mock API.
 Return JSON only, matching the schema. Categories:
 - single: one tool call solves it.

@@ -15,7 +15,7 @@ import {
 import type { RunContext } from '../pipeline/context.js';
 import { resolveVisibleTool, writeEnabled } from '../pipeline/pipeline.js';
 import { enabledOps, opsDefinition } from '../ops/ops.js';
-import { codeModeAvailable, RUN_SCRIPT_DEFINITION } from '../code/run-script.js';
+import { codeModeAvailable, runScriptEntry } from '../code/run-script.js';
 
 export interface McpToolEntry {
   name: string;
@@ -50,7 +50,7 @@ export const CALL_TOOL_DEFINITION: McpToolEntry = {
   title: 'Call a tool by name',
   description: 'Call an API tool found with search_tools: pass its exact name and arguments.',
   inputSchema: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object', default: {} } }, required: ['name'], additionalProperties: false },
-  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
 };
 
 /** Tools the principal may see (hidden + profile filter), before discovery. */
@@ -58,14 +58,20 @@ export function visibleTools(ctx: RunContext): ToolDef[] {
   return ctx.bundle.build.tools.filter((t) => resolveVisibleTool(ctx, t.name) !== null);
 }
 
-export function apiToolEntry(ctx: RunContext, t: ToolDef, deferLoading?: boolean): McpToolEntry {
+/**
+ * One API tool as listed. No per-tool `outputSchema` unless `outputSchema: 'typed'`: MCP makes it
+ * optional, few models read it, and once declared every structuredContent MUST conform (shaped and
+ * clipped results, mock drift and upstream deviations made clients reject valid answers). It was also
+ * most of tools/list (91% for the GitHub demo overlay).
+ */
+export function apiToolEntry(ctx: RunContext, t: ToolDef, deferLoading?: boolean, outputSchema: 'none' | 'typed' = 'none'): McpToolEntry {
   const writes = !t.risk.write || writeEnabled(ctx, t);
   return {
     name: t.name,
     ...(t.title ? { title: t.title } : {}),
     description: t.description,
     inputSchema: t.inputSchema,
-    ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
+    ...(outputSchema === 'typed' && t.outputSchema ? { outputSchema: t.outputSchema } : {}),
     annotations: { title: t.title, readOnlyHint: t.risk.readOnly, destructiveHint: t.risk.destructive, idempotentHint: t.risk.idempotent, openWorldHint: t.risk.openWorld },
     _meta: {
       [META_WRITE]: t.risk.write,
@@ -106,7 +112,7 @@ export function effectiveMode(ctx: RunContext, executorHealthy: boolean): 'tools
  * discovery=search lists pinned tools + search_tools + call_tool. Native-search clients get
  * every tool with `_meta.defer_loading` on non-pinned ones (A6).
  */
-export function buildSurface(ctx: RunContext, opts: { executorHealthy: boolean; usagePinned?: string[]; nativeSearchClients?: string[] }): Surface {
+export function buildSurface(ctx: RunContext, opts: { executorHealthy: boolean; usagePinned?: string[]; nativeSearchClients?: string[]; outputSchema?: 'none' | 'typed' }): Surface {
   const mode = effectiveMode(ctx, opts.executorHealthy);
   const visible = visibleTools(ctx);
   const envOverride = ctx.bundle.environment.discoveryOverride;
@@ -121,15 +127,15 @@ export function buildSurface(ctx: RunContext, opts: { executorHealthy: boolean; 
   const out: McpToolEntry[] = [];
   const code = mode !== 'tools';
   if (mode === 'code') {
-    out.push(SEARCH_TOOLS_DEFINITION, RUN_SCRIPT_DEFINITION as unknown as McpToolEntry, ...pinnedOps);
+    out.push(SEARCH_TOOLS_DEFINITION, runScriptEntry(ctx) as unknown as McpToolEntry, ...pinnedOps);
     return { mode, discovery, code, tools: out };
   }
   if (native) {
-    for (const t of visible) out.push(apiToolEntry(ctx, t, !pinnedNames.has(t.name)));
+    for (const t of visible) out.push(apiToolEntry(ctx, t, !pinnedNames.has(t.name), opts.outputSchema));
   } else if (discovery === 'full') {
-    for (const t of visible) out.push(apiToolEntry(ctx, t, false));
+    for (const t of visible) out.push(apiToolEntry(ctx, t, false, opts.outputSchema));
   } else {
-    for (const t of pinned) out.push(apiToolEntry(ctx, t, false));
+    for (const t of pinned) out.push(apiToolEntry(ctx, t, false, opts.outputSchema));
     out.push(SEARCH_TOOLS_DEFINITION, CALL_TOOL_DEFINITION);
   }
   out.push(...pinnedOps);
@@ -137,7 +143,7 @@ export function buildSurface(ctx: RunContext, opts: { executorHealthy: boolean; 
     for (const o of ops.filter((x) => OPS_VISIBILITY[x] === 'search')) out.push(opsEntry(o));
     out.push(opsEntry(READ_RESULT));
   }
-  if (mode === 'both') out.push(RUN_SCRIPT_DEFINITION as unknown as McpToolEntry);
+  if (mode === 'both') out.push(runScriptEntry(ctx) as unknown as McpToolEntry);
   return { mode, discovery, code, tools: out };
 }
 

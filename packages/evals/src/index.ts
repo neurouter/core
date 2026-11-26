@@ -10,4 +10,6 @@ export * from './mcp.js';
 export * from './suggest.js';
 export * from './report.js';
 export * from './yaml-emit.js';
+export * from './tool-identity.js';
+export * from './select.js';
 export * from './llm/index.js';

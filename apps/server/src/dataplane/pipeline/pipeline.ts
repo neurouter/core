@@ -457,7 +457,9 @@ export class Pipeline {
     let text: string;
     let shaped;
     try {
-      shaped = shapeResponse(body, tool.shaping, { maxBytes: 64 * 1024 });
+      // scripts get whole (shaped) values: no maxItems/maxBytes on inner calls; the script reduces the data
+      // and run_script's result-size limit bounds what it returns. Tool-mode results keep both limits.
+      shaped = shapeResponse(body, tool.shaping, ctx.via === 'script' ? { limits: false } : { maxBytes: 64 * 1024 });
       value = shaped.value;
       if (shaped.truncated) {
         const handle = await this.d.pages.store(ctx.tenantId, ctx.credentialKey, shaped.full);
@@ -473,7 +475,8 @@ export class Pipeline {
     text = compactJson(value);
     if (shaped?.truncated) {
       const t = shaped.truncated;
-      text = `${t.totalItems !== undefined ? `Showing ${t.returnedItems ?? '?'} of ${t.totalItems} items.` : `Showing ${t.returnedBytes} of ${t.totalBytes} bytes.`} Call neurouter_read_result(handle="${String(meta[META_RESULT_HANDLE])}", offset) for more.\n${text}`;
+      const clipped = t.fields?.length ? `Clipped to fit: ${t.fields.slice(0, 10).join(', ')}${t.fields.length > 10 ? ` (+${t.fields.length - 10} more)` : ''}.` : `Showing ${t.returnedBytes} of ${t.totalBytes} bytes.`;
+      text = `${t.totalItems !== undefined ? `Showing ${t.returnedItems ?? '?'} of ${t.totalItems} items.` : clipped} Call neurouter_read_result(handle="${String(meta[META_RESULT_HANDLE])}", offset) for more.\n${text}`;
     }
     if (scanUntrusted(value)) {
       meta[META_UNTRUSTED] = true;

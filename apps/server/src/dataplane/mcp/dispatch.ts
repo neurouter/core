@@ -1,4 +1,4 @@
-import { CALL_TOOL, META_CALL_ID, META_NEXT_TOOLS, META_TASK_ID, META_TOOL_NAMES, OPS_TOOLS, opsMcpName, RUN_SCRIPT, SEARCH_TOOLS, type OpsTool } from '@neurouter/shared';
+import { CALL_TOOL, META_CALL_ID, META_NEXT_TOOLS, META_TASK_ID, META_TOOL_NAMES, OPS_TOOLS, opsMcpName, READ_RESULT, RUN_SCRIPT, scriptBuiltinsLine, SEARCH_TOOLS, type OpsTool } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { RunContext } from '../pipeline/context.js';
@@ -37,6 +37,8 @@ export interface SearchItem {
   readOnly: boolean;
   write: boolean;
   inputSchema?: Record<string, unknown>;
+  /** Compact arguments (`owner*: string, state?: "open"|"closed"`), json format. */
+  args?: string;
   pySignature?: string;
   pyName?: string;
   score: number;
@@ -129,10 +131,12 @@ export class Dispatcher {
     } else if (format === 'python') {
       // the stubs are bare `def`s; say how to call them (gemini-3.5-flash-lite called `find_pets_by_status(...)` without the namespace)
       const ns = ctx.server.slug.replace(/-/g, '_');
-      const how = surface.code ? `# In run_script call these as ${ns}.<name>(...), e.g. ${res.tools.find((t) => t.pyName && !t.pyName.startsWith('ops.'))?.pyName ?? `${ns}.<name>`}(...); helpers as ops.<name>(...).\n\n` : '';
+      const how = surface.code ? `# In run_script call these as ${ns}.<name>(...), e.g. ${res.tools.find((t) => t.pyName && !t.pyName.startsWith('ops.'))?.pyName ?? `${ns}.<name>`}(...); helpers as ops.<name>(...).\n# ${scriptBuiltinsLine()}\n\n` : '';
       text = how + res.tools.map((t) => (t.pySignature ? `${t.pySignature}\n    """${t.description.split('\n')[0]!.slice(0, 300)}"""` : `${t.name} — ${t.description.split('\n')[0]!.slice(0, 200)}`)).join('\n\n');
     } else {
-      text = res.tools.map((t) => `${t.name} — ${t.description.split('\n')[0]!.slice(0, 200)}${t.write ? ' (write)' : ''}`).join('\n');
+      // the text is what most clients give the model: each hit with its arguments (required ones marked)
+      text = res.tools.map((t) => `${t.name}(${t.args ?? ''}) — ${t.description.split('\n')[0]!.slice(0, 200)}${t.write ? ' (write)' : ''}`).join('\n');
+      text += `\n\nArguments: name: type; "*" = required.${includeSchemas ? ' Full JSON Schemas are in structuredContent.tools[].inputSchema.' : ''}`;
     }
     return { content: [{ type: 'text', text }], structuredContent: structured, _meta: meta };
   }
@@ -158,6 +162,7 @@ export class Dispatcher {
         readOnly: t.risk.readOnly,
         write: t.risk.write,
         ...(includeSchemas && format === 'json' ? { inputSchema: t.inputSchema } : {}),
+        ...(format === 'json' ? { args: argSignature(t.inputSchema) } : {}),
         ...(format === 'python' ? { pySignature: t.pySignature, pyName: t.pyName } : {}),
         score: r.score,
       });
@@ -165,12 +170,34 @@ export class Dispatcher {
     // ops tools are searchable too ("neurouter" finds them all)
     const q = query.toLowerCase();
     const words = q.match(/[a-z0-9]+/g) ?? [];
-    for (const op of OPS_TOOLS.filter((o) => ctx.bundle.server.opsTools[o as OpsTool])) {
+    // read_result is always available (truncated tool results point at it), so it is searchable too
+    for (const op of [...OPS_TOOLS.filter((o) => ctx.bundle.server.opsTools[o as OpsTool]), READ_RESULT] as Array<OpsTool | typeof READ_RESULT>) {
       const d = opsDefinition(op);
       const hay = `${d.name} ${d.title} ${d.description}`.toLowerCase();
-      const hit = q.includes('neurouter') || (words.length > 0 && words.filter((w) => w.length > 3).some((w) => hay.includes(w)) && words.filter((w) => hay.includes(w)).length >= Math.min(2, words.length));
-      if (hit && items.length < limit + 8) items.push({ name: d.name, title: d.title, description: d.description, readOnly: Boolean(d.annotations.readOnlyHint), write: false, ...(includeSchemas && format === 'json' ? { inputSchema: d.inputSchema } : {}), ...(format === 'python' && d.pyName ? { pySignature: `ops.${op}(...)`, pyName: d.pyName } : {}), score: 0 });
+      const matched = words.filter((w) => hay.includes(w)).length;
+      const hit = q.includes('neurouter') || (words.length > 0 && words.filter((w) => w.length > 3).some((w) => hay.includes(w)) && matched >= Math.min(2, words.length));
+      // a strong match (most query words) ranks before the API tools, so the limit does not cut it
+      const strong = words.length >= 2 && matched >= Math.ceil(words.length * 0.6);
+      if (hit && items.length < limit + 8) items[strong ? 'unshift' : 'push']({ name: d.name, title: d.title, description: d.description, readOnly: Boolean(d.annotations.readOnlyHint), write: false, ...(includeSchemas && format === 'json' ? { inputSchema: d.inputSchema } : {}), ...(format === 'json' ? { args: argSignature(d.inputSchema) } : {}), ...(format === 'python' && d.pyName ? { pySignature: `ops.${op}(...)`, pyName: d.pyName } : {}), score: 0 });
     }
     return { tools: items.slice(0, Math.max(limit, q.includes('neurouter') ? limit + 8 : limit)), totalVisible: visible.length, mode };
   }
+}
+
+/** Compact argument list of an input schema: `owner*: string, state?: "open"|"closed", labels?: string[]`. */
+export function argSignature(schema: Record<string, unknown>, max = 12): string {
+  const props = schema.properties && typeof schema.properties === 'object' ? (schema.properties as Record<string, Record<string, unknown>>) : {};
+  const req = new Set(Array.isArray(schema.required) ? (schema.required as string[]) : []);
+  const typeOf = (p: Record<string, unknown>, depth = 0): string => {
+    if (!p || typeof p !== 'object' || depth > 2) return 'any';
+    if (Array.isArray(p.enum) && p.enum.length && p.enum.length <= 6) return p.enum.map((e) => JSON.stringify(e)).join('|');
+    for (const k of ['anyOf', 'oneOf'] as const) if (Array.isArray(p[k])) return [...new Set((p[k] as Array<Record<string, unknown>>).map((x) => typeOf(x, depth + 1)))].filter((x) => x !== 'null').join('|') || 'any';
+    const t = Array.isArray(p.type) ? (p.type as string[]).filter((x) => x !== 'null').join('|') : typeof p.type === 'string' ? p.type : p.properties ? 'object' : typeof p.$ref === 'string' ? 'object' : 'any';
+    if (t === 'array') return `${typeOf((p.items ?? {}) as Record<string, unknown>, depth + 1)}[]`;
+    return t;
+  };
+  const names = Object.keys(props).sort((a, b) => Number(req.has(b)) - Number(req.has(a)));
+  const parts = names.slice(0, max).map((k) => `${k}${req.has(k) ? '*' : '?'}: ${typeOf(props[k]!)}`);
+  if (names.length > max) parts.push(`… ${names.length - max} more`);
+  return parts.join(', ');
 }

@@ -85,14 +85,20 @@ describe('neurouter eval (in-process, stub provider)', () => {
     delete process.env.NEUROUTER_EXECUTOR_MODE;
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/Headline: \d+\/100/);
-    const report = JSON.parse(readFileSync(join(dir, 'r.json'), 'utf8')) as { score: { headline: number; cells: unknown[] }; run: { provider: string } };
+    expect(r.err).toMatch(/generator usage: \d+ call\(s\), \d+ tokens .* of a 400000-token budget/);
+    expect(r.out).toMatch(/Suite generation: \d+ tokens over \d+ call\(s\)/);
+    const report = JSON.parse(readFileSync(join(dir, 'r.json'), 'utf8')) as { score: { headline: number; cells: unknown[] }; run: { provider: string }; generator: { usage: { calls: number; totalTokens: number } } };
     expect(report.score.cells).toHaveLength(2);
+    expect(report.generator.usage.calls).toBeGreaterThan(0);
+    expect(report.generator.usage.totalTokens).toBeGreaterThan(0);
     expect(report.run.provider).toBe('stub');
     expect(readFileSync(join(dir, 'r.md'), 'utf8')).toContain('stub provider');
     expect(existsSync(join(dir, 's.json'))).toBe(true);
     const attempts = JSON.parse(readFileSync(join(dir, 't.json'), 'utf8')) as Array<{ mode: string; prompt: string; transcript: Array<{ kind: string }>; assertionResults: unknown[] }>;
     expect(attempts).toHaveLength(10);
     expect(attempts.every((a) => a.prompt && a.transcript[0]?.kind === 'user' && Array.isArray(a.assertionResults))).toBe(true);
+    // --transcripts: untrimmed (the stored console copy keeps 4,096 chars per item)
+    expect(JSON.stringify(attempts)).not.toContain('more characters trimmed');
     // the saved suite re-runs deterministically
     process.env.NEUROUTER_EXECUTOR_MODE = 'local';
     const again = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--suite', join(dir, 's.json'), '--repeats', '1', '--modes', 'tool,code', '--out', join(dir, 'r2.json')]);
@@ -100,4 +106,15 @@ describe('neurouter eval (in-process, stub provider)', () => {
     expect(again.code).toBeUndefined();
     expect((JSON.parse(readFileSync(join(dir, 'r2.json'), 'utf8')) as { score: { headline: number } }).score.headline).toBe(report.score.headline);
   }, 120_000);
+
+  it('--generate exits 2 without running when the generator produces no tasks', async () => {
+    process.env.NEUROUTER_EVAL_LLM = 'stub';
+    const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));
+    const r = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--generate', '--counts', '0,0,0,0', '--repeats', '1', '--modes', 'tool', '--out', join(dir, 'r.json'), '--save-suite', join(dir, 's.json')]);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('the generator produced no valid tasks');
+    expect(r.err).not.toContain('running');
+    expect(existsSync(join(dir, 'r.json'))).toBe(false);
+    expect(existsSync(join(dir, 's.json'))).toBe(false);
+  }, 60_000);
 });

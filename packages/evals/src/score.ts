@@ -26,6 +26,18 @@ const LABELS: Record<ReadinessComponentKey, string> = {
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
+/**
+ * Tokens of one attempt, the same way for every provider: every input token the model read (uncached
+ * + cached, i.e. the full prompt each turn, summed over turns) plus every output token (reasoning
+ * included). Provider caching changes the bill, not this count: OpenAI caches long tool lists
+ * automatically, Anthropic only with cache_control, so counting uncached input alone made models
+ * incomparable. Cached input is reported separately (`cacheReadTokens`, `avgCachedTokens`).
+ * "Tokens per multi-step task" (`avgTokensMulti`) is the mean of this over the multi-step attempts.
+ */
+export function attemptTokens(r: Pick<TaskRunResult, 'inputTokens' | 'outputTokens'> & { cacheReadTokens?: number }): number {
+  return r.inputTokens + (r.cacheReadTokens ?? 0) + r.outputTokens;
+}
+
 /** One `(model, mode)` cell per §15.6. Fallback-served attempts are excluded from the model's score. */
 export function scoreCell(input: ScoreInput, model: string, mode: EvalMode): CellScore {
   const all = input.results.filter((r) => r.model === model && r.mode === mode);
@@ -82,10 +94,11 @@ export function scoreCell(input: ScoreInput, model: string, mode: EvalMode): Cel
     components,
     successRate: counted.length ? passed.length / counted.length : 0,
     categorySuccess,
-    avgTokens: mean(counted.map((r) => r.inputTokens + r.outputTokens)),
+    avgTokens: mean(counted.map(attemptTokens)),
+    avgCachedTokens: mean(counted.map((r) => r.cacheReadTokens ?? 0)),
     avgCalls: mean(counted.map((r) => r.toolCalls)),
     avgLatencyMs: mean(counted.map((r) => r.latencyMs)),
-    avgTokensMulti: multi.length ? mean(multi.map((r) => r.inputTokens + r.outputTokens)) : null,
+    avgTokensMulti: multi.length ? mean(multi.map(attemptTokens)) : null,
     flakyTasks: flaky,
     attempts: counted.length,
     excludedFallback: all.length - counted.length,
@@ -142,7 +155,9 @@ export function recommend(primaryCells: CellScore[]): { mode: EvalMode | null; t
   const dt = ot > 0 ? Math.round(((ot - rt) / ot) * 100) : 0;
   const sign = (n: number) => (n >= 0 ? `+${n}` : `−${Math.abs(n)}`);
   const tokens = dt >= 0 ? `−${dt}% tokens` : `+${Math.abs(dt)}% tokens`;
-  const single = (other.categorySuccess.single ?? 0) > (rec.categorySuccess.single ?? 0) ? `; ${other.mode} mode is better for single lookups` : '';
+  // category rates are means of per-task pass rates (floats): 14/24 can come out as 0.58333…34 in one
+  // cell and 0.58333…33 in the other, so compare with a tolerance far below one attempt's share
+  const single = greater(other.categorySuccess.single ?? 0, rec.categorySuccess.single ?? 0) ? `; ${other.mode} mode is better for single lookups` : '';
   return { mode, text: `${mode} mode: ${sign(ds)} pts success, ${tokens} on multi-step tasks${single}` };
 }
 
@@ -156,6 +171,13 @@ export interface PreliminaryScore {
 export function preliminaryScore(lint: Pick<LintReport, 'score'> | number): PreliminaryScore {
   const score = Math.round(typeof lint === 'number' ? lint : lint.score);
   return { score, band: readinessBand(score), confidence: 'preliminary' };
+}
+
+/** Rates closer than this are equal (one attempt in a suite moves a rate by ≥ 1/10,000 long before this). */
+export const RATE_EPSILON = 1e-9;
+/** `a > b` for rates, with `RATE_EPSILON` tolerance. */
+export function greater(a: number, b: number): boolean {
+  return a - b > RATE_EPSILON;
 }
 
 function clamp01(x: number): number {

@@ -8,6 +8,7 @@ import {
   LlmKeyError,
   RoutingLlmClient,
   QUICK_COUNTS,
+  resolveTaskTools,
   runSuite,
   scoreRun,
   selectVerifyTasks,
@@ -93,10 +94,22 @@ export interface CreateRunInput {
   createdBy: string | null;
   /** Run in the background (job) or await completion (CLI). */
   wait?: boolean;
+  /** Characters kept per transcript item (null = untrimmed, CLI `--transcripts`); default 4,096. */
+  transcriptMaxChars?: number | null;
 }
 
 const gz = (v: unknown) => gzipSync(Buffer.from(JSON.stringify(v), 'utf8'));
 const gunz = <T>(b: Buffer | null): T | null => (b ? (JSON.parse(gunzipSync(b).toString('utf8')) as T) : null);
+
+/** The first generator diagnostics of a suite, as one line (empty-suite errors). */
+export function generatorProblems(suite: Pick<EvalSuiteRowDb, 'generator'>, max = 5): string {
+  const d = parseJsonColumn<{ diagnostics?: Array<{ category: string; key: string | null; message: string }> }>(suite.generator)?.diagnostics ?? [];
+  if (!d.length) return 'No diagnostics were recorded.';
+  return `Diagnostics: ${d
+    .slice(0, max)
+    .map((x) => `[${x.category}${x.key ? ` ${x.key}` : ''}] ${x.message.slice(0, 200)}`)
+    .join('; ')}${d.length > max ? ` (+${d.length - max} more)` : ''}`;
+}
 
 export function taskFromRow(r: EvalTaskRowDb): EvalTask {
   return {
@@ -177,11 +190,16 @@ export class EvalsService {
 
   private async genTools(buildId: string): Promise<{ tools: ToolDef[]; gen: GenTool[] }> {
     const tools = (await this.d.builds.tools(buildId)).filter((t) => !t.hidden && t.kind !== 'composite');
-    return { tools, gen: tools.map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, write: t.risk.write, pyName: t.pyName, exampleArguments: t.examples[0]?.arguments ?? null })) };
+    return { tools, gen: tools.map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, write: t.risk.write, pyName: t.pyName, exampleArguments: t.examples[0]?.arguments ?? null, key: t.key, ...(t.tags[0] ? { group: t.tags[0] } : {}), ...(t.binding.type === 'http' ? { path: t.binding.pathTemplate } : {}) })) };
   }
 
   /** Generates a draft suite (§15.2); reference calls are executed over MCP on a fresh mock namespace. */
-  async generateSuite(tenantId: string, serverId: string, opts: { counts?: Partial<Record<EvalCategory, number>>; model?: string; seed?: number; instructions?: string | null; createdBy: string | null; intoSuiteId?: string }): Promise<EvalSuiteRowDb> {
+  /**
+   * Generates a draft suite (§15.2); reference calls are executed over MCP on a fresh mock namespace.
+   * The suite's `generator` JSON records the model, LLM usage and the generator diagnostics (why tasks
+   * were rejected), so an empty or short suite says why.
+   */
+  async generateSuite(tenantId: string, serverId: string, opts: { counts?: Partial<Record<EvalCategory, number>>; model?: string; seed?: number; instructions?: string | null; maxGeneratorTokens?: number; createdBy: string | null; intoSuiteId?: string }): Promise<EvalSuiteRowDb> {
     const { server, env } = await this.serverAndEnv(tenantId, serverId, null);
     const buildId = env.build_id ?? server.latest_build_id;
     if (!buildId) throw AppError.conflict('The server has no build');
@@ -202,6 +220,7 @@ export class EvalsService {
         ...(opts.counts ? { counts: opts.counts } : {}),
         ...(opts.instructions ? { instructions: opts.instructions } : {}),
         seed: opts.seed ?? 42,
+        ...(opts.maxGeneratorTokens ? { maxGeneratorTokens: opts.maxGeneratorTokens } : {}),
         executeReference: async (calls) => {
           // `gen:<keyId>:…` is honoured only for the key that sends it (G13)
           const refNs = `gen:${key.id}:ref-${newId()}`;
@@ -219,8 +238,10 @@ export class EvalsService {
           }
         },
       });
-      if (opts.intoSuiteId) return await this.fillSuite(tenantId, opts.intoSuiteId, buildId, out.tasks, out.generator as unknown as Record<string, unknown>);
-      return await this.saveSuite(tenantId, serverId, buildId, out.tasks, out.generator as unknown as Record<string, unknown>, opts.createdBy);
+      const generator = { ...out.generator, diagnostics: out.diagnostics } as unknown as Record<string, unknown>;
+      this.d.log.info({ serverId, tasks: out.tasks.length, usage: out.generator.usage, diagnostics: out.diagnostics.length }, 'eval suite generated');
+      if (opts.intoSuiteId) return await this.fillSuite(tenantId, opts.intoSuiteId, buildId, out.tasks, generator);
+      return await this.saveSuite(tenantId, serverId, buildId, out.tasks, generator, opts.createdBy);
     } finally {
       await this.d.keys.revoke(tenantId, key.id, null);
       await this.d.ports.resetMock(ns).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
@@ -326,7 +347,7 @@ export class EvalsService {
         created_at: now,
       })
       .execute();
-    const work = async () => this.executeRun(tenantId, id, { quick, createdBy: input.createdBy });
+    const work = async () => this.executeRun(tenantId, id, { quick, createdBy: input.createdBy, ...(input.transcriptMaxChars !== undefined ? { transcriptMaxChars: input.transcriptMaxChars } : {}) });
     if (input.wait) await work();
     else {
       const jobId = await this.d.jobs.start(tenantId, 'eval_run', { runId: id }, input.createdBy, work);
@@ -348,7 +369,7 @@ export class EvalsService {
     return this.run(tenantId, id);
   }
 
-  private async executeRun(tenantId: string, runId: string, opts: { quick: boolean; createdBy: string | null }): Promise<void> {
+  private async executeRun(tenantId: string, runId: string, opts: { quick: boolean; createdBy: string | null; transcriptMaxChars?: number | null }): Promise<void> {
     const ac = new AbortController();
     this.cancels.set(runId, ac);
     const db = this.d.db;
@@ -360,10 +381,14 @@ export class EvalsService {
       const server = await this.d.servers.get(tenantId, run.server_id);
       const env = (await this.d.servers.environments(run.server_id)).find((e) => e.id === run.environment_id)!;
       if ((await this.suiteTasks(tenantId, run.suite_id)).length === 0) {
-        await this.generateSuite(tenantId, run.server_id, { ...(opts.quick ? { counts: QUICK_COUNTS } : {}), createdBy: opts.createdBy, intoSuiteId: run.suite_id });
+        const suite = await this.generateSuite(tenantId, run.server_id, { ...(opts.quick ? { counts: QUICK_COUNTS } : {}), createdBy: opts.createdBy, intoSuiteId: run.suite_id });
+        // never run (and score) an empty suite: fail the run with the generator's reasons
+        if (suite.task_count === 0) throw new Error(`The generator produced no valid tasks. ${generatorProblems(suite)}`);
         run = await this.run(tenantId, runId);
       }
-      let tasks = (await this.suiteTasks(tenantId, run.suite_id)).map(taskFromRow).filter((t) => t.enabled);
+      // assertions name tools by stable key (fallback: name, or the pre-overlay name): survive overlay renames
+      const buildTools = await this.d.builds.tools(run.build_id);
+      let tasks = resolveTaskTools((await this.suiteTasks(tenantId, run.suite_id)).map(taskFromRow), buildTools).filter((t) => t.enabled);
       const keys = parseJsonColumn<string[]>(run.task_keys);
       if (keys?.length) tasks = tasks.filter((t) => keys.includes(t.key));
       const models = parseJsonColumn<string[]>(run.models) ?? [];
@@ -375,7 +400,7 @@ export class EvalsService {
       const total = tasks.length * models.length * modes.length * run.repeats;
       const existing = new Set((await db.selectFrom('eval_task_runs').where('tenant_id', '=', tenantId).select(['task_id', 'model', 'mode', 'attempt']).where('run_id', '=', runId).execute()).map((r) => `${r.task_id}|${r.model}|${r.mode}|${r.attempt}`));
       const taskIds = new Map((await this.suiteTasks(tenantId, run.suite_id)).map((t) => [t.key, t.id]));
-      const usage: Record<string, { inputTokens: number; outputTokens: number }> = {};
+      const usage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = {};
       const isTemp = (await db.selectFrom('builds').where('tenant_id', '=', tenantId).select('temporary').where('id', '=', run.build_id).executeTakeFirst())?.temporary === 1;
       const pinned = env.build_id;
       const results = await runSuite({
@@ -385,7 +410,7 @@ export class EvalsService {
         modes,
         repeats: run.repeats,
         judgeModel,
-        settings: { effort, fallbacks: fallbacks === 'default' },
+        settings: { effort, fallbacks: fallbacks === 'default', ...(opts.transcriptMaxChars !== undefined ? { transcriptMaxChars: opts.transcriptMaxChars } : {}) },
         signal: ac.signal,
         hasResult: (k) => existing.has(k),
         openSession: async (ctx) => {
@@ -410,12 +435,15 @@ export class EvalsService {
           };
         },
         onResult: async (r) => {
-          const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0 });
+          const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
           u.inputTokens += r.inputTokens;
           u.outputTokens += r.outputTokens;
+          u.cacheReadTokens += r.cacheReadTokens;
+          u.cacheWriteTokens += r.cacheWriteTokens;
           this.d.metrics?.evalTaskRuns.inc({ model: r.model, mode: r.mode, passed: String(r.passed) });
           this.d.metrics?.llmTokens.inc({ model: r.model, kind: 'input' }, r.inputTokens);
           this.d.metrics?.llmTokens.inc({ model: r.model, kind: 'output' }, r.outputTokens);
+          this.d.metrics?.llmTokens.inc({ model: r.model, kind: 'cache_read' }, r.cacheReadTokens);
           await db
             .insertInto('eval_task_runs')
             .values({
@@ -435,6 +463,8 @@ export class EvalsService {
               scripts: r.scripts,
               input_tokens: r.inputTokens,
               output_tokens: r.outputTokens,
+              cache_read_tokens: r.cacheReadTokens,
+              cache_write_tokens: r.cacheWriteTokens,
               latency_ms: Math.round(r.latencyMs),
               served_by_model: r.servedByModel,
               fallback_used: r.fallbackUsed ? 1 : 0,
@@ -489,7 +519,7 @@ export class EvalsService {
 
   /** Stored attempt results, rebuilt as TaskRunResult (scoring, suggestions, resume). */
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
-    const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
+    const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.cache_read_tokens', 'r.cache_write_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
       const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number }>(r.transcript);
       return {
@@ -509,6 +539,8 @@ export class EvalsService {
         scripts: r.scripts,
         inputTokens: r.input_tokens,
         outputTokens: r.output_tokens,
+        cacheReadTokens: r.cache_read_tokens,
+        cacheWriteTokens: r.cache_write_tokens,
         latencyMs: r.latency_ms,
         servedByModel: r.served_by_model,
         fallbackUsed: r.fallback_used === 1,

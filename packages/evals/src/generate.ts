@@ -1,6 +1,8 @@
 import { Assertion, ASSERTION_TYPES, EvalCategory, type ReferenceCall } from '@neurouter/shared';
 import { GENERATOR_MARKER, GENERATOR_PROMPT_VERSION, GENERATOR_SYSTEM, markerMessage } from './prompts.js';
-import { parseJsonText, textOf, type LlmClient } from './llm/types.js';
+import { parseJsonText, textOf, type LlmClient, type LlmUsage } from './llm/types.js';
+import { DEFAULT_MAX_GENERATOR_TOKENS, estimateTokens, GENERATOR_MAX_OUTPUT_TOKENS, MAX_CALL_PROMPT_TOKENS, MIN_CALL_PROMPT_TOKENS, selectGeneratorInput } from './select.js';
+import { stampToolKeys } from './tool-identity.js';
 import type { EvalTask, GeneratedTask, GeneratorCategoryInput, GenTool } from './types.js';
 
 export const DEFAULT_COUNTS: Record<EvalCategory, number> = { single: 8, multi: 8, ambiguous: 4, impossible: 4 };
@@ -49,6 +51,26 @@ export interface GenerateSuiteOptions {
   executeReference?: (calls: ReferenceCall[], task: GeneratedTask) => Promise<ReferenceOutcome[]>;
   signal?: AbortSignal;
   onProgress?: (done: number, total: number) => void;
+  /**
+   * Hard budget for the whole generation (input incl. cached + output tokens over every call). Each
+   * call's prompt gets a share (≤ MAX_CALL_PROMPT_TOKENS); large APIs send a relevant subset of tool
+   * schemas plus a names-only catalog. Default DEFAULT_MAX_GENERATOR_TOKENS.
+   */
+  maxGeneratorTokens?: number;
+}
+
+/** Generator LLM usage over all calls of one suite generation. */
+export interface GeneratorUsage {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  /** inputTokens + cacheReadTokens + outputTokens (the figure the budget limits) */
+  totalTokens: number;
+  budgetTokens: number;
+  /** tools sent with full schemas / visible tools, per category (last call) */
+  toolsWithSchemas: Partial<Record<EvalCategory, number>>;
+  visibleTools: number;
 }
 
 export interface GenerateDiagnostic {
@@ -60,7 +82,7 @@ export interface GenerateDiagnostic {
 export interface GeneratedSuite {
   tasks: EvalTask[];
   diagnostics: GenerateDiagnostic[];
-  generator: { model: string; promptVersion: string; seed: number; counts: Record<EvalCategory, number>; provider: string };
+  generator: { model: string; promptVersion: string; seed: number; counts: Record<EvalCategory, number>; provider: string; usage: GeneratorUsage };
 }
 
 /** §15.2: one Messages call per category, deterministic validation, one regeneration round with errors appended. */
@@ -71,27 +93,44 @@ export async function generateSuite(opts: GenerateSuiteOptions): Promise<Generat
   const diagnostics: GenerateDiagnostic[] = [];
   const seen = new Set<string>();
   const cats = EvalCategory.options.filter((c) => counts[c] > 0);
+  const budget = Math.max(MIN_CALL_PROMPT_TOKENS, opts.maxGeneratorTokens ?? DEFAULT_MAX_GENERATOR_TOKENS);
+  const usage: GeneratorUsage = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, budgetTokens: budget, toolsWithSchemas: {}, visibleTools: opts.tools.length };
   let done = 0;
-  for (const category of cats) {
+  for (const [ci, category] of cats.entries()) {
     let errors: string[] = [];
     let accepted: EvalTask[] = [];
     for (let round = 0; round < 2; round++) {
+      const count = counts[category] - accepted.length;
+      if (count <= 0) break;
+      // share of what is left: this call and one per remaining category (a retry takes from later shares)
+      const callsLeft = cats.length - ci;
+      const share = (budget - usage.totalTokens) / Math.max(1, callsLeft) - GENERATOR_MAX_OUTPUT_TOKENS / 2;
+      const promptBudget = Math.min(MAX_CALL_PROMPT_TOKENS, Math.floor(share));
+      if (promptBudget < MIN_CALL_PROMPT_TOKENS) {
+        diagnostics.push({ category, key: null, message: `generator token budget exhausted (${usage.totalTokens} of ${budget} tokens used); raise --max-generator-tokens` });
+        break;
+      }
+      const picked = selectGeneratorInput(opts.tools, { category, budgetTokens: promptBudget, seed: seed + round, samples: opts.samples, instructions: opts.instructions ?? null });
+      usage.toolsWithSchemas[category] = picked.tools.length;
       const input: GeneratorCategoryInput = {
         category,
-        count: counts[category] - accepted.length,
+        count,
         server: opts.server,
-        tools: opts.tools,
-        samples: opts.samples,
+        tools: picked.tools,
+        ...(picked.otherTools.length ? { otherTools: picked.otherTools } : {}),
+        samples: picked.samples,
         instructions: opts.instructions ?? null,
         seed: seed + round,
         ...(errors.length ? { previousErrors: errors } : {}),
       };
-      if (input.count <= 0) break;
       let raw: GeneratedTask[];
       try {
-        raw = await callGenerator(opts, input);
+        const out = await callGenerator(opts, input);
+        addUsage(usage, out.usage, input);
+        raw = out.tasks;
       } catch (err) {
         if (isKeyError(err)) throw err;
+        addUsage(usage, (err as { usage?: LlmUsage }).usage, input);
         errors = [`generation failed: ${(err as Error).message}`];
         if (round === 1) diagnostics.push({ category, key: null, message: errors[0]! });
         continue;
@@ -108,21 +147,33 @@ export async function generateSuite(opts: GenerateSuiteOptions): Promise<Generat
           roundFailures.push({ category, key: g.key ?? null, message: v.errors.join('; ') });
         }
       }
+      if (!raw.length) roundFailures.push({ category, key: null, message: 'the generator returned no tasks' });
       if (round === 1) diagnostics.push(...roundFailures);
-      if (accepted.length >= counts[category] || !errors.length) break;
+      if (accepted.length >= counts[category] || (!errors.length && raw.length)) break;
+      if (!errors.length) errors = ['you returned no tasks'];
     }
     accepted = dedupeKeys(accepted, tasks);
     tasks.push(...accepted);
     opts.onProgress?.(++done, cats.length);
   }
-  return { tasks, diagnostics, generator: { model: opts.model, promptVersion: GENERATOR_PROMPT_VERSION, seed, counts, provider: opts.llm.provider } };
+  return { tasks, diagnostics, generator: { model: opts.model, promptVersion: GENERATOR_PROMPT_VERSION, seed, counts, provider: opts.llm.provider, usage } };
 }
 
-async function callGenerator(opts: GenerateSuiteOptions, input: GeneratorCategoryInput): Promise<GeneratedTask[]> {
+function addUsage(u: GeneratorUsage, got: LlmUsage | undefined, input: GeneratorCategoryInput): void {
+  u.calls++;
+  // providers that report no usage (fake clients): count the prompt estimate so the budget still holds
+  const inTok = got?.input_tokens ?? estimateTokens(input);
+  u.inputTokens += inTok;
+  u.outputTokens += got?.output_tokens ?? 0;
+  u.cacheReadTokens += got?.cache_read_input_tokens ?? 0;
+  u.totalTokens = u.inputTokens + u.cacheReadTokens + u.outputTokens;
+}
+
+async function callGenerator(opts: GenerateSuiteOptions, input: GeneratorCategoryInput): Promise<{ tasks: GeneratedTask[]; usage: LlmUsage | undefined }> {
   const res = await opts.llm.create(
     {
       model: opts.model,
-      max_tokens: 16000,
+      max_tokens: GENERATOR_MAX_OUTPUT_TOKENS,
       system: GENERATOR_SYSTEM,
       messages: [
         {
@@ -139,9 +190,14 @@ async function callGenerator(opts: GenerateSuiteOptions, input: GeneratorCategor
     },
     opts.signal ? { signal: opts.signal } : {},
   );
-  const parsed = parseJsonText(textOf(res)) as { tasks?: unknown };
+  let parsed: { tasks?: unknown };
+  try {
+    parsed = parseJsonText(textOf(res)) as { tasks?: unknown };
+  } catch (err) {
+    throw Object.assign(new Error(`${(err as Error).message}`), { usage: res.usage });
+  }
   if (!Array.isArray(parsed.tasks)) throw new Error('generator returned no tasks array');
-  return parsed.tasks as GeneratedTask[];
+  return { tasks: parsed.tasks as GeneratedTask[], usage: res.usage };
 }
 
 function isKeyError(err: unknown): boolean {
@@ -228,20 +284,19 @@ export async function validateGenerated(
     });
   }
   if (errors.length) return { ok: false, errors };
-  return {
-    ok: true,
-    task: {
-      key: slugKey(g.key || `${category}-${normPrompt(g.prompt).slice(0, 30)}`),
-      category,
-      prompt: g.prompt.trim(),
-      rubric: typeof g.rubric === 'string' ? g.rubric : '',
-      assertions,
-      referenceCalls: refs,
-      seedState: g.seed_state ?? null,
-      tags: Array.isArray(g.tags) ? g.tags.map(String) : [],
-      enabled: true,
-    },
+  const keyed = opts.tools.filter((t): t is GenTool & { key: string } => typeof t.key === 'string');
+  const task: EvalTask = {
+    key: slugKey(g.key || `${category}-${normPrompt(g.prompt).slice(0, 30)}`),
+    category,
+    prompt: g.prompt.trim(),
+    rubric: typeof g.rubric === 'string' ? g.rubric : '',
+    assertions,
+    referenceCalls: refs,
+    seedState: g.seed_state ?? null,
+    tags: Array.isArray(g.tags) ? g.tags.map(String) : [],
+    enabled: true,
   };
+  return { ok: true, task: keyed.length ? stampToolKeys(task, keyed) : task };
 }
 
 function slugKey(k: string): string {

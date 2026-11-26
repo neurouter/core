@@ -2,7 +2,10 @@
  * Mock state (backend spec §16, multi-tenancy spec §7.2). `MockStateStore` is the async interface the
  * handler goes through; `MemoryMockStateStore` keeps it in process memory (`MockStore`: LRU eviction
  * and idle TTL), the server's `DbMockStateStore` keeps it in the database so every instance sees it.
- * Collections are seeded lazily and deterministically per (namespace seed, resource, scope).
+ * Collections are seeded lazily and deterministically per (namespace seed, resource): the seed items
+ * do not depend on the namespace name or the scope values, so the sample entities the eval generator
+ * sees (`gen:` namespace, default scope) are exactly what an eval attempt (`eval:` namespace, any
+ * spelling of `owner/repo`) reads. Scope params on the items are set to the requested scope.
  */
 import type { JsonSchema } from '@neurouter/shared';
 import { isObj, sha256Hex, type Obj } from '../util.js';
@@ -44,6 +47,8 @@ export interface MockStateStore {
   remove(ns: MockNs, r: MockResource, scope: MockScope, id: string): Promise<boolean>;
   /** Drops the namespace; it is reseeded on next use (with `seed`, default the store seed). */
   reset(ns: MockNs, seed?: number): Promise<void>;
+  /** The namespace's seed (created items and action responses derive from it); default `DEFAULT_SEED`. */
+  seedOf?(ns: MockNs): Promise<number>;
 }
 
 /** A store limit was hit (§7.5); the handler answers with a problem JSON. */
@@ -94,9 +99,14 @@ export function toMockNs(ns: MockNs | string): MockNs {
   return typeof ns === 'string' ? { tenantId: '', environmentId: '', name: ns } : ns;
 }
 
+/** Seed of a resource's collections: the namespace seed and the resource, never the scope values. */
+export function collectionSeed(r: MockResource, nsSeed: number): number {
+  return hashSeed(nsSeed, r.key);
+}
+
 /** The 20 seed items of a collection (exactly what both stores hold before any write). */
 export function seedItems(r: MockResource, scope: MockScope, nsSeed: number): Obj[] {
-  const seed = hashSeed(nsSeed, r.key, scopeKeyOf(r, scope));
+  const seed = collectionSeed(r, nsSeed);
   const items: Obj[] = [];
   for (let i = 1; i <= SEED_ITEMS; i++) items.push(newItem(r, hashSeed(seed, i), i, scope));
   return items;
@@ -156,6 +166,11 @@ export class MockStore {
   resetNamespace(namespace: string, seed?: number): void {
     this.ns.delete(namespace);
     if (seed !== undefined) this.ns.set(namespace, { seed, collections: new Map(), lastUsed: this.now() });
+  }
+
+  /** The namespace's seed (the store seed unless it was reset with another). */
+  seedOf(namespace: string): number {
+    return this.ns.get(namespace)?.seed ?? this.seed;
   }
 
   namespaces(): string[] {
@@ -241,6 +256,10 @@ export class MemoryMockStateStore implements MockStateStore {
 
   async reset(ns: MockNs, seed?: number): Promise<void> {
     this.store.resetNamespace(MemoryMockStateStore.key(ns), seed);
+  }
+
+  async seedOf(ns: MockNs): Promise<number> {
+    return this.store.seedOf(MemoryMockStateStore.key(ns));
   }
 }
 

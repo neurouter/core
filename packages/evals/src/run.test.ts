@@ -36,7 +36,19 @@ describe('runAttempt', () => {
     const cached = (r: ReturnType<typeof llmResponse>, write: number, read: number) => ({ ...r, usage: { ...r.usage, cache_creation_input_tokens: write, cache_read_input_tokens: read } });
     const llm = new ScriptedLlmClient([cached(llmResponse([use('u1', 'list_pets', {})], { input: 3 }), 2000, 0), cached(llmResponse([text('done')], { input: 4 }), 50, 2000)]);
     const r = await runAttempt({ llm, mcp, prompt: 'p', model: 'claude-haiku-5-5', mode: 'tool' });
-    expect(r).toMatchObject({ inputTokens: 3 + 2000 + 4 + 50, cacheReadTokens: 2000 });
+    expect(r).toMatchObject({ inputTokens: 3 + 2000 + 4 + 50, cacheReadTokens: 2000, cacheWriteTokens: 2050 });
+  });
+
+  it('keeps full transcripts when transcriptMaxChars is null (eval --transcripts), trims to 4,096 by default', async () => {
+    const long = 'x'.repeat(10_000);
+    const mk = () => new ScriptedLlmClient([llmResponse([text(long), use('u1', 'list_pets', {})]), llmResponse([text('done')])]);
+    const full = await runAttempt({ llm: mk(), mcp: fakePetstore(), prompt: long, model: 'm', mode: 'tool', settings: { transcriptMaxChars: null } });
+    expect(full.transcript[0]).toEqual({ kind: 'user', text: long });
+    expect(full.transcript.find((t) => t.kind === 'assistant')).toEqual({ kind: 'assistant', text: long });
+    const trimmed = await runAttempt({ llm: mk(), mcp: fakePetstore(), prompt: long, model: 'm', mode: 'tool' });
+    expect((trimmed.transcript[0] as { text: string }).text).toBe(`${'x'.repeat(4096)}… [5904 more characters trimmed]`);
+    const custom = await runAttempt({ llm: mk(), mcp: fakePetstore(), prompt: long, model: 'm', mode: 'tool', settings: { transcriptMaxChars: 100 } });
+    expect((custom.transcript[0] as { text: string }).text.startsWith(`${'x'.repeat(100)}…`)).toBe(true);
   });
 
   it('marks errors from tools as is_error and counts run_script once', async () => {

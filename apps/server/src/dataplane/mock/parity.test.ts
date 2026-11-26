@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Kysely } from 'kysely';
@@ -13,8 +13,9 @@ import { DbMockStateStore } from './db-store.js';
 
 const REPO = resolve(import.meta.dirname, '../../../../..');
 const SPECS = { github: 'examples/github/github-subset.json', petstore: 'examples/petstore/openapi.yaml', acme: 'examples/acme-orders/openapi.yaml' } as const;
-/** Recorded on v0.1.1 (in-memory `MockStore`, namespaces `env:<environmentId>` / `eval:…`) before the store became async. */
-const GOLDEN = JSON.parse(readFileSync(resolve(import.meta.dirname, 'mock-session.golden.json'), 'utf8')) as Record<string, Array<{ ns: string; req: string; status: number; sha: string }>>;
+/** Recorded on the in-memory `MockStore` (first on v0.1.1; re-recorded in 0.2.1 for schema-valid values and scope-independent seeds). */
+const GOLDEN_FILE = resolve(import.meta.dirname, 'mock-session.golden.json');
+const GOLDEN = JSON.parse(readFileSync(GOLDEN_FILE, 'utf8')) as Record<string, Array<{ ns: string; req: string; status: number; sha: string }>>;
 const FIXED = () => Date.parse('2026-02-01T00:00:00Z');
 const TENANT = '0190a0b0-0000-7000-8000-0000000000a1';
 const ENV: MockNs = { tenantId: TENANT, environmentId: '0190a0b0-0000-7000-8000-0000000000e1', name: 'env' };
@@ -34,7 +35,7 @@ const digest = (rows: Awaited<ReturnType<typeof replay>>) => rows.map((r) => ({ 
 /**
  * P0b golden parity (spec §7.5): a recorded mock session over every operation of three specs
  * (list, paging, filters, other scopes, read/404, create, update/replace, delete, actions, 404/405)
- * gives byte-identical responses on v0.1.1, on the memory store and on the DB store (SQLite + PGlite).
+ * gives byte-identical responses in the recorded golden, on the memory store and on the DB store (SQLite + PGlite).
  */
 describe('mock store parity (v0.1.1 golden ↔ memory ↔ DB)', () => {
   const models: Record<string, OpenApiMockModel> = {};
@@ -52,8 +53,11 @@ describe('mock store parity (v0.1.1 golden ↔ memory ↔ DB)', () => {
   });
 
   for (const spec of Object.keys(SPECS)) {
-    it(`${spec}: memory store matches the v0.1.1 golden`, async () => {
-      expect(digest(await replay(models[spec]!, new MemoryMockStateStore({ now: FIXED })))).toEqual(GOLDEN[spec]);
+    it(`${spec}: memory store matches the golden`, async () => {
+      const got = digest(await replay(models[spec]!, new MemoryMockStateStore({ now: FIXED })));
+      // RECORD_GOLDEN=1 re-records after an intended change of the mock data (0.2.1: schema-valid values, scope-independent seeds)
+      if (process.env.RECORD_GOLDEN) writeFileSync(GOLDEN_FILE, JSON.stringify({ ...JSON.parse(readFileSync(GOLDEN_FILE, 'utf8')), [spec]: got }, null, 1) + '\n');
+      else expect(got).toEqual(GOLDEN[spec]);
     });
 
     it(`${spec}: DB store (SQLite and PGlite) answers exactly like the memory store`, async () => {
@@ -61,7 +65,7 @@ describe('mock store parity (v0.1.1 golden ↔ memory ↔ DB)', () => {
       for (const d of dbs) {
         const got = await replay(models[spec]!, new DbMockStateStore(d.db, FIXED));
         expect(got, d.name).toEqual(mem);
-        expect(digest(got), d.name).toEqual(GOLDEN[spec]);
+        if (!process.env.RECORD_GOLDEN) expect(digest(got), d.name).toEqual(GOLDEN[spec]);
       }
     }, 60_000);
   }

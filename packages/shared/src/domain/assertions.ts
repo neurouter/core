@@ -5,10 +5,17 @@ import * as z from 'zod';
  * (`judge` assertions are scored by the LLM judge). Shared by the console (task editor) and evals.
  */
 const ArgsRecord = z.record(z.string(), z.unknown());
+/**
+ * Stable identity of the tool a `called`/`not_called` assertion or reference call is about: the
+ * compiler's `ToolDef.key` (`operationId:<id>`, `"<METHOD> <path>"`, `graphql:<Root>.<field>`). Before a
+ * run it is resolved to the build's current tool name, so overlays that rename tools keep frozen
+ * suites working; `tool` (the display name at generation time) is the fallback.
+ */
+const ToolKey = z.string().min(1).optional();
 
 export const Assertion = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('called'), tool: z.string().min(1), args: ArgsRecord.optional(), argsMatch: z.enum(['subset', 'exact']).optional(), minTimes: z.number().int().min(1).optional() }),
-  z.object({ type: z.literal('not_called'), tool: z.string().min(1) }),
+  z.object({ type: z.literal('called'), tool: z.string().min(1), toolKey: ToolKey, args: ArgsRecord.optional(), argsMatch: z.enum(['subset', 'exact']).optional(), minTimes: z.number().int().min(1).optional() }),
+  z.object({ type: z.literal('not_called'), tool: z.string().min(1), toolKey: ToolKey }),
   z.object({ type: z.literal('no_writes') }),
   /** MCP tool calls by the agent (a `run_script` counts 1). */
   z.object({ type: z.literal('max_calls'), n: z.number().int().min(0) }),
@@ -32,7 +39,7 @@ export type AssertionType = Assertion['type'];
 export const ASSERTION_TYPES = ['called', 'not_called', 'no_writes', 'max_calls', 'state', 'answer_contains', 'answer_matches', 'unmet_need_reported_or_declined', 'framing', 'judge'] as const satisfies readonly AssertionType[];
 
 /** A reference call of a generated task (`reference_calls`). */
-export const ReferenceCall = z.object({ tool: z.string().min(1), arguments: ArgsRecord });
+export const ReferenceCall = z.object({ tool: z.string().min(1), toolKey: ToolKey, arguments: ArgsRecord });
 export type ReferenceCall = z.infer<typeof ReferenceCall>;
 
 /** Score weights (A35). `correctness` only counts when the correctness suite ran (weights renormalize). */

@@ -2,7 +2,7 @@
  * Python `.pyi` stubs for code mode (backend spec §8.5). Generated from the visible tools of a
  * namespace; the server regenerates them for the per-principal allowed set.
  */
-import type { JsonSchema, ToolDef } from '@neurouter/shared';
+import { scriptBuiltinsLine, type JsonSchema, type ToolDef } from '@neurouter/shared';
 import { PY_KEYWORDS, pyIdent } from './naming.js';
 import { isObj, jcsHash, type Obj } from './util.js';
 import { COMPILER_VERSION } from './version.js';
@@ -152,9 +152,20 @@ function docstring(tool: ToolDef): string {
   let first = paras[0]!.trim();
   if (first.length > 500) first = `${first.slice(0, 497)}...`;
   const notes: string[] = [];
-  notes.push(tool.risk.write ? 'WRITE: in dry_run mode returns a planned change instead of calling the API.' : 'Read-only.');
-  if (tool.shaping?.maxItems) notes.push(`Returns at most ${tool.shaping.maxItems} items; more are summarised in the result.`);
-  const text = `${first}\n\n${notes.join(' ')}`.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+  notes.push(tool.risk.write ? `WRITE${tool.risk.destructive ? ' (destructive)' : ''}: in dry_run mode returns a planned change instead of calling the API.` : 'Read-only.');
+  // the arguments with their descriptions (the signature has names and types only)
+  const props = isObj(tool.inputSchema.properties) ? (tool.inputSchema.properties as Record<string, JsonSchema>) : {};
+  const req = new Set(Array.isArray(tool.inputSchema.required) ? (tool.inputSchema.required as string[]) : []);
+  const argLines = Object.entries(props)
+    .sort(([a], [b]) => Number(req.has(b)) - Number(req.has(a)))
+    .slice(0, 12)
+    .map(([k, v]) => {
+      const d = typeof v.description === 'string' ? v.description.replace(/\s+/g, ' ').trim() : '';
+      const short = d.length > 140 ? `${d.slice(0, 137)}...` : d;
+      return `    ${pyIdent(k)}${req.has(k) ? ' (required)' : ''}${short ? `: ${short}` : ''}`;
+    });
+  const args = argLines.length ? `\n\nArgs:\n${argLines.join('\n')}${Object.keys(props).length > 12 ? `\n    … ${Object.keys(props).length - 12} more` : ''}` : '';
+  const text = `${first}${args}\n\n${notes.join(' ')}`.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
   return `    """${text
     .split('\n')
     .map((l, i) => (i === 0 || l === '' ? l : `    ${l}`))
@@ -207,7 +218,7 @@ export function pySignatureFor(tool: ToolDef): string {
 export function generateStubs(tools: ToolDef[], namespace: string, opts: StubOptions = {}): string {
   const reg = new TypeRegistry(opts.maxTypedDicts ?? MAX_TYPED_DICTS);
   const fns = tools.filter((t) => !t.hidden).map((t) => renderFunction(t, reg).text);
-  const header = `# ${namespace}.pyi  (generated; Neurouter compiler ${COMPILER_VERSION}${opts.buildHash ? `; build ${opts.buildHash.slice(0, 12)}` : ''})\nfrom typing import Any, Literal, NotRequired, TypedDict\n`;
+  const header = `# ${namespace}.pyi  (generated; Neurouter compiler ${COMPILER_VERSION}${opts.buildHash ? `; build ${opts.buildHash.slice(0, 12)}` : ''})\n# ${scriptBuiltinsLine()}\n# Inside run_script, tool results are whole values (no maxItems/maxBytes truncation); keep what you return small.\nfrom typing import Any, Literal, NotRequired, TypedDict\n`;
   return [header, ...reg.classes, ...fns].join('\n');
 }
 

@@ -29,9 +29,9 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
     const tasks = await db.selectFrom('eval_tasks').where('tenant_id', '=', s.tenant_id).select(['category']).where('suite_id', '=', s.id).execute();
     const by = { single: 0, multi: 0, ambiguous: 0, impossible: 0 };
     for (const t of tasks) by[t.category]++;
-    const gen = parseJsonColumn<{ model?: string; promptVersion?: string; seed?: number }>(s.generator) ?? {};
+    const gen = parseJsonColumn<{ model?: string; promptVersion?: string; seed?: number; usage?: { calls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; totalTokens: number; budgetTokens: number }; diagnostics?: Array<{ category: never; key: string | null; message: string }> }>(s.generator) ?? {};
     const b = s.generated_from_build_id ? await db.selectFrom('builds').where('tenant_id', '=', s.tenant_id).select(['id', 'hash']).where('id', '=', s.generated_from_build_id).executeTakeFirst() : undefined;
-    return { id: s.id, serverId: s.server_id, version: s.version, status: s.status, taskCount: tasks.length, byCategory: by, generatedFromBuild: b ? { id: b.id, hash: b.hash } : null, generator: gen.model ? { model: gen.model, promptVersion: gen.promptVersion ?? '', seed: gen.seed ?? null } : null, createdAt: toIso(s.created_at), frozenAt: toIsoOrNull(s.frozen_at) };
+    return { id: s.id, serverId: s.server_id, version: s.version, status: s.status, taskCount: tasks.length, byCategory: by, generatedFromBuild: b ? { id: b.id, hash: b.hash } : null, generator: gen.model ? { model: gen.model, promptVersion: gen.promptVersion ?? '', seed: gen.seed ?? null, ...(gen.usage ? { usage: { calls: gen.usage.calls, inputTokens: gen.usage.inputTokens, outputTokens: gen.usage.outputTokens, cacheReadTokens: gen.usage.cacheReadTokens, totalTokens: gen.usage.totalTokens, budgetTokens: gen.usage.budgetTokens } } : {}), ...(gen.diagnostics ? { diagnostics: gen.diagnostics.slice(0, 50) } : {}) } : null, createdAt: toIso(s.created_at), frozenAt: toIsoOrNull(s.frozen_at) };
   };
   const taskRow = (t: EvalTaskRowDb): EvalTaskRow => ({ id: t.id, key: t.key, category: t.category, prompt: t.prompt, rubric: t.rubric, assertions: parseJsonColumn(t.assertions) ?? [], referenceCalls: parseJsonColumn(t.reference_calls) ?? [], seedState: parseJsonColumn(t.seed_state), tags: parseJsonColumn(t.tags) ?? [], enabled: t.enabled === 1, source: t.source });
   const runRow = async (r: EvalRunRowDb): Promise<EvalRunRow> => {
@@ -70,10 +70,10 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
     if (!s) return null;
     return { headline: s.headline, band: s.band, confidence: s.confidence, recommendedMode: s.recommendedMode, recommendation: s.recommendationText ?? null, primaryModel: (parseJsonColumn<string[]>(r.models) ?? [''])[0]!, modeScores: s.modeScores, breakdown: s.breakdown, cells: s.cells.map((x) => ({ model: x.model, mode: x.mode, score: x.score, components: x.components })) };
   };
-  const matrix = (r: EvalRunRowDb): MatrixCell[] => ((ev.score(r) as EvalScore | null)?.cells ?? []).map((x) => ({ model: x.model, mode: x.mode, successRate: x.successRate, score: x.score, avgTokens: x.avgTokens, avgCalls: x.avgCalls, avgLatencyMs: x.avgLatencyMs, flakyTasks: x.flakyTasks, excludedAttempts: x.excludedFallback ?? 0, best: x.best }));
+  const matrix = (r: EvalRunRowDb): MatrixCell[] => ((ev.score(r) as EvalScore | null)?.cells ?? []).map((x) => ({ model: x.model, mode: x.mode, successRate: x.successRate, score: x.score, avgTokens: x.avgTokens, avgCachedTokens: x.avgCachedTokens ?? 0, avgTokensMulti: x.avgTokensMulti ?? null, avgCalls: x.avgCalls, avgLatencyMs: x.avgLatencyMs, flakyTasks: x.flakyTasks, excludedAttempts: x.excludedFallback ?? 0, best: x.best }));
   const taskResults = async (r: EvalRunRowDb, filter: { model?: string; mode?: string; passed?: boolean; category?: string } = {}): Promise<TaskResultRow[]> => {
     const tasks = r.suite_id ? await ev.suiteTasks(r.tenant_id, r.suite_id) : [];
-    const runs = await db.selectFrom('eval_task_runs').select(['id', 'task_id', 'model', 'mode', 'attempt', 'passed', 'failure_cause', 'input_tokens', 'output_tokens', 'tool_calls', 'task_id_neurouter']).where('run_id', '=', r.id).where('tenant_id', '=', r.tenant_id).orderBy('attempt').execute();
+    const runs = await db.selectFrom('eval_task_runs').select(['id', 'task_id', 'model', 'mode', 'attempt', 'passed', 'failure_cause', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'tool_calls', 'task_id_neurouter']).where('run_id', '=', r.id).where('tenant_id', '=', r.tenant_id).orderBy('attempt').execute();
     const traced = runs.map((x) => x.task_id_neurouter).filter((x): x is string => !!x);
     const alive = new Set(traced.length ? (await db.selectFrom('tasks').select('id').where('tenant_id', '=', r.tenant_id).where('id', 'in', traced).execute()).map((t) => t.id) : []);
     const out: TaskResultRow[] = [];
@@ -88,7 +88,8 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
         cell.attempts++;
         if (x.passed === 1) cell.passes++;
         else cell.failureCause ??= (x.failure_cause as never) ?? null;
-        cell.avgTokens += x.input_tokens + x.output_tokens;
+        // same total as the score cells: uncached + cached input + output
+        cell.avgTokens += x.input_tokens + x.cache_read_tokens + x.output_tokens;
         cell.avgCalls += x.tool_calls;
         cell.taskRunIds.push(x.id);
         cell.runs.push({ id: x.id, attempt: x.attempt, passed: x.passed === 1, taskId: x.task_id_neurouter, trace: !x.task_id_neurouter ? 'none' : alive.has(x.task_id_neurouter) ? 'recorded' : 'expired' });
@@ -125,7 +126,7 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
   route(app, 'evals.generateSuite', api.evals.generateSuite, async (req, reply) => {
     await ev.llm(tenantOf(req));
     const b = req.body ?? {};
-    const jobId = await c.jobs.start(tenantOf(req), 'eval_generate', { serverId: req.params.id }, userOf(req), async () => suiteRow(await ev.generateSuite(tenantOf(req), req.params.id, { ...(b.counts ? { counts: b.counts } : {}), ...(b.model ? { model: b.model } : {}), ...(b.seed !== undefined ? { seed: b.seed } : {}), instructions: b.instructions ?? null, createdBy: userOf(req) })));
+    const jobId = await c.jobs.start(tenantOf(req), 'eval_generate', { serverId: req.params.id }, userOf(req), async () => suiteRow(await ev.generateSuite(tenantOf(req), req.params.id, { ...(b.counts ? { counts: b.counts } : {}), ...(b.model ? { model: b.model } : {}), ...(b.seed !== undefined ? { seed: b.seed } : {}), instructions: b.instructions ?? null, ...(b.maxGeneratorTokens ? { maxGeneratorTokens: b.maxGeneratorTokens } : {}), createdBy: userOf(req) })));
     return reply.status(202).send({ jobId, status: 'running' } as never);
   });
 
@@ -285,7 +286,7 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
       failureCause: (r.failure_cause as never) ?? null,
       toolCalls: r.tool_calls,
       scripts: r.scripts,
-      tokens: { inputTokens: r.input_tokens, outputTokens: r.output_tokens },
+      tokens: { inputTokens: r.input_tokens, outputTokens: r.output_tokens, cacheReadTokens: r.cache_read_tokens, cacheWriteTokens: r.cache_write_tokens },
       latencyMs: r.latency_ms,
       servedByModel: r.served_by_model,
       fallbackUsed: r.fallback_used === 1,

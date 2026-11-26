@@ -24,7 +24,17 @@ export const EvalSuiteRow = z.object({
   taskCount: z.number().int(),
   byCategory: CategoryCounts,
   generatedFromBuild: z.object({ id: Id, hash: z.string() }).nullable(),
-  generator: z.object({ model: z.string(), promptVersion: z.string(), seed: z.number().int().nullable() }).nullable(),
+  generator: z
+    .object({
+      model: z.string(),
+      promptVersion: z.string(),
+      seed: z.number().int().nullable(),
+      /** Generator LLM usage (0.2.1+): calls and tokens (input = uncached, cached read, output) against the budget. */
+      usage: z.object({ calls: z.number().int(), inputTokens: z.number().int(), outputTokens: z.number().int(), cacheReadTokens: z.number().int(), totalTokens: z.number().int(), budgetTokens: z.number().int() }).optional(),
+      /** Why generated tasks were rejected or categories came out short (0.2.1+). */
+      diagnostics: z.array(z.object({ category: EvalCategory, key: z.string().nullable(), message: z.string() })).optional(),
+    })
+    .nullable(),
   createdAt: IsoDateTime,
   frozenAt: IsoDateTime.nullable(),
 });
@@ -53,6 +63,8 @@ export const SuiteGenerate = z.object({
   model: z.string().min(1).optional(),
   seed: z.number().int().optional(),
   instructions: z.string().max(2000).optional(),
+  /** Token budget for the whole generation (default 400,000). */
+  maxGeneratorTokens: z.number().int().min(4000).max(10_000_000).optional(),
 });
 export type SuiteGenerate = z.infer<typeof SuiteGenerate>;
 
@@ -82,7 +94,12 @@ export type SuiteFile = z.infer<typeof SuiteFile>;
 
 /* ------------------------------------------------------------------ runs */
 
-export const TokenUsage = z.object({ inputTokens: z.number().int(), outputTokens: z.number().int(), cacheReadTokens: z.number().int().optional() });
+/**
+ * Tokens: `inputTokens` = input not read from a provider cache (Anthropic cache writes included),
+ * `cacheReadTokens` = input read from the cache, `cacheWriteTokens` = Anthropic cache writes (part of
+ * inputTokens). Total tokens of an attempt = inputTokens + cacheReadTokens + outputTokens.
+ */
+export const TokenUsage = z.object({ inputTokens: z.number().int(), outputTokens: z.number().int(), cacheReadTokens: z.number().int().optional(), cacheWriteTokens: z.number().int().optional() });
 export type TokenUsage = z.infer<typeof TokenUsage>;
 
 export const EvalRunRow = z.object({
@@ -118,7 +135,12 @@ export const MatrixCell = z.object({
   mode: CallMode,
   successRate: z.number().min(0).max(1),
   score: z.number().int().min(0).max(100),
+  /** Mean tokens per attempt: uncached input + cached input + output. */
   avgTokens: z.number(),
+  /** Mean cached input tokens per attempt (part of avgTokens). */
+  avgCachedTokens: z.number().optional(),
+  /** Mean tokens per multi-step attempt (null without multi-step tasks). */
+  avgTokensMulti: z.number().nullable().optional(),
   avgCalls: z.number(),
   avgLatencyMs: z.number(),
   flakyTasks: z.number().int(),

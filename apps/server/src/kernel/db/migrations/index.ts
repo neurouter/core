@@ -6,12 +6,13 @@ import { m0005_evals } from './main/0005_evals.js';
 import { m0008_tenant_scope } from './main/0008_tenant_scope.js';
 import { m0009_mock_state } from './main/0009_mock_state.js';
 import { m0010_eval_origin } from './main/0010_eval_origin.js';
+import { m0011_eval_cache_tokens } from './main/0011_eval_cache_tokens.js';
 import { m0006_audit } from './audit/0006_audit.js';
 import { m0007_metrics } from './audit/0007_metrics.js';
 import type { DialectMigration } from './types.js';
 
 /** Static migration sets (bundler-safe, explicit order). Numbering is global across both sets (Hub convention). */
-export const MAIN_MIGRATIONS: readonly DialectMigration[] = [m0001_core, m0002_servers, m0003_auth, m0004_ops, m0005_evals, m0008_tenant_scope, m0009_mock_state, m0010_eval_origin];
+export const MAIN_MIGRATIONS: readonly DialectMigration[] = [m0001_core, m0002_servers, m0003_auth, m0004_ops, m0005_evals, m0008_tenant_scope, m0009_mock_state, m0010_eval_origin, m0011_eval_cache_tokens];
 
 export const AUDIT_MIGRATIONS: readonly DialectMigration[] = [m0006_audit, m0007_metrics];
 
