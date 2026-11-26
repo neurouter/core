@@ -65,8 +65,11 @@ function checkOne(a: Assertion, rec: AttemptRecord, opts: CheckOptions): Promise
       const w = rec.calls.filter(effectiveWrite);
       return r(w.length === 0, w.length ? `writes: ${w.map((c) => c.tool).join(', ')}` : 'no writes');
     }
-    case 'max_calls':
-      return r(rec.toolCallsByAgent <= a.n, `${rec.toolCallsByAgent} calls (max ${a.n})`);
+    case 'max_calls': {
+      const n = workCalls(rec);
+      const searches = rec.toolCallsByAgent - n;
+      return r(n <= a.n, `${n} calls (max ${a.n})${searches ? `; ${searches} search_tools not counted` : ''}`);
+    }
     case 'state':
       return (async () => {
         if (!opts.stateReader) return r(false, 'state assertions need a state reader');
@@ -105,6 +108,17 @@ function checkOne(a: Assertion, rec: AttemptRecord, opts: CheckOptions): Promise
   }
 }
 
+/**
+ * Calls that count against `max_calls`: the agent's non-ops calls minus discovery (`search_tools`).
+ * The task's budget is written against the reference calls, but code mode (and tool mode with
+ * discovery=search) exposes only search_tools + run_script / call_tool and the server instructions
+ * tell the agent to get signatures with search_tools first, so counting discovery would fail every
+ * code-mode attempt that follows them (search_tools + one run_script = 2 > max 1).
+ */
+export function workCalls(rec: Pick<AttemptRecord, 'toolCallsByAgent' | 'agentCalls'>): number {
+  return Math.max(0, rec.toolCallsByAgent - rec.agentCalls.filter((c) => c.name === 'search_tools').length);
+}
+
 /** begin_task before the first API call and end_task after the last one. */
 export function framingOk(rec: AttemptRecord): boolean {
   const seq = rec.agentCalls.map((c) => c.name);
@@ -130,7 +144,8 @@ export async function checkAttempt(task: EvalTask, rec: AttemptRecord, opts: Che
 
 /**
  * Failure cause (§15.5, first match): policy_blocked → bad_arguments → wrong_tool → hallucinated →
- * missing_capability → no_framing (only framing failed; does not fail the run) → over_budget →
+ * missing_capability → no_framing (only framing failed; does not fail the run) → over_budget (incl.
+ * a finished attempt whose only misses are max_calls) →
  * gave_up → error. Refusals and transport errors are `error` first.
  */
 export function classifyFailure(task: EvalTask, rec: AttemptRecord, check: Pick<CheckResult, 'passed' | 'results' | 'framingPassed'>): FailureCause | null {
@@ -146,6 +161,8 @@ export function classifyFailure(task: EvalTask, rec: AttemptRecord, check: Pick<
   if (task.category !== 'impossible' && rec.calls.some((c) => c.tool === UNMET_NEED_TOOL)) return 'missing_capability';
   const nonFraming = check.results.filter((x) => x.assertion.type !== 'framing');
   if (nonFraming.every((x) => x.passed) && check.framingPassed === false) return 'no_framing';
+  // the agent finished, and the only misses are call budgets: inefficient, not given up
+  if (rec.endReason === 'end_turn' && nonFraming.some((x) => !x.passed) && nonFraming.every((x) => x.passed || x.assertion.type === 'max_calls')) return 'over_budget';
   if (rec.endReason === 'over_budget' || rec.endReason === 'max_turns' || rec.endReason === 'max_tool_calls' || rec.endReason === 'timeout' || rec.endReason === 'max_tokens') return 'over_budget';
   if (rec.endReason === 'end_turn') return 'gave_up';
   return 'error';

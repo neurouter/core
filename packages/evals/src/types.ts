@@ -63,7 +63,7 @@ export type TranscriptItem =
 export interface AttemptRun {
   finalAnswer: string;
   agentCalls: AgentCall[];
-  /** MCP tool calls counted for efficiency/max_calls: run_script counts 1, ops (`neurouter_*`) tools excluded. */
+  /** MCP tool calls counted for efficiency: run_script counts 1, ops (`neurouter_*`) tools excluded. `max_calls` also excludes search_tools (see `workCalls`). */
   toolCallsByAgent: number;
   scripts: number;
   turns: number;

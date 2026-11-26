@@ -27,6 +27,20 @@ describe('checkAttempt', () => {
     expect((await checkAttempt(t, rec2)).results.map((x) => x.passed)).toEqual([false, false, false]);
   });
 
+  it('max_calls does not count search_tools discovery (code mode: search_tools + one run_script passes max 1)', async () => {
+    // regression: real code-mode runs (claude-haiku-5-5, gemini-3.5-flash-lite, gpt-6-luna) followed the
+    // server instructions (get signatures with search_tools, then run_script) and all failed "2 calls (max 1)"
+    const t = task({ assertions: [{ type: 'called', tool: 'get_order_by_id', args: { order_id: 1 } }, { type: 'max_calls', n: 1 }] });
+    const agent = (names: string[]) => names.map((name) => ({ name, arguments: {}, isError: false, latencyMs: 1 }));
+    const calls = [call('get_order_by_id', { order_id: 1 }, { via: 'script', scriptRunId: 's1' })];
+    const ok = await checkAttempt(t, record({ toolCallsByAgent: 2, agentCalls: agent(['neurouter_begin_task', 'search_tools', 'run_script', 'neurouter_end_task']), calls }));
+    expect(ok.passed).toBe(true);
+    expect(ok.results[1]!.detail).toBe('1 calls (max 1); 1 search_tools not counted');
+    // two scripts are still two calls
+    const two = await checkAttempt(t, record({ toolCallsByAgent: 3, agentCalls: agent(['search_tools', 'run_script', 'run_script']), calls }));
+    expect(two).toMatchObject({ passed: false, failureCause: 'over_budget' });
+  });
+
   it('state via the injected reader', async () => {
     const t = task({ assertions: [{ type: 'state', resource: 'pets', where: { name: 'Rex' }, expect: 'exists' }, { type: 'state', resource: 'pets', where: { name: 'Zed' }, expect: { count: 0 } }] });
     const r = await checkAttempt(t, record(), { stateReader: (_res, _s, where) => (where.name === 'Rex' ? [{ id: 1 }] : []) });
@@ -79,6 +93,11 @@ describe('classifyFailure (first match)', () => {
   it('missing_capability', async () => expect(await cause(record({ calls: [call('neurouter_report_unmet_need')] }))).toBe('missing_capability'));
   it('over_budget', async () => expect(await cause(record({ endReason: 'max_turns' }))).toBe('over_budget'));
   it('gave_up', async () => expect(await cause(record({ endReason: 'end_turn' }))).toBe('gave_up'));
+  it('over_budget, not gave_up, when a finished attempt only misses max_calls', async () => {
+    const tb = task({ assertions: [{ type: 'called', tool: 'get_pet_by_id' }, { type: 'max_calls', n: 1 }] });
+    expect(await cause(record({ endReason: 'end_turn', toolCallsByAgent: 2, calls: [call('get_pet_by_id', { petId: 1 })] }), tb)).toBe('over_budget');
+  });
+
   it('error for refusals', async () => {
     const r = await checkAttempt(t, record({ endReason: 'refusal', calls: [call('get_pet_by_id', { petId: 1 })] }));
     expect(r).toMatchObject({ passed: false, failureCause: 'error' });
