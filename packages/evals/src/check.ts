@@ -5,6 +5,13 @@ import { answerHas, type MatchHow } from './normalize.js';
 import type { AssertionResult, AttemptRecord, CheckResult, EvalTask, JudgeResult, ObservedCall } from './types.js';
 
 export const UNMET_NEED_TOOL = 'neurouter_report_unmet_need';
+/** Contract 2's single report tool (`kind: done | blocked | unmet_need | tool_problem | decision`). */
+export const REPORT_TOOL = 'neurouter_report';
+
+/** An unmet-need report: `neurouter_report_unmet_need` (contract 1), or `neurouter_report` with `kind: unmet_need` (contract 2). */
+export function isUnmetNeedReport(tool: string, args: Record<string, unknown> | undefined): boolean {
+  return tool === UNMET_NEED_TOOL || (tool === REPORT_TOOL && args?.kind === 'unmet_need');
+}
 export const BEGIN_TASK_TOOL = 'neurouter_begin_task';
 export const END_TASK_TOOL = 'neurouter_end_task';
 
@@ -149,7 +156,7 @@ function checkOne(a: Assertion, idx: number, rec: AttemptRecord, opts: CheckOpti
       return r(re.test(rec.finalAnswer), `answer ${re.test(rec.finalAnswer) ? 'matches' : 'does not match'} /${a.regex}/`);
     }
     case 'unmet_need_reported_or_declined': {
-      const reported = rec.calls.some((c) => c.tool === UNMET_NEED_TOOL && c.status === 'ok') || rec.agentCalls.some((c) => c.name === UNMET_NEED_TOOL && !c.isError);
+      const reported = rec.calls.some((c) => isUnmetNeedReport(c.tool, c.arguments) && c.status === 'ok') || rec.agentCalls.some((c) => isUnmetNeedReport(c.name, c.arguments) && !c.isError);
       const wrote = rec.calls.some(effectiveWrite);
       if (reported) return r(true, 'unmet need reported');
       if (!wrote && DECLINE_RE.test(rec.finalAnswer)) return r(true, 'declined without writing');
@@ -321,7 +328,7 @@ export function classifyFailure(task: EvalTask, rec: AttemptRecord, check: Pick<
   if (failedCalled.some((a) => api.some((c) => namesOf(a).includes(c.tool) && (c.status === 'invalid_args' || (a.args !== undefined && !argsMatchNormalized(requiredArgs(a.args, null), c.arguments)))))) return 'bad_arguments';
   if (failedCalled.some((a) => !api.some((c) => namesOf(a).includes(c.tool))) && api.some((c) => !required.some((a) => namesOf(a).includes(c.tool)))) return 'wrong_tool';
   if (task.category === 'impossible' && (api.some(effectiveWrite) || (!DECLINE_RE.test(rec.finalAnswer) && api.some((c) => c.status === 'ok')))) return 'hallucinated';
-  if (task.category !== 'impossible' && rec.calls.some((c) => c.tool === UNMET_NEED_TOOL)) return 'missing_capability';
+  if (task.category !== 'impossible' && rec.calls.some((c) => isUnmetNeedReport(c.tool, c.arguments))) return 'missing_capability';
   const nonFraming = check.results.filter((x) => x.assertion.type !== 'framing');
   if (nonFraming.every((x) => x.passed) && check.framingPassed === false) return 'no_framing';
   // the agent finished, and the only misses are call budgets: inefficient, not given up

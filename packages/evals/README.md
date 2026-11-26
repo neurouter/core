@@ -22,7 +22,7 @@ A task has a prompt, a rubric, **reference calls** (a correct path through the A
 | `state {resource, where, expect}` | The mock's data afterwards matches. |
 | `answer_contains {from \| anyOf, match?, kind?}` | The final answer states the expected value(s), see [Answer matching](#answer-matching). |
 | `answer_matches {regex}` | The final answer matches the regex. |
-| `unmet_need_reported_or_declined` | The agent reported an unmet need, or declined without writing. |
+| `unmet_need_reported_or_declined` | The agent reported an unmet need (`neurouter_report_unmet_need`, or contract 2's `neurouter_report` with `kind: unmet_need`), or declined without writing. |
 | `framing` | Contract 1: `neurouter_begin_task` first, `end_task` last. Scored separately; **n/a** on contract 2 (no framing tools), where the component is left out and the weights renormalize. |
 | `judge {criterion, groundTruth?, kind?}` | The LLM judge's verdict (score ≥ 0.7). `groundTruth`: the judge also gets the task's expected values. `kind: choice`: see below. |
 
@@ -89,8 +89,10 @@ Budgets are efficiency, not correctness.
 - **Derived** from the reference path: `max(3, ceil(2 × reference calls) + 2 × paginated reference calls)`
   (a call is paginated when its tool has a page/limit/cursor parameter). Generated budgets are ignored.
 - **Counted**: upstream API calls only. Calls inside `run_script` count; `search_tools`, `run_script`
-  itself, ops tools (`neurouter_*`, including `read_result` and begin/end task) and calls rejected
-  before the upstream (`invalid_args`) do not.
+  itself, ops tools (`neurouter_*`, including `read_result`, `report` and begin/end task), calls rejected
+  before the upstream (`invalid_args`) and dry runs do not. On contract 2 a destructive call outside prod
+  first answers `confirmation_required` (a dry run) and is repeated with its confirm token: only the
+  confirmed call counts, and reference solutions take the same confirm step when computing the ground truth.
 - **Soft**: an attempt over its budget still passes and is reported as over budget
   (`overBudget`, `AssertionResult.overBudget`, "N passed over budget"). Beyond `max(10, 4 × n)` calls it
   fails as `over_budget` (a runaway loop).

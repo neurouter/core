@@ -16,6 +16,8 @@ export interface RefOutcome {
   /** The result value (envelope `data` on contract 2, the body on contract 1). */
   data: unknown;
   error?: string | null;
+  /** Contract 2 (D5): a destructive call answered `confirmation_required`; this call (with the confirm token) executes it. */
+  confirm?: { tool: string; args: Record<string, unknown> } | null;
 }
 
 export interface GroundTruth {
@@ -33,7 +35,7 @@ export interface RefSession {
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** A contract-2 result envelope (`{ok, data, page, truncated, error, state}`). */
-export function isEnvelope(v: unknown): v is { ok: boolean; data?: unknown; error?: { message?: string; code?: string } | null } {
+export function isEnvelope(v: unknown): v is { ok: boolean; data?: unknown; error?: { message?: string; code?: string; next?: Array<{ tool?: unknown; args?: unknown }> } | null } {
   return isObj(v) && typeof v.ok === 'boolean' && ('data' in v || 'error' in v) && ('state' in v || 'page' in v || 'truncated' in v || 'error' in v);
 }
 
@@ -68,7 +70,9 @@ export function outcomeFromResult(tool: string, res: McpCallResult): RefOutcome 
   if (typeof v === 'string' && isObj(res.structuredContent)) v = res.structuredContent;
   if (isEnvelope(v)) {
     const ok = v.ok && !res.isError;
-    return { tool, ok, data: v.data ?? null, error: ok ? null : (v.error?.message ?? v.error?.code ?? 'error') };
+    const next = v.error?.code === 'confirmation_required' && Array.isArray(v.error.next) ? v.error.next[0] : undefined;
+    const confirm = next && typeof next.tool === 'string' && isObj(next.args) ? { tool: next.tool, args: next.args } : null;
+    return { tool, ok, data: v.data ?? null, error: ok ? null : (v.error?.message ?? v.error?.code ?? 'error'), ...(confirm ? { confirm } : {}) };
   }
   return { tool, ok: !res.isError, data: unwrapV1(v), error: res.isError ? text.slice(0, 300) : null };
 }
@@ -153,7 +157,11 @@ export async function computeGroundTruth(refs: ReferenceCall[], open: () => Prom
   try {
     for (const r of refs) {
       const args = resolveArgs(r.arguments, gt);
-      gt.refs.push(await s.call(r.tool, args).catch((err: unknown) => ({ tool: r.tool, ok: false, data: null, error: (err as Error).message })));
+      const fail = (tool: string) => (err: unknown): RefOutcome => ({ tool, ok: false, data: null, error: (err as Error).message });
+      let out = await s.call(r.tool, args).catch(fail(r.tool));
+      // a destructive reference call outside prod (contract 2): repeat it with its confirm token
+      if (!out.ok && out.confirm) out = { ...(await s.call(out.confirm.tool, out.confirm.args).catch(fail(r.tool))), tool: r.tool };
+      gt.refs.push(out);
     }
     for (const [i, r] of refs.entries()) {
       if (!r.alternatives?.length) continue;

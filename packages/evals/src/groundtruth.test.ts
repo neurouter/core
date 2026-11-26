@@ -40,3 +40,21 @@ describe('ground truth', () => {
     expect(resolvePath(view, 'ref[1].data.by')).toEqual(['get_alt']);
   });
 });
+
+describe('ground truth on contract 2 destructive calls', () => {
+  it('repeats a confirmation_required reference call with its confirm token', async () => {
+    const calls: Array<[string, unknown]> = [];
+    const session: RefSession = {
+      call: async (tool, args) => {
+        calls.push([tool, args]);
+        const env = args.confirm
+          ? { ok: true, data: { deleted: true }, page: null, truncated: null, error: null, state: {} }
+          : { ok: false, data: { plan: {} }, page: null, truncated: null, error: { code: 'confirmation_required', message: 'destructive', next: [{ tool, args: { ...args, confirm: 'c_tok' } }] }, state: {} };
+        return outcomeFromResult(tool, { isError: !env.ok, content: [{ type: 'text', text: JSON.stringify(env) }] });
+      },
+    };
+    const gt = await computeGroundTruth([{ tool: 'delete_pet', arguments: { pet_id: 1 } }], async () => session);
+    expect(calls).toEqual([['delete_pet', { pet_id: 1 }], ['delete_pet', { pet_id: 1, confirm: 'c_tok' }]]);
+    expect(gt.refs[0]).toMatchObject({ tool: 'delete_pet', ok: true, data: { deleted: true } });
+  });
+});

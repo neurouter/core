@@ -2,8 +2,9 @@
  * Call budgets (efficiency, not correctness). A task's budget is derived from its reference path:
  * `max(MIN_CALL_BUDGET, ceil(2 × reference upstream calls) + 2 per paginated reference call)`.
  * Only upstream API calls count: inner `run_script` calls do, `search_tools`, `run_script` itself,
- * ops tools (`neurouter_*`, incl. read_result and begin/end task) and calls rejected before the
- * upstream (`invalid_args`) do not. An attempt over budget still passes (reported as over budget);
+ * ops tools (`neurouter_*`, incl. read_result, report and begin/end task), calls rejected before the
+ * upstream (`invalid_args`) and dry runs (incl. contract 2's `confirmation_required` round before a
+ * destructive call) do not. An attempt over budget still passes (reported as over budget);
  * one beyond `runawayCeiling(n)` fails as `over_budget`. `n: 0` and `hard` budgets are strict.
  */
 import type { ReferenceCall } from '@neurouter/shared';
@@ -49,5 +50,5 @@ const isMeta = (t: string) => t === 'search_tools' || t === 'call_tool' || t ===
 
 /** Upstream API calls of an attempt (see the module comment). */
 export function upstreamCalls(rec: Pick<AttemptRecord, 'calls'>): number {
-  return rec.calls.filter((c) => !isOps(c.tool) && !isMeta(c.tool) && c.status !== 'invalid_args').length;
+  return rec.calls.filter((c) => !isOps(c.tool) && !isMeta(c.tool) && c.status !== 'invalid_args' && c.decision !== 'dry_run').length;
 }

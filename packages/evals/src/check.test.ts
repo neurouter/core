@@ -196,3 +196,19 @@ describe('framing on contract 2', () => {
     expect(r).toMatchObject({ passed: true, framingPassed: null, failureCause: null });
   });
 });
+
+describe('contract 2 ops and confirmation', () => {
+  it('neurouter_report with kind unmet_need counts as reporting an unmet need', async () => {
+    const t = task({ category: 'impossible', assertions: [{ type: 'unmet_need_reported_or_declined' }] });
+    expect((await checkAttempt(t, record({ finalAnswer: 'Done.', calls: [call('neurouter_report', { kind: 'unmet_need', text: 'sms' })] }))).passed).toBe(true);
+    expect((await checkAttempt(t, record({ finalAnswer: 'Done.', calls: [call('neurouter_report', { kind: 'done' })] }))).passed).toBe(false);
+    const s = task({ assertions: [{ type: 'called', tool: 'get_pet_by_id' }] });
+    expect((await checkAttempt(s, record({ calls: [call('neurouter_report', { kind: 'unmet_need' })] }))).failureCause).toBe('missing_capability');
+  });
+
+  it('the confirmation round of a destructive call (dry run) is not charged to the budget', async () => {
+    const t = task({ assertions: [{ type: 'called', tool: 'delete_pet' }, { type: 'max_calls', n: 1, hard: true }] });
+    const r = await checkAttempt(t, record({ calls: [call('delete_pet', { pet_id: 1 }, { decision: 'dry_run', write: true }), call('delete_pet', { pet_id: 1, confirm: 'tok' }, { write: true })] }));
+    expect(r).toMatchObject({ passed: true, upstreamCalls: 1 });
+  });
+});
