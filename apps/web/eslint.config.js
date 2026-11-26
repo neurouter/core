@@ -29,7 +29,7 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       ...pluginQuery.configs['flat/recommended'][0]?.rules,
       'no-restricted-syntax': ['error', { selector: 'Literal[value=/localhost|127\\.0\\.0\\.1/]', message: 'No hardcoded hosts in apps/web: the app is same-origin.' }],
-      'no-restricted-imports': ['error', { patterns: [{ group: ['**/ai-gateway/**'], message: 'Code is copied from Hub, never imported.' }] }],
+      'no-restricted-imports': ['error', { patterns: [{ group: ['**/neurouter-hub/**'], message: 'Code is copied from Neurouter Hub, never imported.' }] }],
     },
   },
   {

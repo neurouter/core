@@ -27,7 +27,7 @@ blob-report/
 data/
 models/
 
-# internal plans/reports/scripts: a separate private checkout of neurouter/internal
+# local agent notes (never committed)
 .agent/
 
 # local scratch (legacy untracked files archived in tmp/legacy-untracked)

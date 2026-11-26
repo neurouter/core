@@ -2,7 +2,7 @@
 
 Turns an OpenAPI or GraphQL API into a governed MCP server with code mode (Python via Pydantic Monty), ops tools and evals. Apache-2.0. Not Neurouter Hub (a separate product and repo; code was copied from it, never imported).
 
-- Spec and plans live outside this repo (`neurouter/internal` checkout): backend spec, frontend spec, progress log `backend-progress.md`.
+- Design specs and plans are kept outside this repo; code comments cite them as "backend spec §n" / "frontend spec §n".
 - npm workspaces: `packages/shared` (zod REST contract the console imports; isomorphic, zod only), `packages/compiler` (pure spec → tool model), `packages/evals`, `apps/executor` (Monty pool behind a socket frame protocol), `apps/server` (Fastify: `kernel/`, `dataplane/`, `controlplane/`), `apps/web` (console, separate workstream), `packages/cli` (npm `neurouter`).
 - Plane boundary is enforced by ESLint: `dataplane/**` never imports `controlplane/**` and vice versa; both use `kernel/**`. Only `deps.ts`, `routes.ts`, `server.ts` wire both.
 - Local dev uses SQLite (no Docker). Postgres (pgvector) is supported; set `DATABASE_URL=postgres://…`.

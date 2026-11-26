@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# One-time GCP setup for the Neurouter Cloud Run demo (backend spec §20.6). Reviewed and run by a human.
-# Creates NEW resources only: never touch the `neurouter` or `ai-gateway` services, their secrets, or ai-gateway-sa.
+# One-time GCP setup for a Neurouter Cloud Run deployment. Reviewed and run by a human.
+# Creates new resources (Cloud SQL instance, service account + IAM bindings, secrets) in the given project.
+# Usage: GCP_PROJECT=<project> [GCP_REGION=europe-north1] ./setup.sh
 set -euo pipefail
-PROJECT=helppo-ai
-REGION=europe-north1
+PROJECT="${GCP_PROJECT:?set GCP_PROJECT}"
+REGION="${GCP_REGION:-europe-north1}"
 INSTANCE=neurouter-core-pg
 SA=neurouter-core-demo-sa
 
@@ -33,6 +34,9 @@ put_secret neurouter-core-active-key-id "$(echo "$KEYS" | sed -n 's/^NEUROUTER_A
 put_secret neurouter-core-hash-pepper "$(echo "$KEYS" | sed -n 's/^HASH_PEPPER=//p')"
 read -r -s -p "OIDC client secret (Google OAuth client 'Neurouter demo'): " OIDC_SECRET; echo
 put_secret neurouter-core-oidc-client-secret "$OIDC_SECRET"
-read -r -s -p "Anthropic API key (BYOK, for evals): " ANTHROPIC_KEY; echo
-put_secret neurouter-core-anthropic-api-key "$ANTHROPIC_KEY"
+# BYOK model provider keys for evals (each optional; the default model gpt-6-luna needs OpenAI)
+for p in openai anthropic gemini; do
+  read -r -s -p "$p API key (empty to skip): " K; echo
+  if [ -n "$K" ]; then put_secret "neurouter-core-$p-api-key" "$K"; fi
+done
 echo "done. Build: gcloud builds submit --project $PROJECT --region $REGION --tag gcr.io/$PROJECT/neurouter-core:\$TAG --machine-type e2-highcpu-8 --timeout 40m ."
