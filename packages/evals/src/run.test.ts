@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { attemptKey, callsFromAgent, runAttempt, runSuite } from './run.js';
+import { attemptKey, callsFromAgent, gradeAttempt, runAttempt, runSuite, runSuiteDetailed } from './run.js';
+import { EQUIV_MARKER, JUDGE_MARKER } from './prompts.js';
+import { record } from './test/fixtures.js';
+import type { LlmClient, LlmRequest } from './llm/types.js';
 import { ScriptedLlmClient, llmResponse } from './llm/fake.js';
 import { LlmError, LlmKeyError, LlmRateLimitError } from './llm/types.js';
 import { fakePetstore, task } from './test/fixtures.js';
@@ -135,5 +138,67 @@ describe('runSuite', () => {
 
   it('callsFromAgent unwraps call_tool', () => {
     expect(callsFromAgent([{ name: 'call_tool', arguments: { name: 'x', arguments: { a: 1 } }, isError: false, latencyMs: 0 }])[0]).toMatchObject({ tool: 'x', arguments: { a: 1 }, via: 'call_tool' });
+  });
+});
+
+describe('ground truth, judges, spend (0.2.2)', () => {
+  const answerTask = task({ key: 'g', category: 'single', referenceCalls: [{ tool: 'get_pet_by_id', arguments: { petId: 1 } }], assertions: [{ type: 'answer_contains', from: 'ref[0].data.name' }] });
+  const script = (answer: string) => [llmResponse([use('u1', 'get_pet_by_id', { petId: 1 })], { input: 100, output: 10 }), llmResponse([text(answer)], { input: 100, output: 10 })];
+
+  it('records framing availability and the tools/list size', async () => {
+    const r = await runAttempt({ llm: new ScriptedLlmClient(script('Rex')), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool' });
+    expect(r.framingAvailable).toBe(true);
+    expect(r.toolsListBytes).toBeGreaterThan(200);
+  });
+
+  it('checks answers against the ground truth computed once per task', async () => {
+    let computed = 0;
+    const llm = new ScriptedLlmClient([...script('The pet is Rex.'), ...script('The pet is Rex.')]);
+    const out = await runSuiteDetailed({
+      llm,
+      tasks: [answerTask],
+      models: ['m'],
+      modes: ['tool'],
+      repeats: 2,
+      concurrency: 1,
+      equivalenceJudge: false,
+      openSession: async () => ({ mcp: fakePetstore() }),
+      groundTruth: async () => (computed++, { refs: [{ tool: 'get_pet_by_id', ok: true, data: { id: 1, name: 'Rex' } }] }),
+    });
+    expect(computed).toBe(1);
+    expect(out.results.map((r) => r.passed)).toEqual([true, true]);
+    expect(out.results[0]).toMatchObject({ upstreamCalls: 1, overBudget: false });
+    expect(out.incomplete).toBeNull();
+    expect(out.tokensUsed).toBe(2 * 220);
+  });
+
+  it('--max-run-tokens stops starting attempts and marks the run incomplete', async () => {
+    const llm = new ScriptedLlmClient([...script('Rex'), ...script('Rex'), ...script('Rex')]);
+    const out = await runSuiteDetailed({ llm, tasks: [answerTask], models: ['m'], modes: ['tool'], repeats: 3, concurrency: 1, maxRunTokens: 300, openSession: async () => ({ mcp: fakePetstore() }) });
+    expect(out.results).toHaveLength(2);
+    expect(out.incomplete).toMatchObject({ attemptsRun: 2, attemptsPlanned: 3 });
+    expect(out.incomplete!.reason).toContain('--max-run-tokens 300');
+  });
+
+  it('gradeAttempt: the equivalence judge can pass a failed answer check (matched_by: judge); judge usage is counted', async () => {
+    const reqs: LlmRequest[] = [];
+    const judge: LlmClient = {
+      provider: 'fake',
+      create: async (req) => {
+        reqs.push(req);
+        const body = String(req.messages[0]!.content);
+        if (body.includes(EQUIV_MARKER)) return llmResponse([text('{"items":[{"index":0,"equivalent":true,"reason":"Rex the dog"}]}')], { input: 300, output: 20 });
+        expect(body).toContain(JUDGE_MARKER);
+        return llmResponse([text('{"score":0.9,"verdict":"pass","reasons":["ok"]}')], { input: 200, output: 10 });
+      },
+    } as LlmClient;
+    const t = task({ ...answerTask, assertions: [{ type: 'answer_contains', from: 'ref[0].data.name' }, { type: 'judge', criterion: 'names the pet', groundTruth: true }] });
+    const gt = { refs: [{ tool: 'get_pet_by_id', ok: true, data: { name: 'R3x' } }] };
+    const { check, judgeUsage } = await gradeAttempt(t, record({ finalAnswer: 'It is the dog called Rex' }), { llm: judge, judgeModel: 'j', groundTruth: gt });
+    expect(check.passed).toBe(true);
+    expect(check.results[0]!.matchedBy).toBe('judge');
+    expect(judgeUsage).toEqual({ calls: 2, inputTokens: 500, outputTokens: 30, cacheReadTokens: 0 });
+    // the rubric judge saw the ground truth
+    expect(String(reqs[0]!.messages[0]!.content)).toContain('groundTruth');
   });
 });

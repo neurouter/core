@@ -85,9 +85,14 @@ export type EvalTaskPatch = z.infer<typeof EvalTaskPatch>;
 
 /** Suite export/import format for git and CI (§15.2). */
 export const SuiteFile = z.object({
-  version: z.literal(1),
+  /** 2 (0.2.2): outcome-based assertions, mock data version, calibration; 1: 0.2.1 files (mock data version 1). */
+  version: z.union([z.literal(1), z.literal(2)]),
   server: z.string(),
-  generatedFrom: z.object({ buildHash: z.string().nullable(), model: z.string().nullable(), promptVersion: z.string().nullable() }).optional(),
+  generatedFrom: z.object({ buildHash: z.string().nullable(), model: z.string().nullable(), promptVersion: z.string().nullable() }).partial().nullable().optional(),
+  mockDataVersion: z.number().int().min(1).max(2).optional(),
+  calibration: z.unknown().optional(),
+  coverage: z.record(z.string(), z.number()).optional(),
+  migration: z.unknown().optional(),
   tasks: z.array(EvalTaskCreate.extend({ enabled: z.boolean().default(true) })),
 });
 export type SuiteFile = z.infer<typeof SuiteFile>;
@@ -212,7 +217,7 @@ export const TranscriptItem = z.discriminatedUnion('type', [
 ]);
 export type TranscriptItem = z.infer<typeof TranscriptItem>;
 
-export const AssertionResult = z.object({ assertion: Assertion, passed: z.boolean(), detail: z.string() });
+export const AssertionResult = z.object({ assertion: Assertion, passed: z.boolean(), detail: z.string(), matchedBy: z.enum(['literal', 'normalized', 'judge']).optional(), overBudget: z.boolean().optional() });
 export type AssertionResult = z.infer<typeof AssertionResult>;
 
 export const JudgeResult = z.object({ score: z.number().min(0).max(1), verdict: z.enum(['pass', 'fail']), reasons: z.array(z.string()).max(3) });

@@ -46,9 +46,12 @@ describe('stub provider', () => {
     const b = await run();
     expect(a.suite.tasks.map((t) => t.key)).toEqual(b.suite.tasks.map((t) => t.key));
     expect(a.score.headline).toBe(b.score.headline);
-    expect(a.suite.tasks.map((t) => t.category)).toEqual(['single', 'single', 'multi', 'multi', 'ambiguous', 'impossible']);
+    // the second multi task differs from the first only in wording: rejected as a near-duplicate (twice)
+    expect(a.suite.tasks.map((t) => t.category)).toEqual(['single', 'single', 'multi', 'ambiguous', 'impossible']);
+    expect(a.suite.diagnostics.some((d) => d.category === 'multi' && d.message.includes('duplicate'))).toBe(true);
+    expect(a.suite.generator.coverage).toBeTruthy();
     const byMode = (m: string) => a.results.filter((r) => r.mode === m);
-    expect(byMode('tool').filter((r) => r.passed).length).toBeGreaterThanOrEqual(5);
+    expect(byMode('tool').filter((r) => r.passed).length).toBeGreaterThanOrEqual(4);
     expect(byMode('code').filter((r) => r.category === 'single' && r.passed).length).toBe(2);
     expect(a.results.every((r) => r.servedByModel === STUB_MODEL)).toBe(true);
     expect(a.score.headline).toBeGreaterThan(50);

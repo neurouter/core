@@ -112,3 +112,34 @@ describe('tokens (consistent across providers)', () => {
     expect(md).toContain('| 10200 | 9000 | 10200 |');
   });
 });
+
+describe('0.2.2 scoring rules', () => {
+  it('excludes provider refusals (counted), counts over-budget passes as successes, charges upstream calls', () => {
+    const results = [
+      result({ taskKey: 's1', attempt: 1, passed: true, toolCalls: 9, upstreamCalls: 5, overBudget: true, toolsListBytes: 2000 }),
+      result({ taskKey: 's1', attempt: 2, passed: false, failureCause: 'provider_refusal' }),
+    ];
+    const c = scoreCell({ tasks, results, models: ['m'], modes: ['tool'], lintScore: 80 }, 'm', 'tool');
+    expect(c).toMatchObject({ attempts: 1, excludedRefusals: 1, overBudget: 1, successRate: 1, avgCalls: 5, avgToolsListBytes: 2000 });
+    const eff = c.components.find((x) => x.key === 'efficiency')!;
+    expect(eff.score).toBeCloseTo(2 / 6);
+    expect(eff.detail).toContain('1 passed over budget');
+  });
+
+  it('framing is n/a (no component) when no attempt could frame (contract 2)', () => {
+    const c = scoreCell({ tasks, results: [result({ taskKey: 's1', framingPassed: null })], models: ['m'], modes: ['tool'], lintScore: 80 }, 'm', 'tool');
+    expect(c.components.some((x) => x.key === 'framing')).toBe(false);
+  });
+
+  it('recommendation is cost-aware: ≥ 2× tokens per multi-step task with success within 10 pts → the cheaper mode', () => {
+    // Stripe 0.2.1: tool 77 vs code 66, but tool mode resent a 95 KB tools/list each turn (76k vs 16k tokens)
+    const tool = { ...cell('tool', 77, 0.4, 76_066), avgToolsListBytes: 94_711 };
+    const code = cell('code', 66, 0.333, 15_810);
+    const r = recommend([tool, code]);
+    expect(r.mode).toBe('code');
+    expect(r.text).toContain('costs 4.8× the tokens');
+    expect(r.text).toContain('92 KB');
+    // a clear success gap keeps the expensive mode
+    expect(recommend([cell('tool', 77, 0.72, 76_066), cell('code', 66, 0.33, 15_810)]).mode).toBe('tool');
+  });
+});

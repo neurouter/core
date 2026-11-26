@@ -32,12 +32,41 @@ export function hashSeed(...parts: Array<string | number>): number {
   return h;
 }
 
+/**
+ * Mock data versions. 1: the 0.2.1 heuristics (lorem names and titles, 0..100 amounts, random
+ * timestamps), kept byte-for-byte so suites frozen on 0.2.1 (whose prompts name generated values)
+ * still find them. 2 (default, 0.2.2): realistic values by field semantics (person and repository
+ * names, labels, product names, ISO currencies, minor-unit amounts, English titles and descriptions)
+ * and timestamps that decrease with the item index, so insertion order is newest first.
+ */
+export type MockDataVersion = 1 | 2;
+export const MOCK_DATA_VERSION: MockDataVersion = 2;
+
+/**
+ * The data version of a mock namespace: `dv1` as a `:`-separated segment of its name
+ * (`eval:<run>:dv1:<attempt>`, `gen:<key>:dv1:ref-…`) selects version 1; anything else is the current version.
+ */
+export function mockDataVersionOf(namespace: string): MockDataVersion {
+  return /(^|[:/])dv1(:|$)/.test(namespace) ? 1 : MOCK_DATA_VERSION;
+}
+
+/** A namespace name carrying a data version (`dv1` segment after the prefix's first two segments). */
+export function withMockDataVersion(name: string, dv: MockDataVersion): string {
+  if (dv === MOCK_DATA_VERSION || mockDataVersionOf(name) === dv) return name;
+  const parts = name.split(':');
+  return parts.length >= 3 ? [...parts.slice(0, 2), `dv${dv}`, ...parts.slice(2)].join(':') : `${name}:dv${dv}`;
+}
+
 export interface GenCtx {
   faker: Faker;
   defs: Obj;
   depth: number;
   /** sequential index of the item being generated (1-based) */
   index: number;
+  /** data version (default MOCK_DATA_VERSION) */
+  dv?: MockDataVersion;
+  /** the resource the item belongs to (`repo`, `customer`, …): drives name heuristics in version 2 */
+  resource?: string;
 }
 
 /** Below this depth objects are generated compactly (required fields only, empty optional lists). */
@@ -179,9 +208,62 @@ function formatValue(format: string, f: Faker): string | null {
   return null;
 }
 
+const sentence = (p: string) => (/[.!?]$/.test(p) ? p : `${p}.`);
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const PERSON_RES = /^(user|customer|owner|member|person|contact|employee|author|collaborator|cardholder|individual|assignee|reviewer|maintainer|admin|subscriber|recipient|beneficiary|person_)/;
+const SLUG_RES = /^(repo|repository|project|package|app|codespace|environment|branch|workflow|bucket|service|topic|deployment|runner|artifact|cache|pipeline|module|site|domain|plugin|extension)/;
+const ORG_RES = /^(org|organization|team|company|business|enterprise|account|merchant|vendor|supplier)/;
+const PRODUCT_RES = /^(product|plan|price|coupon|item|sku|promotion|discount|subscription|offer|tier)/;
+const LABELS = ['bug', 'enhancement', 'documentation', 'question', 'good first issue', 'help wanted', 'wontfix', 'duplicate', 'security', 'performance', 'dependencies', 'needs triage'];
+const CURRENCIES = ['usd', 'eur', 'gbp', 'usd', 'cad', 'aud', 'jpy', 'chf', 'sek', 'usd'];
+
+/** Version-2 string heuristics by field semantics; null = no opinion (fall through to version 1). */
+function realisticString(name: string, schema: JsonSchema, ctx: GenCtx): string | null {
+  const f = ctx.faker;
+  // camelCase as snake_case (`postalCode` → `postal_code`)
+  const n = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+  const res = (ctx.resource ?? '').toLowerCase();
+  if (n === 'currency' || n.endsWith('_currency') || schema.format === 'currency') {
+    const c = f.helpers.arrayElement(CURRENCIES);
+    return typeof schema.pattern === 'string' && /A-Z/.test(schema.pattern) ? c.toUpperCase() : c;
+  }
+  if (n === 'login' || n === 'username' || n === 'handle' || n.endsWith('_login') || n.endsWith('_username'))
+    return f.internet.username({ firstName: f.person.firstName(), lastName: f.person.lastName() }).toLowerCase().replace(/[^a-z0-9-]/g, '');
+  if (n === 'full_name' && SLUG_RES.test(res)) return `${f.internet.domainWord()}/${f.word.adjective()}-${f.word.noun()}`.toLowerCase();
+  if (n === 'name' || n === 'display_name' || n === 'full_name' || n === 'nickname' || (n === 'title' && PERSON_RES.test(res))) {
+    if (n === 'full_name' || PERSON_RES.test(res)) return f.person.fullName();
+    if (res === 'label' || res.endsWith('_label')) return f.helpers.arrayElement(LABELS);
+    if (SLUG_RES.test(res)) return `${f.word.adjective()}-${f.word.noun()}`.toLowerCase();
+    if (PRODUCT_RES.test(res)) return f.commerce.productName();
+    if (ORG_RES.test(res)) return f.company.name();
+    if (/secret|variable|key$|token|credential/.test(res)) return `${f.word.noun()}_${f.word.noun()}`.toUpperCase().replace(/[^A-Z_]/g, '');
+    if (/template|gitignore|license|language/.test(res)) return cap(f.helpers.arrayElement(['node', 'python', 'go', 'java', 'ruby', 'rust', 'swift', 'kotlin', 'haskell', 'elixir']));
+    return `${cap(f.word.adjective())} ${f.word.noun()}`;
+  }
+  if (n === 'title' || n === 'subject' || n === 'summary' || n === 'headline') return `${cap(f.hacker.verb())} the ${f.hacker.adjective()} ${f.hacker.noun()}`;
+  if (n === 'description' || n === 'body' || n === 'text' || n === 'message' || n === 'content' || n === 'comment' || n === 'notes' || n === 'bio')
+    return `${sentence(f.hacker.phrase())}${f.datatype.boolean() ? ` ${sentence(f.hacker.phrase())}` : ''}`;
+  if (n.endsWith('url') || n.endsWith('_uri') || n === 'href' || n === 'website' || n === 'homepage') return `https://www.${f.internet.domainWord()}.com/${f.word.noun()}`;
+  if (n === 'country' || n.endsWith('_country')) return f.location.countryCode();
+  if (n === 'city') return f.location.city();
+  if (n === 'postal_code' || n === 'zip' || n === 'zip_code' || n === 'postcode') return f.location.zipCode();
+  if (n === 'line1' || n === 'address_line1' || n === 'street' || n === 'address') return f.location.streetAddress();
+  if (n === 'line2' || n === 'address_line2') return `Suite ${f.number.int({ min: 100, max: 999 })}`;
+  if (n === 'state' && /address/.test(res)) return f.location.state({ abbreviated: true });
+  if (n === 'sku') return `SKU-${f.string.alphanumeric({ length: 6, casing: 'upper' })}`;
+  if (n === 'note' || n === 'notes' || n === 'memo' || n === 'statement_descriptor') return sentence(f.hacker.phrase());
+  if (n === 'company') return f.company.name();
+  return null;
+}
+
 function heuristicString(name: string, schema: JsonSchema, ctx: GenCtx): string {
   const f = ctx.faker;
   const n = name.toLowerCase();
+  if ((ctx.dv ?? MOCK_DATA_VERSION) !== 1) {
+    if (/(^|_)(created|updated|closed|merged|pushed|due|started|ended)_?(at|on|date)$/.test(n) || /At$/.test(name)) return recentByIndex(ctx).toISOString();
+    const v = realisticString(name, schema, ctx);
+    if (v !== null) return v;
+  }
   if (/(^|_)(created|updated|closed|merged|pushed|due|started|ended)_?(at|on|date)$/.test(n) || /At$/.test(name)) return f.date.recent({ days: 120, refDate: MOCK_REF_DATE }).toISOString();
   if (n === 'email' || n.endsWith('_email')) return f.internet.email().toLowerCase();
   if (n === 'login' || n === 'username' || n.endsWith('_login')) return f.internet.username().toLowerCase().replace(/[^a-z0-9-]/g, '');
@@ -194,7 +276,8 @@ function heuristicString(name: string, schema: JsonSchema, ctx: GenCtx): string 
   if (n === 'color') return f.color.rgb({ prefix: '' });
   if (n === 'sha') return f.git.commitSha();
   if (typeof schema.pattern === 'string' || schema.minLength !== undefined || schema.maxLength !== undefined) return lengthString(schema, ctx);
-  return f.lorem.word();
+  // version 2: an English word, not lorem ipsum
+  return (ctx.dv ?? MOCK_DATA_VERSION) !== 1 ? f.word.noun() : f.lorem.word();
 }
 
 /** A string of the schema's length (long strings capped at 24 characters, never below minLength). */
@@ -210,7 +293,9 @@ function lengthString(schema: JsonSchema, ctx: GenCtx): string {
  */
 function stringFor(name: string, schema: JsonSchema, ctx: GenCtx): string {
   const f = ctx.faker;
+  const v2 = (ctx.dv ?? MOCK_DATA_VERSION) !== 1;
   const candidates: Array<() => string | null> = [
+    () => (v2 && (schema.format === 'date-time' || schema.format === 'date') ? (schema.format === 'date' ? recentByIndex(ctx).toISOString().slice(0, 10) : recentByIndex(ctx).toISOString()) : null),
     () => (typeof schema.format === 'string' ? formatValue(schema.format, f) : null),
     () => heuristicString(name, schema, ctx),
     () => (typeof schema.pattern === 'string' && patternOf(schema) ? fromPattern(schema.pattern, ctx) : null),
@@ -241,9 +326,30 @@ function fromPattern(pattern: string, ctx: GenCtx): string | null {
   }
 }
 
+/** Version 2: timestamps that decrease with the item index (item 1 is the newest), within the last ~120 days. */
+function recentByIndex(ctx: GenCtx): Date {
+  const hours = ctx.index * 6 + ctx.faker.number.int({ min: 0, max: 5 });
+  return new Date(MOCK_REF_DATE.getTime() - hours * 3_600_000 - ctx.faker.number.int({ min: 0, max: 3_599_999 }));
+}
+
+const MONEY_RE = /(^|_)(amount|price|total|subtotal|balance|fee|cost|unit_amount|amount_due|amount_paid|amount_remaining|tax)(_|$)/;
+const EPOCH_RE = /^(created|updated|expires_at|arrival_date|available_on|date|period_start|period_end|canceled_at|ended_at|start_date|due_date|paid_at|finalized_at)$/;
+
 function numberFor(name: string, schema: JsonSchema, ctx: GenCtx, integer: boolean): number {
   const f = ctx.faker;
   const n = name.toLowerCase();
+  if ((ctx.dv ?? MOCK_DATA_VERSION) !== 1 && !isRefName(name)) {
+    // amounts: whole currency units in minor units (5.00 .. 2,000.00), or plain amounts for decimals
+    if (MONEY_RE.test(n)) {
+      const v = integer ? f.number.int({ min: 10, max: 4000 }) * 50 : Math.round(f.number.float({ min: 5, max: 2000 }) * 100) / 100;
+      if (numberFits(schema, v, integer)) return v;
+    }
+    // unix timestamps (Stripe `created`): newest first, like ISO timestamps
+    if (integer && (EPOCH_RE.test(n) || schema.format === 'unix-time')) {
+      const v = Math.floor(recentByIndex(ctx).getTime() / 1000);
+      if (numberFits(schema, v, true)) return v;
+    }
+  }
   const intRef = integer && isRefName(name);
   if (intRef && numberFits(schema, 1, true)) {
     const v = f.number.int({ min: 1, max: SEED_ITEMS });
@@ -384,10 +490,12 @@ export function generateValue(schema: unknown, name: string, ctx: GenCtx): unkno
       const out: Obj = {};
       const required = new Set((schema.required as string[] | undefined) ?? []);
       const compact = ctx.depth > COMPACT_DEPTH;
+      // a nested object is named by its property (`owner` of a repo is a person, not a repo)
+      const resource = ctx.depth > 0 && name && name !== 'result' && name !== 'body' ? singularName(name) : ctx.resource;
       for (const [k, v] of Object.entries(schema.properties)) {
         // keep objects compact below the top level: required + a few optional fields
         if (!required.has(k) && (compact || (ctx.depth >= 2 && Object.keys(out).length >= 6))) continue;
-        out[k] = ctx.depth > MAX_DEPTH ? minimalValue(isObj(v) ? (v as JsonSchema) : {}, ctx) : generateValue(v, k, { ...ctx, depth: ctx.depth + 1 });
+        out[k] = ctx.depth > MAX_DEPTH ? minimalValue(isObj(v) ? (v as JsonSchema) : {}, ctx) : generateValue(v, k, { ...ctx, depth: ctx.depth + 1, ...(resource !== undefined ? { resource } : {}) });
       }
       return out;
     }

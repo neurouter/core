@@ -1,15 +1,23 @@
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { Kysely, Selectable } from 'kysely';
-import { applyOverlayPatch, type MockNs } from '@neurouter/compiler';
+import { applyOverlayPatch, withMockDataVersion, type MockDataVersion, type MockNs } from '@neurouter/compiler';
 import {
+  calibrateTask,
+  computeGroundTruth,
   createMcpHttpClient,
   generateSuite,
+  outcomeFromResult,
+  runSuiteDetailed,
+  summarizeCalibration,
+  type GroundTruth,
+  type RefSession,
+  type SuiteCalibration,
+  type TaskCalibration,
   llmFromEnv,
   LlmKeyError,
   RoutingLlmClient,
   QUICK_COUNTS,
   resolveTaskTools,
-  runSuite,
   scoreRun,
   selectVerifyTasks,
   STUB_RUN_MODEL,
@@ -55,6 +63,8 @@ export interface EvalPorts {
   mockState(ns: MockNs): StateReader;
   /** Drops a mock namespace (every instance sees it). */
   resetMock(ns: MockNs): Promise<void>;
+  /** Eval-only clear arguments of watched eval keys (the audit log stores them redacted). */
+  evalArgs?: { watch(apiKeyId: string): void; peek(apiKeyId: string): ReadonlyMap<string, unknown>; release(apiKeyId: string): void };
 }
 
 export interface EvalDeps {
@@ -96,6 +106,15 @@ export interface CreateRunInput {
   wait?: boolean;
   /** Characters kept per transcript item (null = untrimmed, CLI `--transcripts`); default 4,096. */
   transcriptMaxChars?: number | null;
+  /** Hard token cap (agent + judge) for the run; it stops gracefully and is marked incomplete. */
+  maxRunTokens?: number | null;
+}
+
+/** The suite's generator JSON fields this service reads (mock data version, calibration). */
+interface SuiteMeta {
+  mockDataVersion?: number;
+  calibration?: SuiteCalibration | null;
+  pending?: boolean;
 }
 
 const gz = (v: unknown) => gzipSync(Buffer.from(JSON.stringify(v), 'utf8'));
@@ -190,7 +209,50 @@ export class EvalsService {
 
   private async genTools(buildId: string): Promise<{ tools: ToolDef[]; gen: GenTool[] }> {
     const tools = (await this.d.builds.tools(buildId)).filter((t) => !t.hidden && t.kind !== 'composite');
-    return { tools, gen: tools.map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, write: t.risk.write, pyName: t.pyName, exampleArguments: t.examples[0]?.arguments ?? null, key: t.key, ...(t.tags[0] ? { group: t.tags[0] } : {}), ...(t.binding.type === 'http' ? { path: t.binding.pathTemplate } : {}) })) };
+    return {
+      tools,
+      gen: tools.map((t) => ({
+        name: t.name,
+        title: t.title,
+        description: t.description,
+        inputSchema: t.inputSchema,
+        write: t.risk.write,
+        pyName: t.pyName,
+        exampleArguments: t.examples[0]?.arguments ?? null,
+        key: t.key,
+        ...(t.pinned ? { pinned: true } : {}),
+        ...(t.tags[0] ? { group: t.tags[0] } : {}),
+        ...(t.binding.type === 'http' ? { path: t.binding.pathTemplate, method: t.binding.method } : {}),
+      })),
+    };
+  }
+
+  /**
+   * Reference sessions for ground truth and calibration: each opens a fresh `gen:<keyId>:…` mock
+   * namespace (the key's own, G13) with the suite's data version, over MCP with tool exposure, so the
+   * reference outcome goes through the same pipeline (shaping, contract) as the agent's calls.
+   */
+  private refOpener(server: { slug: string }, env: { id: string; slug: string; tenant_id: string }, key: { id: string; token: string }, dv: MockDataVersion, build?: string | null): () => Promise<RefSession> {
+    return async () => {
+      const name = withMockDataVersion(`gen:${key.id}:gt-${newId()}`, dv);
+      const ns: MockNs = { tenantId: env.tenant_id, environmentId: env.id, name };
+      const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: 'tools' };
+      if (build) headers[HEADER_BUILD] = build;
+      const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
+      return {
+        call: async (tool, args) => outcomeFromResult(tool, await mcp.callTool(tool, args)),
+        close: async () => {
+          await mcp.close().catch(() => {});
+          await this.d.ports.resetMock(ns).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
+        },
+      };
+    };
+  }
+
+  /** Mock data version of a suite: recorded at generation/import; suites from before 0.2.2 use version 1. */
+  suiteMeta(suite: Pick<EvalSuiteRowDb, 'generator'>): SuiteMeta & { mockDataVersion: MockDataVersion } {
+    const g = parseJsonColumn<SuiteMeta>(suite.generator) ?? {};
+    return { ...g, mockDataVersion: g.mockDataVersion === 2 ? 2 : 1 };
   }
 
   /** Generates a draft suite (§15.2); reference calls are executed over MCP on a fresh mock namespace. */
@@ -221,25 +283,10 @@ export class EvalsService {
         ...(opts.instructions ? { instructions: opts.instructions } : {}),
         seed: opts.seed ?? 42,
         ...(opts.maxGeneratorTokens ? { maxGeneratorTokens: opts.maxGeneratorTokens } : {}),
-        executeReference: async (calls) => {
-          // `gen:<keyId>:…` is honoured only for the key that sends it (G13)
-          const refNs = `gen:${key.id}:ref-${newId()}`;
-          const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers: { [HEADER_MOCK_STATE]: refNs, [HEADER_EXPOSURE]: 'tools' } });
-          try {
-            const res = [];
-            for (const c of calls) {
-              const r = await mcp.callTool(c.tool, c.arguments ?? {}).catch((err: unknown) => ({ isError: true, content: [{ type: 'text', text: (err as Error).message }] }) as never);
-              res.push(r.isError ? { ok: false, error: JSON.stringify(r.content).slice(0, 300) } : { ok: true });
-            }
-            return res;
-          } finally {
-            await mcp.close().catch(() => {});
-            await this.d.ports.resetMock(mockNs(refNs)).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
-          }
-        },
+        openReference: this.refOpener(server, env, key, 2),
       });
       const generator = { ...out.generator, diagnostics: out.diagnostics } as unknown as Record<string, unknown>;
-      this.d.log.info({ serverId, tasks: out.tasks.length, usage: out.generator.usage, diagnostics: out.diagnostics.length }, 'eval suite generated');
+      this.d.log.info({ serverId, tasks: out.tasks.length, usage: out.generator.usage, coverage: out.generator.coverage, diagnostics: out.diagnostics.length }, 'eval suite generated');
       if (opts.intoSuiteId) return await this.fillSuite(tenantId, opts.intoSuiteId, buildId, out.tasks, generator);
       return await this.saveSuite(tenantId, serverId, buildId, out.tasks, generator, opts.createdBy);
     } finally {
@@ -289,6 +336,126 @@ export class EvalsService {
   async suiteTasks(tenantId: string, suiteId: string): Promise<EvalTaskRowDb[]> {
     // G6: tasks of a suite of this tenant only (a foreign suite id yields no prompts or assertions)
     return this.d.db.selectFrom('eval_tasks').selectAll().where('suite_id', '=', suiteId).where('tenant_id', '=', tenantId).orderBy('key').execute();
+  }
+
+  /**
+   * Calibration gate: every task's own reference solution runs through its assertions against the mock
+   * (the suite's data version). Rejected tasks are reported (and disabled with `disableRejected`, so
+   * they are never run or scored). `calibrateWith`: one tool-mode pass of that model; tasks it fails
+   * are flagged for human review, not dropped. The result is stored with the suite.
+   */
+  async calibrateSuite(tenantId: string, serverId: string, suiteId: string, opts: { calibrateWith?: string | null; disableRejected?: boolean; environmentId?: string | null } = {}): Promise<SuiteCalibration> {
+    const suite = await this.suiteOf(tenantId, serverId, suiteId);
+    const meta = this.suiteMeta(suite);
+    const { server, env } = await this.serverAndEnv(tenantId, serverId, opts.environmentId);
+    const buildId = env.build_id ?? server.latest_build_id;
+    if (!buildId) throw AppError.conflict('The server has no build');
+    const tasks = resolveTaskTools((await this.suiteTasks(tenantId, suiteId)).map(taskFromRow), await this.d.builds.tools(buildId));
+    const key = await this.evalKey(tenantId, serverId, env.id, ['tools:read', 'tools:write'], 'eval calibration');
+    const openKeys = new Set<string>();
+    try {
+      const open = this.refOpener(server, env, key, meta.mockDataVersion);
+      const results: TaskCalibration[] = [];
+      const gts = new Map<string, GroundTruth>();
+      for (const t of tasks) {
+        try {
+          const gt = await computeGroundTruth(t.referenceCalls, open);
+          gts.set(t.key, gt);
+          results.push(await calibrateTask(t, gt));
+        } catch (err) {
+          results.push({ key: t.key, status: 'rejected', reasons: [`reference execution failed: ${(err as Error).message}`] });
+        }
+      }
+      if (opts.calibrateWith) {
+        const passed = new Set(results.filter((r) => r.status === 'passed').map((r) => r.key));
+        const llm = await this.llm(tenantId, [opts.calibrateWith]);
+        const out = await runSuiteDetailed({
+          llm,
+          tasks: tasks.filter((t) => passed.has(t.key) && t.referenceCalls.length),
+          models: [opts.calibrateWith],
+          modes: ['tool'],
+          repeats: 1,
+          judgeModel: opts.calibrateWith,
+          groundTruth: async (t) => gts.get(t.key) ?? null,
+          openSession: async (ctx) => this.attemptSession(tenantId, serverId, server, env, ctx.mode, (k) => withMockDataVersion(`gen:${k}:cal-${newId()}`, meta.mockDataVersion), null, openKeys),
+        });
+        for (const r of out.results) {
+          if (r.passed || r.failureCause === 'provider_refusal') continue;
+          const c = results.find((x) => x.key === r.taskKey);
+          if (!c) continue;
+          c.status = 'flagged';
+          c.reasons.push(`${opts.calibrateWith} (tool mode) disagrees: ${r.assertionResults.filter((a) => !a.passed && a.assertion.type !== 'framing').map((a) => a.detail).join('; ').slice(0, 400) || (r.error ?? r.failureCause ?? 'failed')}`);
+        }
+      }
+      const cal = summarizeCalibration(results, meta.mockDataVersion, opts.calibrateWith ?? null, new Date(this.d.clock.now()));
+      const fresh = await this.suiteOf(tenantId, serverId, suiteId);
+      await this.d.db.transaction().execute(async (trx) => {
+        await trx.updateTable('eval_suites').set({ generator: toJsonColumn({ ...(parseJsonColumn<Record<string, unknown>>(fresh.generator) ?? {}), calibration: cal }) }).where('id', '=', suiteId).where('tenant_id', '=', tenantId).execute();
+        const rejected = cal.tasks.filter((t) => t.status === 'rejected').map((t) => t.key);
+        if (opts.disableRejected && rejected.length) await trx.updateTable('eval_tasks').set({ enabled: 0 }).where('suite_id', '=', suiteId).where('tenant_id', '=', tenantId).where('key', 'in', rejected).execute();
+      });
+      return cal;
+    } finally {
+      await this.d.keys.revoke(tenantId, key.id, null);
+      for (const id of openKeys) await this.d.keys.revoke(tenantId, id, null).catch(() => {});
+    }
+  }
+
+  /**
+   * Reference runner for offline tools (CLI `--migrate-suite`, `--regrade`): resolves tasks against the
+   * environment's build, executes reference calls (ground truth) on fresh namespaces of mock data
+   * version `dv`, and lists the build's tools for the task upgrader. `close()` revokes its key.
+   */
+  async referenceRunner(tenantId: string, serverId: string, dv: MockDataVersion, environmentId?: string | null) {
+    const { server, env } = await this.serverAndEnv(tenantId, serverId, environmentId);
+    const buildId = env.build_id ?? server.latest_build_id;
+    if (!buildId) throw AppError.conflict('The server has no build');
+    const buildTools = await this.d.builds.tools(buildId);
+    const key = await this.evalKey(tenantId, serverId, env.id, ['tools:read', 'tools:write'], 'eval reference runner');
+    const open = this.refOpener(server, env, key, dv);
+    return {
+      resolve: (tasks: EvalTask[]) => resolveTaskTools(tasks, buildTools),
+      groundTruth: (task: EvalTask) => computeGroundTruth(task.referenceCalls, open),
+      tools: buildTools.map((t) => ({ name: t.name, key: t.key, inputSchema: t.inputSchema, write: t.risk.write, ...(t.binding.type === 'http' ? { method: t.binding.method, path: t.binding.pathTemplate } : {}) })),
+      close: () => this.d.keys.revoke(tenantId, key.id, null),
+    };
+  }
+
+  /**
+   * A per-attempt MCP session: its own eval key (watched for clear arguments), the mock namespace
+   * `nsName(keyId)` and the mode's exposure; calls are collected from the audit log by the key.
+   */
+  private async attemptSession(
+    tenantId: string,
+    serverId: string,
+    server: { slug: string },
+    env: { id: string; slug: string },
+    mode: 'tool' | 'code',
+    nsName: (keyId: string) => string,
+    buildHeader: string | null,
+    openKeys: Set<string>,
+  ) {
+    const key = await this.evalKey(tenantId, serverId, env.id, mode === 'code' ? ['tools:read', 'tools:write', 'code:run'] : ['tools:read', 'tools:write'], 'eval attempt');
+    openKeys.add(key.id);
+    this.d.ports.evalArgs?.watch(key.id);
+    const name = nsName(key.id);
+    const ns: MockNs = { tenantId, environmentId: env.id, name };
+    await this.d.ports.resetMock(ns);
+    const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: mode === 'code' ? 'code' : 'tools' };
+    if (buildHeader) headers[HEADER_BUILD] = buildHeader;
+    const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
+    return {
+      mcp,
+      stateReader: this.d.ports.mockState(ns),
+      collectCalls: async () => this.observedCalls(tenantId, key.id),
+      close: async () => {
+        await mcp.close().catch(() => {});
+        this.d.ports.evalArgs?.release(key.id);
+        await this.d.keys.revoke(tenantId, key.id, null);
+        openKeys.delete(key.id);
+        await this.d.ports.resetMock(ns).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
+      },
+    };
   }
 
   /* ------------------------------------------------------------------ runs */
@@ -347,7 +514,7 @@ export class EvalsService {
         created_at: now,
       })
       .execute();
-    const work = async () => this.executeRun(tenantId, id, { quick, createdBy: input.createdBy, ...(input.transcriptMaxChars !== undefined ? { transcriptMaxChars: input.transcriptMaxChars } : {}) });
+    const work = async () => this.executeRun(tenantId, id, { quick, createdBy: input.createdBy, ...(input.transcriptMaxChars !== undefined ? { transcriptMaxChars: input.transcriptMaxChars } : {}), ...(input.maxRunTokens ? { maxRunTokens: input.maxRunTokens } : {}) });
     if (input.wait) await work();
     else {
       const jobId = await this.d.jobs.start(tenantId, 'eval_run', { runId: id }, input.createdBy, work);
@@ -369,12 +536,13 @@ export class EvalsService {
     return this.run(tenantId, id);
   }
 
-  private async executeRun(tenantId: string, runId: string, opts: { quick: boolean; createdBy: string | null; transcriptMaxChars?: number | null }): Promise<void> {
+  private async executeRun(tenantId: string, runId: string, opts: { quick: boolean; createdBy: string | null; transcriptMaxChars?: number | null; maxRunTokens?: number }): Promise<void> {
     const ac = new AbortController();
     this.cancels.set(runId, ac);
     const db = this.d.db;
     // per-attempt eval keys still active (revoked on session close; any left are revoked when the run ends)
     const openKeys = new Set<string>();
+    let refKey: { id: string; token: string } | null = null;
     try {
       let run = await this.run(tenantId, runId);
       await db.updateTable('eval_runs').set({ status: 'running', started_at: this.d.clock.now() }).where('id', '=', runId).where('tenant_id', '=', tenantId).execute();
@@ -388,7 +556,10 @@ export class EvalsService {
       }
       // assertions name tools by stable key (fallback: name, or the pre-overlay name): survive overlay renames
       const buildTools = await this.d.builds.tools(run.build_id);
-      let tasks = resolveTaskTools((await this.suiteTasks(tenantId, run.suite_id)).map(taskFromRow), buildTools).filter((t) => t.enabled);
+      const meta = this.suiteMeta(await this.suiteOf(tenantId, run.server_id, run.suite_id));
+      // tasks the calibration gate rejected are never run or scored
+      const rejected = new Set((meta.calibration?.tasks ?? []).filter((t) => t.status === 'rejected').map((t) => t.key));
+      let tasks = resolveTaskTools((await this.suiteTasks(tenantId, run.suite_id)).map(taskFromRow), buildTools).filter((t) => t.enabled && !rejected.has(t.key));
       const keys = parseJsonColumn<string[]>(run.task_keys);
       if (keys?.length) tasks = tasks.filter((t) => keys.includes(t.key));
       const models = parseJsonColumn<string[]>(run.models) ?? [];
@@ -403,7 +574,11 @@ export class EvalsService {
       const usage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = {};
       const isTemp = (await db.selectFrom('builds').where('tenant_id', '=', tenantId).select('temporary').where('id', '=', run.build_id).executeTakeFirst())?.temporary === 1;
       const pinned = env.build_id;
-      const results = await runSuite({
+      // ground truth: each task's reference calls on a fresh namespace with the attempts' seed and data version
+      refKey = await this.evalKey(tenantId, run.server_id, env.id, ['tools:read', 'tools:write'], `eval ${runId.slice(-6)} ground truth`);
+      const buildHeader = isTemp || (pinned && pinned !== run.build_id) ? run.build_id : null;
+      const openRef = this.refOpener(server, env, refKey, meta.mockDataVersion, buildHeader);
+      const outcome = await runSuiteDetailed({
         llm,
         tasks,
         models,
@@ -413,27 +588,9 @@ export class EvalsService {
         settings: { effort, fallbacks: fallbacks === 'default', ...(opts.transcriptMaxChars !== undefined ? { transcriptMaxChars: opts.transcriptMaxChars } : {}) },
         signal: ac.signal,
         hasResult: (k) => existing.has(k),
-        openSession: async (ctx) => {
-          const name = `eval:${runId}:${ctx.key.replace(/[^A-Za-z0-9:_-]/g, '_').slice(0, 150)}`;
-          const ns: MockNs = { tenantId, environmentId: env.id, name };
-          await this.d.ports.resetMock(ns);
-          const key = await this.evalKey(tenantId, run.server_id, env.id, ctx.mode === 'code' ? ['tools:read', 'tools:write', 'code:run'] : ['tools:read', 'tools:write'], `eval ${runId.slice(-6)}`);
-          openKeys.add(key.id);
-          const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: ctx.mode === 'code' ? 'code' : 'tools' };
-          if (isTemp || (pinned && pinned !== run.build_id)) headers[HEADER_BUILD] = run.build_id;
-          const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
-          return {
-            mcp,
-            stateReader: this.d.ports.mockState(ns),
-            collectCalls: async () => this.observedCalls(tenantId, key.id),
-            close: async () => {
-              await mcp.close().catch(() => {});
-              await this.d.keys.revoke(tenantId, key.id, null);
-              openKeys.delete(key.id);
-              await this.d.ports.resetMock(ns).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
-            },
-          };
-        },
+        groundTruth: (task) => computeGroundTruth(task.referenceCalls, openRef),
+        ...(opts.maxRunTokens ? { maxRunTokens: opts.maxRunTokens } : {}),
+        openSession: async (ctx) => this.attemptSession(tenantId, run.server_id, server, env, ctx.mode, () => withMockDataVersion(`eval:${runId}:${ctx.key.replace(/[^A-Za-z0-9:_-]/g, '_').slice(0, 140)}`, meta.mockDataVersion), buildHeader, openKeys),
         onResult: async (r) => {
           const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
           u.inputTokens += r.inputTokens;
@@ -469,7 +626,7 @@ export class EvalsService {
               served_by_model: r.servedByModel,
               fallback_used: r.fallbackUsed ? 1 : 0,
               task_id_neurouter: r.neurouterTaskId,
-              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey }),
+              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes }),
               created_at: this.d.clock.now(),
             })
             .execute();
@@ -482,13 +639,12 @@ export class EvalsService {
       if (ac.signal.aborted) return;
       const all = await this.taskResults(tenantId, runId);
       const lint = (await db.selectFrom('builds').where('tenant_id', '=', tenantId).select('lint_score').where('id', '=', run.build_id).executeTakeFirst())?.lint_score ?? 0;
-      const score = scoreRun({ tasks, results: all, models, modes, lintScore: lint });
+      const score = { ...scoreRun({ tasks, results: all, models, modes, lintScore: lint }), incomplete: outcome.incomplete };
       await db
         .updateTable('eval_runs').where('tenant_id', '=', tenantId)
         .set({ status: 'succeeded', score: toJsonColumn(score), headline: score.headline, recommended_mode: score.recommendedMode, confidence: score.confidence, usage: toJsonColumn(usage), progress: toJsonColumn({ done: total, total }), ended_at: this.d.clock.now() })
         .where('id', '=', runId)
         .execute();
-      void results;
       if (run.trigger !== 'suggestion_verify') await this.createSuggestions(tenantId, runId).catch((err: unknown) => this.d.log.warn({ err, runId }, 'suggestion generation failed'));
       else await this.finishVerify(tenantId, runId);
     } catch (err) {
@@ -497,6 +653,7 @@ export class EvalsService {
       await db.updateTable('eval_runs').where('tenant_id', '=', tenantId).set({ status: ac.signal.aborted ? 'cancelled' : 'failed', error: msg.slice(0, 1000), ended_at: this.d.clock.now() }).where('id', '=', runId).execute();
     } finally {
       this.cancels.delete(runId);
+      if (refKey) await this.d.keys.revoke(tenantId, refKey.id, null).catch((err: unknown) => this.d.log.warn({ err, runId }, 'eval key revoke failed'));
       for (const id of openKeys) await this.d.keys.revoke(tenantId, id, null).catch((err: unknown) => this.d.log.warn({ err, runId }, 'eval key revoke failed'));
     }
   }
@@ -505,9 +662,11 @@ export class EvalsService {
   private async observedCalls(tenantId: string, apiKeyId: string): Promise<ObservedCall[]> {
     await this.d.auditStore.flush(5000);
     const rows = await this.d.auditStore.query({ tenantId, from: 0, to: this.d.clock.now() + 60_000, limit: 2000, order: 'asc', kinds: ['tool_call', 'ops_call', 'script_run'], principal: apiKeyId } as never);
+    // assertions check the clear arguments (eval-only, in memory); the audit log keeps them redacted
+    const clear = this.d.ports.evalArgs?.peek(apiKeyId);
     return rows.rows.map((r) => ({
       tool: r.tool_name ?? '',
-      arguments: (parseJsonColumn<Record<string, unknown>>(r.params_redacted) ?? {}) as Record<string, unknown>,
+      arguments: ((clear?.get(r.id) as Record<string, unknown> | undefined) ?? parseJsonColumn<Record<string, unknown>>(r.params_redacted) ?? {}) as Record<string, unknown>,
       status: r.status,
       decision: r.decision,
       via: r.via ?? 'direct',
@@ -521,7 +680,7 @@ export class EvalsService {
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
     const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.cache_read_tokens', 'r.cache_write_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
-      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number }>(r.transcript);
+      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
       return {
         key: `${r.key}|${r.model}|${r.mode}|${r.attempt}`,
         taskKey: r.key,
@@ -550,6 +709,9 @@ export class EvalsService {
         error: tr?.error ?? null,
         transcript: tr?.transcript ?? [],
         calls: tr?.calls ?? [],
+        ...(tr?.upstreamCalls !== undefined ? { upstreamCalls: tr.upstreamCalls, callBudget: tr.callBudget ?? null, overBudget: tr.overBudget ?? false } : {}),
+        ...(tr?.judgeUsage ? { judgeUsage: tr.judgeUsage } : {}),
+        ...(tr?.toolsListBytes !== undefined ? { toolsListBytes: tr.toolsListBytes } : {}),
       } as TaskRunResult;
     });
   }

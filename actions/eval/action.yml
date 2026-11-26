@@ -11,6 +11,7 @@ inputs:
   modes: { description: tool,code, required: false, default: "tool,code" }
   repeats: { description: Attempts per task, required: false, default: "3" }
   min-score: { description: Fail below this headline score, required: false, default: "0" }
+  max-run-tokens: { description: "Hard token cap for the run (agent + judge tokens); the run stops starting attempts and is marked incomplete", required: false, default: "" }
   neurouter-version: { description: "npm version of the neurouter CLI (default: the version of this action: its tag, e.g. v0.2.1 → 0.2.1, else the CLI package version at this ref)", required: false, default: "" }
   openai-api-key: { description: "OpenAI API key (pass secrets.OPENAI_API_KEY); needed for gpt-* models", required: false, default: "" }
   anthropic-api-key: { description: "Anthropic API key (pass secrets.ANTHROPIC_API_KEY); needed for claude-* models", required: false, default: "" }
@@ -39,6 +40,7 @@ runs:
         NR_MODES: ${{ inputs.modes }}
         NR_REPEATS: ${{ inputs.repeats }}
         NR_MIN_SCORE: ${{ inputs.min-score }}
+        NR_MAX_RUN_TOKENS: ${{ inputs.max-run-tokens }}
         NR_VERSION: ${{ inputs.neurouter-version }}
         NR_ACTION_REF: ${{ github.action_ref }}
         NR_ACTION_PATH: ${{ github.action_path }}
@@ -58,6 +60,7 @@ runs:
         else echo "::error::set spec, or config + server"; exit 2; fi
         if [ -n "$NR_OVERLAY" ]; then ARGS+=(--overlay "$NR_OVERLAY"); fi
         if [ -n "$NR_SUITE" ]; then ARGS+=(--suite "$NR_SUITE"); else ARGS+=(--generate); fi
+        if [ -n "${NR_MAX_RUN_TOKENS:-}" ]; then ARGS+=(--max-run-tokens "$NR_MAX_RUN_TOKENS"); fi
         echo "neurouter@${VERSION}"
         npx -y "neurouter@${VERSION}" eval "${ARGS[@]}" --models "$NR_MODELS" --modes "$NR_MODES" \
           --repeats "$NR_REPEATS" --min-score "$NR_MIN_SCORE" \

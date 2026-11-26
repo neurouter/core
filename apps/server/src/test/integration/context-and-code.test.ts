@@ -330,17 +330,17 @@ return {"checked": len(issues), "labelled": [i["number"] for i in stale[:3]]}`;
 
   it('maxBytes clips fields in tool mode (no {$truncated} object), scripts read whole values; built-ins and next(genexpr) work', async () => {
     const c = await mcpClient(s, 'petsmall', 'dev', await keyFor(s, 'petsmall', 'dev', ['tools:read', 'code:run']));
-    // tool mode: over the overlay's 256-byte cap the pet keeps its shape; clipped paths are reported
-    const tool = await c.callTool({ name: 'get_pet_by_id', arguments: { pet_id: 1 } });
+    // tool mode: over the overlay's 256-byte cap (pet 11 of the mock data is ~370 bytes) the pet keeps its shape; clipped paths are reported
+    const tool = await c.callTool({ name: 'get_pet_by_id', arguments: { pet_id: 11 } });
     expect(tool.isError, text(tool)).toBeFalsy();
     expect(tool.structuredContent).not.toHaveProperty('$truncated');
-    expect(tool.structuredContent).toMatchObject({ id: 1 });
+    expect(tool.structuredContent).toMatchObject({ id: 11 });
     const meta = tool._meta as Record<string, unknown>;
     expect((meta['dev.neurouter/truncated'] as { fields: string[] }).fields.length).toBeGreaterThan(0);
     expect(text(tool)).toMatch(/Clipped to fit: .*Call neurouter_read_result/);
     // in a script the same call is the whole value
-    const r = await c.callTool({ name: 'run_script', arguments: { code: 'p = petsmall.get_pet_by_id(pet_id=1)\nreturn {"id": p["id"], "has_name": "name" in p, "kind": str(type(p)), "truncated": "$truncated" in p}' } });
-    expect(r.structuredContent, text(r)).toMatchObject({ status: 'ok', result: { id: 1, has_name: true, kind: "<class 'dict'>", truncated: false } });
+    const r = await c.callTool({ name: 'run_script', arguments: { code: 'p = petsmall.get_pet_by_id(pet_id=11)\nreturn {"id": p["id"], "has_name": "name" in p, "kind": str(type(p)), "truncated": "$truncated" in p}' } });
+    expect(r.structuredContent, text(r)).toMatchObject({ status: 'ok', result: { id: 11, has_name: true, kind: "<class 'dict'>", truncated: false } });
     const m = await c.callTool({ name: 'run_script', arguments: { code: 'return list(map(str, [1, 2]))' } });
     const err = (m.structuredContent as { status: string; error: { hint?: string } });
     expect(err.status).toBe('type_error');

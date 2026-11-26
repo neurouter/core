@@ -2083,7 +2083,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"id\":\"order_1\",\"customerId\":\"cimentarius\",\"status\":\"paid\",\"items\":[{\"sku\":\"tamen\",\"quantity\":75,\"unitPrice\":654.26}],\"total\":989.25,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"bibo\",\"line2\":\"capio\",\"city\":\"summopere\",\"postalCode\":\"demergo\",\"country\":\"alii\"},\"note\":\"depono\",\"createdAt\":\"2025-11-27T03:44:33.051Z\"}"
+    "text": "{\"id\":\"order_1\",\"customerId\":\"ectoderm\",\"status\":\"paid\",\"items\":[{\"sku\":\"SKU-QQNZ78\",\"quantity\":73,\"unitPrice\":472.9}],\"total\":184.68,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"6078 Rodriguez Mountain\",\"line2\":\"Suite 216\",\"city\":\"Jessycafurt\",\"postalCode\":\"44913-4299\",\"country\":\"KN\"},\"note\":\"We need to generate the online SCSI application!\",\"createdAt\":\"2026-01-15T04:38:59.755Z\"}"
    },
    {
     "type": "text",
@@ -2092,26 +2092,26 @@
   ],
   "structuredContent": {
    "id": "order_1",
-   "customerId": "cimentarius",
+   "customerId": "ectoderm",
    "status": "paid",
    "items": [
     {
-     "sku": "tamen",
-     "quantity": 75,
-     "unitPrice": 654.26
+     "sku": "SKU-QQNZ78",
+     "quantity": 73,
+     "unitPrice": 472.9
     }
    ],
-   "total": 989.25,
+   "total": 184.68,
    "currency": "EUR",
    "shippingAddress": {
-    "line1": "bibo",
-    "line2": "capio",
-    "city": "summopere",
-    "postalCode": "demergo",
-    "country": "alii"
+    "line1": "6078 Rodriguez Mountain",
+    "line2": "Suite 216",
+    "city": "Jessycafurt",
+    "postalCode": "44913-4299",
+    "country": "KN"
    },
-   "note": "depono",
-   "createdAt": "2025-11-27T03:44:33.051Z"
+   "note": "We need to generate the online SCSI application!",
+   "createdAt": "2026-01-15T04:38:59.755Z"
   }
  },
  "list_orders": {
@@ -2122,68 +2122,68 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"nextCursor\":\"eos\",\"total_count\":20,\"items\":[{\"id\":\"order_1\",\"customerId\":\"cimentarius\",\"status\":\"paid\",\"items\":[{\"sku\":\"tamen\",\"quantity\":75,\"unitPrice\":654.26}],\"total\":989.25,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"bibo\",\"line2\":\"capio\",\"city\":\"summopere\",\"postalCode\":\"demergo\",\"country\":\"alii\"},\"note\":\"depono\",\"createdAt\":\"2025-11-27T03:44:33.051Z\"},{\"id\":\"order_2\",\"customerId\":\"usque\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"trucido\",\"quantity\":47,\"unitPrice\":586.08},{\"sku\":\"adnuo\",\"quantity\":2,\"unitPrice\":373.86},{\"sku\":\"cauda\",\"quantity\":5,\"unitPrice\":232.73}],\"total\":848.26,\"currency\":\"sophismata\",\"shippingAddress\":{\"line1\":\"ver\",\"line2\":\"culpo\",\"city\":\"crur\",\"postalCode\":\"toties\",\"country\":\"deripio\"},\"note\":\"ubi\",\"createdAt\":\"2025-10-27T21:21:05.220Z\"}]}"
+    "text": "{\"nextCursor\":\"license\",\"total_count\":20,\"items\":[{\"id\":\"order_1\",\"customerId\":\"ectoderm\",\"status\":\"paid\",\"items\":[{\"sku\":\"SKU-QQNZ78\",\"quantity\":73,\"unitPrice\":472.9}],\"total\":184.68,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"6078 Rodriguez Mountain\",\"line2\":\"Suite 216\",\"city\":\"Jessycafurt\",\"postalCode\":\"44913-4299\",\"country\":\"KN\"},\"note\":\"We need to generate the online SCSI application!\",\"createdAt\":\"2026-01-15T04:38:59.755Z\"},{\"id\":\"order_2\",\"customerId\":\"suitcase\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"SKU-UGL10D\",\"quantity\":26,\"unitPrice\":46.75},{\"sku\":\"SKU-8UNWEE\",\"quantity\":83,\"unitPrice\":497.74},{\"sku\":\"SKU-UCFV3F\",\"quantity\":26,\"unitPrice\":350.8}],\"total\":1993.77,\"currency\":\"usd\",\"shippingAddress\":{\"line1\":\"776 Stark Summit\",\"line2\":\"Suite 518\",\"city\":\"East Sergio\",\"postalCode\":\"92121\",\"country\":\"BN\"},\"note\":\"parsing the panel won't do anything, we need to hack the cross-platform COM interface!\",\"createdAt\":\"2026-01-14T22:47:07.819Z\"}]}"
    }
   ],
   "structuredContent": {
-   "nextCursor": "eos",
+   "nextCursor": "license",
    "total_count": 20,
    "items": [
     {
      "id": "order_1",
-     "customerId": "cimentarius",
+     "customerId": "ectoderm",
      "status": "paid",
      "items": [
       {
-       "sku": "tamen",
-       "quantity": 75,
-       "unitPrice": 654.26
+       "sku": "SKU-QQNZ78",
+       "quantity": 73,
+       "unitPrice": 472.9
       }
      ],
-     "total": 989.25,
+     "total": 184.68,
      "currency": "EUR",
      "shippingAddress": {
-      "line1": "bibo",
-      "line2": "capio",
-      "city": "summopere",
-      "postalCode": "demergo",
-      "country": "alii"
+      "line1": "6078 Rodriguez Mountain",
+      "line2": "Suite 216",
+      "city": "Jessycafurt",
+      "postalCode": "44913-4299",
+      "country": "KN"
      },
-     "note": "depono",
-     "createdAt": "2025-11-27T03:44:33.051Z"
+     "note": "We need to generate the online SCSI application!",
+     "createdAt": "2026-01-15T04:38:59.755Z"
     },
     {
      "id": "order_2",
-     "customerId": "usque",
+     "customerId": "suitcase",
      "status": "cancelled",
      "items": [
       {
-       "sku": "trucido",
-       "quantity": 47,
-       "unitPrice": 586.08
+       "sku": "SKU-UGL10D",
+       "quantity": 26,
+       "unitPrice": 46.75
       },
       {
-       "sku": "adnuo",
-       "quantity": 2,
-       "unitPrice": 373.86
+       "sku": "SKU-8UNWEE",
+       "quantity": 83,
+       "unitPrice": 497.74
       },
       {
-       "sku": "cauda",
-       "quantity": 5,
-       "unitPrice": 232.73
+       "sku": "SKU-UCFV3F",
+       "quantity": 26,
+       "unitPrice": 350.8
       }
      ],
-     "total": 848.26,
-     "currency": "sophismata",
+     "total": 1993.77,
+     "currency": "usd",
      "shippingAddress": {
-      "line1": "ver",
-      "line2": "culpo",
-      "city": "crur",
-      "postalCode": "toties",
-      "country": "deripio"
+      "line1": "776 Stark Summit",
+      "line2": "Suite 518",
+      "city": "East Sergio",
+      "postalCode": "92121",
+      "country": "BN"
      },
-     "note": "ubi",
-     "createdAt": "2025-10-27T21:21:05.220Z"
+     "note": "parsing the panel won't do anything, we need to hack the cross-platform COM interface!",
+     "createdAt": "2026-01-14T22:47:07.819Z"
     }
    ]
   }
@@ -2196,11 +2196,11 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"nextCursor\":\"eos\",\"total_count\":0,\"items\":[]}"
+    "text": "{\"nextCursor\":\"license\",\"total_count\":0,\"items\":[]}"
    }
   ],
   "structuredContent": {
-   "nextCursor": "eos",
+   "nextCursor": "license",
    "total_count": 0,
    "items": []
   }
@@ -2213,8 +2213,8 @@
    "dev.neurouter/truncated": {
     "totalItems": 20,
     "returnedItems": 3,
-    "totalBytes": 1801,
-    "returnedBytes": 279
+    "totalBytes": 1920,
+    "returnedBytes": 310
    },
    "dev.neurouter/next-tools": [
     "neurouter_read_result"
@@ -2223,7 +2223,7 @@
   "content": [
    {
     "type": "text",
-    "text": "Showing 3 of 20 items. Call neurouter_read_result(handle=\"rh_<id>\", offset) for more.\n{\"total_count\":20,\"items\":[{\"sku\":\"product_1\",\"name\":\"meanwhile\",\"price\":194.17,\"currency\":\"dedecor\",\"stock\":97},{\"sku\":\"product_2\",\"name\":\"other\",\"price\":680.52,\"currency\":\"abundans\",\"stock\":83},{\"sku\":\"product_3\",\"name\":\"following\",\"price\":916.05,\"currency\":\"vero\",\"stock\":1}]}"
+    "text": "Showing 3 of 20 items. Call neurouter_read_result(handle=\"rh_<id>\", offset) for more.\n{\"total_count\":20,\"items\":[{\"sku\":\"product_1\",\"name\":\"Elegant Metal Gloves\",\"price\":392.37,\"currency\":\"cad\",\"stock\":97},{\"sku\":\"product_2\",\"name\":\"Oriental Metal Pizza\",\"price\":1362.64,\"currency\":\"usd\",\"stock\":83},{\"sku\":\"product_3\",\"name\":\"Licensed Rubber Gloves\",\"price\":1832.52,\"currency\":\"usd\",\"stock\":1}]}"
    }
   ],
   "structuredContent": {
@@ -2231,23 +2231,23 @@
    "items": [
     {
      "sku": "product_1",
-     "name": "meanwhile",
-     "price": 194.17,
-     "currency": "dedecor",
+     "name": "Elegant Metal Gloves",
+     "price": 392.37,
+     "currency": "cad",
      "stock": 97
     },
     {
      "sku": "product_2",
-     "name": "other",
-     "price": 680.52,
-     "currency": "abundans",
+     "name": "Oriental Metal Pizza",
+     "price": 1362.64,
+     "currency": "usd",
      "stock": 83
     },
     {
      "sku": "product_3",
-     "name": "following",
-     "price": 916.05,
-     "currency": "vero",
+     "name": "Licensed Rubber Gloves",
+     "price": 1832.52,
+     "currency": "usd",
      "stock": 1
     }
    ]
@@ -2261,16 +2261,16 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"id\":\"shipment_1\",\"orderId\":\"cauda\",\"carrier\":\"dhl\",\"trackingNumber\":\"studio\",\"status\":\"delivered\",\"estimatedDelivery\":\"2025-10-01\"}"
+    "text": "{\"id\":\"shipment_1\",\"orderId\":\"discourse\",\"carrier\":\"dhl\",\"trackingNumber\":\"pop\",\"status\":\"delivered\",\"estimatedDelivery\":\"2026-01-15\"}"
    }
   ],
   "structuredContent": {
    "id": "shipment_1",
-   "orderId": "cauda",
+   "orderId": "discourse",
    "carrier": "dhl",
-   "trackingNumber": "studio",
+   "trackingNumber": "pop",
    "status": "delivered",
-   "estimatedDelivery": "2025-10-01"
+   "estimatedDelivery": "2026-01-15"
   }
  },
  "create_customer": {
@@ -2281,17 +2281,17 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace\",\"email\":\"ada@example.com\",\"phone\":\"(535) 574-7184 x346\",\"orderCount\":39,\"lifetimeSpend\":267.12,\"createdAt\":\"2026-01-02T04:41:36.878Z\"}"
+    "text": "{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace\",\"email\":\"ada@example.com\",\"phone\":\"664-780-9054 x3547\",\"orderCount\":47,\"lifetimeSpend\":799.39,\"createdAt\":\"2026-01-10T05:09:32.930Z\"}"
    }
   ],
   "structuredContent": {
    "id": "customer_21",
    "name": "Ada Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace",
    "email": "ada@example.com",
-   "phone": "(535) 574-7184 x346",
-   "orderCount": 39,
-   "lifetimeSpend": 267.12,
-   "createdAt": "2026-01-02T04:41:36.878Z"
+   "phone": "664-780-9054 x3547",
+   "orderCount": 47,
+   "lifetimeSpend": 799.39,
+   "createdAt": "2026-01-10T05:09:32.930Z"
   }
  },
  "get_customer_clipped": {
@@ -2300,8 +2300,8 @@
    "dev.neurouter/task-id": "<uuid>",
    "dev.neurouter/result-handle": "rh_<id>",
    "dev.neurouter/truncated": {
-    "totalBytes": 437,
-    "returnedBytes": 207,
+    "totalBytes": 436,
+    "returnedBytes": 206,
     "fields": [
      "name"
     ]
@@ -2313,17 +2313,17 @@
   "content": [
    {
     "type": "text",
-    "text": "Clipped to fit: name. Call neurouter_read_result(handle=\"rh_<id>\", offset) for more.\n{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace …\",\"email\":\"ada@example.com\",\"phone\":\"(535) 574-7184 x346\",\"orderCount\":39,\"lifetimeSpend\":267.12,\"createdAt\":\"2026-01-02T04:41:36.878Z\"}"
+    "text": "Clipped to fit: name. Call neurouter_read_result(handle=\"rh_<id>\", offset) for more.\n{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace …\",\"email\":\"ada@example.com\",\"phone\":\"664-780-9054 x3547\",\"orderCount\":47,\"lifetimeSpend\":799.39,\"createdAt\":\"2026-01-10T05:09:32.930Z\"}"
    }
   ],
   "structuredContent": {
    "id": "customer_21",
    "name": "Ada Lovelace Lovelace Lovelace Lovelace …",
    "email": "ada@example.com",
-   "phone": "(535) 574-7184 x346",
-   "orderCount": 39,
-   "lifetimeSpend": 267.12,
-   "createdAt": "2026-01-02T04:41:36.878Z"
+   "phone": "664-780-9054 x3547",
+   "orderCount": 47,
+   "lifetimeSpend": 799.39,
+   "createdAt": "2026-01-10T05:09:32.930Z"
   }
  },
  "get_order_not_found": {
@@ -3083,23 +3083,23 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"items\":[{\"sku\":\"product_4\",\"name\":\"newsletter\",\"price\":213.01,\"currency\":\"sonitus\",\"stock\":43},{\"sku\":\"product_5\",\"name\":\"near\",\"price\":455.27,\"currency\":\"cursim\",\"stock\":1}],\"offset\":3,\"total\":20,\"next_offset\":5}"
+    "text": "{\"items\":[{\"sku\":\"product_4\",\"name\":\"Recycled Aluminum Pants\",\"price\":429.95,\"currency\":\"jpy\",\"stock\":43},{\"sku\":\"product_5\",\"name\":\"Licensed Metal Pants\",\"price\":913.26,\"currency\":\"cad\",\"stock\":1}],\"offset\":3,\"total\":20,\"next_offset\":5}"
    }
   ],
   "structuredContent": {
    "items": [
     {
      "sku": "product_4",
-     "name": "newsletter",
-     "price": 213.01,
-     "currency": "sonitus",
+     "name": "Recycled Aluminum Pants",
+     "price": 429.95,
+     "currency": "jpy",
      "stock": 43
     },
     {
      "sku": "product_5",
-     "name": "near",
-     "price": 455.27,
-     "currency": "cursim",
+     "name": "Licensed Metal Pants",
+     "price": 913.26,
+     "currency": "cad",
      "stock": 1
     }
    ],
@@ -3338,36 +3338,36 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"id\":\"animi\",\"customerId\":\"triumphus\",\"status\":\"delivered\",\"items\":[{\"sku\":\"similique\",\"quantity\":34,\"unitPrice\":860.6},{\"sku\":\"modi\",\"quantity\":94,\"unitPrice\":370.11}],\"total\":442.66,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"creo\",\"line2\":\"calcar\",\"city\":\"vorax\",\"postalCode\":\"aurum\",\"country\":\"vergo\"},\"note\":\"vobis\",\"createdAt\":\"2025-10-18T10:41:37.477Z\"}"
+    "text": "{\"id\":\"casement\",\"customerId\":\"sonnet\",\"status\":\"delivered\",\"items\":[{\"sku\":\"SKU-NBUKXD\",\"quantity\":45,\"unitPrice\":385.16},{\"sku\":\"SKU-8Z6WY9\",\"quantity\":91,\"unitPrice\":886.96}],\"total\":1132.4,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"24973 Airport Road\",\"line2\":\"Suite 132\",\"city\":\"New Winnifred\",\"postalCode\":\"22135\",\"country\":\"GA\"},\"note\":\"We need to reboot the virtual ADP application!\",\"createdAt\":\"2026-01-15T05:07:27.185Z\"}"
    }
   ],
   "structuredContent": {
-   "id": "animi",
-   "customerId": "triumphus",
+   "id": "casement",
+   "customerId": "sonnet",
    "status": "delivered",
    "items": [
     {
-     "sku": "similique",
-     "quantity": 34,
-     "unitPrice": 860.6
+     "sku": "SKU-NBUKXD",
+     "quantity": 45,
+     "unitPrice": 385.16
     },
     {
-     "sku": "modi",
-     "quantity": 94,
-     "unitPrice": 370.11
+     "sku": "SKU-8Z6WY9",
+     "quantity": 91,
+     "unitPrice": 886.96
     }
    ],
-   "total": 442.66,
+   "total": 1132.4,
    "currency": "EUR",
    "shippingAddress": {
-    "line1": "creo",
-    "line2": "calcar",
-    "city": "vorax",
-    "postalCode": "aurum",
-    "country": "vergo"
+    "line1": "24973 Airport Road",
+    "line2": "Suite 132",
+    "city": "New Winnifred",
+    "postalCode": "22135",
+    "country": "GA"
    },
-   "note": "vobis",
-   "createdAt": "2025-10-18T10:41:37.477Z"
+   "note": "We need to reboot the virtual ADP application!",
+   "createdAt": "2026-01-15T05:07:27.185Z"
   }
  },
  "end_task": {
@@ -4471,41 +4471,41 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"id\":\"order_2\",\"customerId\":\"usque\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"trucido\",\"quantity\":47,\"unitPrice\":586.08},{\"sku\":\"adnuo\",\"quantity\":2,\"unitPrice\":373.86},{\"sku\":\"cauda\",\"quantity\":5,\"unitPrice\":232.73}],\"total\":848.26,\"currency\":\"sophismata\",\"shippingAddress\":{\"line1\":\"ver\",\"line2\":\"culpo\",\"city\":\"crur\",\"postalCode\":\"toties\",\"country\":\"deripio\"},\"note\":\"ubi\",\"createdAt\":\"2025-10-27T21:21:05.220Z\"}"
+    "text": "{\"id\":\"order_2\",\"customerId\":\"suitcase\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"SKU-UGL10D\",\"quantity\":26,\"unitPrice\":46.75},{\"sku\":\"SKU-8UNWEE\",\"quantity\":83,\"unitPrice\":497.74},{\"sku\":\"SKU-UCFV3F\",\"quantity\":26,\"unitPrice\":350.8}],\"total\":1993.77,\"currency\":\"usd\",\"shippingAddress\":{\"line1\":\"776 Stark Summit\",\"line2\":\"Suite 518\",\"city\":\"East Sergio\",\"postalCode\":\"92121\",\"country\":\"BN\"},\"note\":\"parsing the panel won't do anything, we need to hack the cross-platform COM interface!\",\"createdAt\":\"2026-01-14T22:47:07.819Z\"}"
    }
   ],
   "structuredContent": {
    "id": "order_2",
-   "customerId": "usque",
+   "customerId": "suitcase",
    "status": "cancelled",
    "items": [
     {
-     "sku": "trucido",
-     "quantity": 47,
-     "unitPrice": 586.08
+     "sku": "SKU-UGL10D",
+     "quantity": 26,
+     "unitPrice": 46.75
     },
     {
-     "sku": "adnuo",
-     "quantity": 2,
-     "unitPrice": 373.86
+     "sku": "SKU-8UNWEE",
+     "quantity": 83,
+     "unitPrice": 497.74
     },
     {
-     "sku": "cauda",
-     "quantity": 5,
-     "unitPrice": 232.73
+     "sku": "SKU-UCFV3F",
+     "quantity": 26,
+     "unitPrice": 350.8
     }
    ],
-   "total": 848.26,
-   "currency": "sophismata",
+   "total": 1993.77,
+   "currency": "usd",
    "shippingAddress": {
-    "line1": "ver",
-    "line2": "culpo",
-    "city": "crur",
-    "postalCode": "toties",
-    "country": "deripio"
+    "line1": "776 Stark Summit",
+    "line2": "Suite 518",
+    "city": "East Sergio",
+    "postalCode": "92121",
+    "country": "BN"
    },
-   "note": "ubi",
-   "createdAt": "2025-10-27T21:21:05.220Z"
+   "note": "parsing the panel won't do anything, we need to hack the cross-platform COM interface!",
+   "createdAt": "2026-01-14T22:47:07.819Z"
   }
  },
  "ro_call_tool_unknown": {

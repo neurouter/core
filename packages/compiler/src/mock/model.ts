@@ -28,8 +28,15 @@ export interface MockOperation {
   requestSchema: JsonSchema | null;
   /** PUT/PATCH on a collection path updating the item named by the body id (Petstore `PUT /pet`) */
   bodyId?: boolean;
-  /** pagination params understood by the list */
-  paging: { limit?: string; page?: string; offset?: string; cursor?: string; startingAfter?: string };
+  /**
+   * pagination params understood by the list: page size (`limit`, default and maximum from its schema),
+   * page number, offset, an opaque cursor, and id cursors (Stripe `starting_after` / `ending_before`)
+   */
+  paging: { limit?: string; page?: string; offset?: string; cursor?: string; startingAfter?: string; endingBefore?: string; defaultLimit?: number; maxLimit?: number };
+  /** list ops: query params that filter by a range object (`amount[gte]=50`, `created[lt]=…`): param → field */
+  rangeFilters?: Record<string, string>;
+  /** list ops: sort params (`sort=updated`, `direction=asc`, `order=desc`) */
+  sort?: { param?: string; directionParam?: string; defaultDirection?: 'asc' | 'desc' };
   example?: unknown;
 }
 
@@ -42,6 +49,12 @@ export interface MockResource {
   scopeParams: string[];
   /** default scope values (from examples or `demo`) */
   defaultScope: Record<string, string>;
+  /**
+   * The resource whose seed this one shares (same item schema and id field, fewer scope params:
+   * `/v1/charges/{charge}/refunds` → `/v1/refunds`), so an id names the same object in both
+   * collections (data version 2).
+   */
+  seedKey?: string;
 }
 
 export interface OpenApiMockModel {
@@ -98,9 +111,62 @@ function singular(word: string): string {
   return word;
 }
 
+/**
+ * The object properties of a schema, following `$ref`, `allOf` (merged) and `anyOf`/`oneOf` (first
+ * object branch). Item schemas taken from responses are often a bare `$ref` (Stripe
+ * `terminal.configuration`): reading `properties` directly found none, so the item id fell back to the
+ * path param (`configuration`) while the generated `id` stayed random, and no filter was recognized.
+ */
+export function objectProps(schema: unknown, depth = 0): Record<string, JsonSchema> {
+  if (!isObj(schema) || depth > 8) return {};
+  const defs = defsOf(schema);
+  const s = typeof schema.$ref === 'string' ? derefSchema(schema, defs) : schema;
+  const out: Record<string, JsonSchema> = {};
+  const resolve = (v: unknown): JsonSchema => (isObj(v) ? (withDefs(derefSchema(v, defs), defs) as JsonSchema) : {});
+  if (isObj(s.properties)) for (const [k, v] of Object.entries(s.properties as Obj)) out[k] = resolve(v);
+  if (Array.isArray(s.allOf)) for (const part of s.allOf) Object.assign(out, objectProps(withDefs(resolve(part), defs), depth + 1));
+  if (!Object.keys(out).length)
+    for (const k of ['anyOf', 'oneOf'] as const)
+      if (Array.isArray(s[k])) {
+        for (const b of s[k] as unknown[]) {
+          const p = objectProps(withDefs(resolve(b), defs), depth + 1);
+          if (Object.keys(p).length) return p;
+        }
+      }
+  return out;
+}
+
+/** The scalar type of a property schema (`type`, a nullable type list, or an anyOf with one scalar branch). */
+export function scalarTypeOf(schema: unknown): 'string' | 'integer' | 'number' | 'boolean' | null {
+  if (!isObj(schema)) return null;
+  const scalars = ['string', 'integer', 'number', 'boolean'];
+  if (typeof schema.type === 'string') return scalars.includes(schema.type) ? (schema.type as 'string') : null;
+  if (Array.isArray(schema.type)) {
+    const t = (schema.type as string[]).filter((x) => x !== 'null');
+    return t.length === 1 && scalars.includes(t[0]!) ? (t[0] as 'string') : null;
+  }
+  if (Array.isArray(schema.enum) && schema.enum.length) return typeof schema.enum[0] === 'string' ? 'string' : typeof schema.enum[0] === 'boolean' ? 'boolean' : typeof schema.enum[0] === 'number' ? 'number' : null;
+  for (const k of ['anyOf', 'oneOf'] as const)
+    if (Array.isArray(schema[k])) {
+      const ts = (schema[k] as unknown[]).map(scalarTypeOf).filter((x): x is NonNullable<typeof x> => x !== null);
+      if (ts.length === 1) return ts[0]!;
+    }
+  return null;
+}
+
+/** A query param schema that accepts a range object (`{gt, gte, lt, lte}`), alone or in an anyOf. */
+function isRangeParam(schema: unknown, defs: Obj): boolean {
+  if (!isObj(schema)) return false;
+  const s = derefSchema(schema, defs);
+  const props = isObj(s.properties) ? Object.keys(s.properties as Obj) : [];
+  if (props.length && props.every((p) => ['gt', 'gte', 'lt', 'lte'].includes(p))) return true;
+  for (const k of ['anyOf', 'oneOf'] as const) if (Array.isArray(s[k]) && (s[k] as unknown[]).some((b) => isRangeParam(b, defs))) return true;
+  return false;
+}
+
 function idFieldFor(itemSchema: JsonSchema, idParam: string | null): { field: string; type: 'integer' | 'string' } {
-  const props = isObj(itemSchema.properties) ? (itemSchema.properties as Record<string, JsonSchema>) : {};
-  const typeOf = (f: string): 'integer' | 'string' => (props[f]?.type === 'integer' || props[f]?.type === 'number' ? 'integer' : 'string');
+  const props = objectProps(itemSchema);
+  const typeOf = (f: string): 'integer' | 'string' => (scalarTypeOf(props[f]) === 'integer' || scalarTypeOf(props[f]) === 'number' ? 'integer' : 'string');
   if (idParam) {
     if (idParam in props) return { field: idParam, type: typeOf(idParam) };
     const lower = idParam.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -120,7 +186,7 @@ function paramArg(binding: HttpBinding, name: string): string {
 
 function scalarProps(schema: JsonSchema | null): Set<string> {
   const out = new Set<string>();
-  if (isObj(schema?.properties)) for (const [k, v] of Object.entries(schema.properties as Obj)) if (isObj(v) && ['string', 'integer', 'number', 'boolean'].includes(v.type as string)) out.add(k);
+  for (const [k, v] of Object.entries(objectProps(schema))) if (scalarTypeOf(v)) out.add(k);
   return out;
 }
 
@@ -151,7 +217,7 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
     const scopeParams = segs.filter(isParamSeg).map(paramName);
     const existing = resources[collection];
     if (existing) {
-      if (itemSchema && !isObj(existing.itemSchema.properties) && isObj(itemSchema.properties)) {
+      if (itemSchema && !Object.keys(objectProps(existing.itemSchema)).length && Object.keys(objectProps(itemSchema)).length) {
         const id = idFieldFor(itemSchema, idParam);
         Object.assign(existing, { itemSchema, idField: id.field, idType: id.type });
       }
@@ -196,6 +262,18 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
   for (const r of Object.values(resources)) {
     const k = schemaKey(r.itemSchema);
     if (k && !bySchemaName.has(k)) bySchemaName.set(k, r.key);
+  }
+  // nested collections of a top-level resource's objects share its seed (same id → same object)
+  const canonical = new Map<string, MockResource>();
+  for (const r of Object.values(resources)) {
+    const k = schemaKey(r.itemSchema);
+    if (!k) continue;
+    const c = canonical.get(k);
+    if (!c || r.scopeParams.length < c.scopeParams.length) canonical.set(k, r);
+  }
+  for (const r of Object.values(resources)) {
+    const c = canonical.get(schemaKey(r.itemSchema) ?? '');
+    if (c && c !== r && c.idField === r.idField && c.name === r.name) r.seedKey = c.key;
   }
 
   const operations: MockOperation[] = [];
@@ -251,18 +329,31 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
     if (base.kind === 'list' && base.resource) {
       const r = resources[base.resource]!;
       const fields = scalarProps(r.itemSchema);
+      const inProps = isObj(t.inputSchema.properties) ? (t.inputSchema.properties as Obj) : {};
+      const inDefs = defsOf(t.inputSchema);
       for (const p of b.params) {
         if (p.in !== 'query') continue;
         const n = p.name.toLowerCase();
-        if (['limit', 'per_page', 'page_size', 'pagesize'].includes(n)) base.paging.limit = p.name;
-        else if (n === 'page') base.paging.page = p.name;
+        const ps = derefSchema(inProps[p.arg] ?? {}, inDefs);
+        if (['limit', 'per_page', 'page_size', 'pagesize'].includes(n)) {
+          base.paging.limit = p.name;
+          if (typeof ps.default === 'number') base.paging.defaultLimit = ps.default;
+          if (typeof ps.maximum === 'number') base.paging.maxLimit = ps.maximum;
+        } else if (n === 'page') base.paging.page = p.name;
         else if (n === 'offset') base.paging.offset = p.name;
         else if (['cursor', 'page_token', 'pagetoken', 'after'].includes(n)) base.paging.cursor = p.name;
         else if (n === 'starting_after') base.paging.startingAfter = p.name;
-        else if (fields.has(p.name)) base.filters[p.name] = p.name;
-        else {
-          const match = [...fields].find((f) => f.toLowerCase() === n);
-          if (match) base.filters[p.name] = match;
+        else if (n === 'ending_before') base.paging.endingBefore = p.name;
+        else if (n === 'sort' || n === 'sort_by' || n === 'order_by') (base.sort ??= {}).param = p.name;
+        else if (n === 'direction' || n === 'order' || n === 'sort_direction') {
+          (base.sort ??= {}).directionParam = p.name;
+          if (ps.default === 'asc' || ps.default === 'desc') base.sort.defaultDirection = ps.default;
+        } else {
+          const field = fields.has(p.name) ? p.name : [...fields].find((f) => f.toLowerCase() === n);
+          if (!field) continue;
+          if (isRangeParam(ps, inDefs)) (base.rangeFilters ??= {})[p.name] = field;
+          // a deepObject param that is only a range (`created[gte]`) is not an equality filter on its own
+          if (p.style !== 'deepObject' || !isRangeParam(ps, inDefs) || scalarTypeOf(ps)) base.filters[p.name] = field;
         }
       }
       if (isObj(out) && out.type !== 'array' && isObj(out.properties)) {

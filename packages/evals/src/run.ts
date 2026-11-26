@@ -1,6 +1,8 @@
 import { agentSystemPrompt } from './prompts.js';
-import { checkAttempt, primaryTool, workCalls } from './check.js';
-import { judgeAttempt, needsJudge } from './judge.js';
+import { BEGIN_TASK_TOOL, checkAttempt, failedAnswerExpectations, primaryTool, workCalls, type CheckOptions } from './check.js';
+import { emptyJudgeUsage, judgeAttempt, judgeEquivalence, judgeTokens, needsJudge } from './judge.js';
+import type { GroundTruth } from './groundtruth.js';
+import type { CheckResult, JudgeResult, JudgeUsage } from './types.js';
 import { fallbackUsed, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmToolResultBlock, type LlmToolUseBlock } from './llm/types.js';
 import { resultText, taskIdFromResult, type McpSession } from './mcp.js';
 import type { StateReader } from './check.js';
@@ -92,6 +94,8 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
   };
 
   const tools = (await opts.mcp.listTools()).map((t) => ({ name: t.name, ...(t.description ? { description: t.description } : {}), input_schema: t.inputSchema }));
+  out.framingAvailable = tools.some((t) => t.name === BEGIN_TASK_TOOL);
+  out.toolsListBytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
   const messages: LlmMessageParam[] = [{ role: 'user', content: opts.prompt }];
   const system = agentSystemPrompt(opts.mcp.instructions);
   let totalCalls = 0;
@@ -237,6 +241,12 @@ export interface RunSuiteOptions {
   signal?: AbortSignal;
   /** Skip attempts already stored (resume). */
   hasResult?: (key: string) => boolean | Promise<boolean>;
+  /** The task's ground truth (reference calls on the attempt's mock seed); computed once per task and cached. */
+  groundTruth?: (task: EvalTask) => Promise<GroundTruth | null>;
+  /** Ask the judge whether a failed answer check is stated in another form (default true). */
+  equivalenceJudge?: boolean;
+  /** Hard token cap for the run (agent + judge tokens): no new attempt starts once it is reached; the run is marked incomplete. */
+  maxRunTokens?: number | null;
   onResult?: (r: TaskRunResult) => void | Promise<void>;
   onProgress?: (done: number, total: number) => void;
 }
@@ -245,8 +255,22 @@ export function attemptKey(taskKey: string, model: string, mode: EvalMode, attem
   return `${taskKey}|${model}|${mode}|${attempt}`;
 }
 
+export interface RunSuiteOutcome {
+  results: TaskRunResult[];
+  /** Set when `maxRunTokens` stopped the run before every attempt ran. */
+  incomplete: { reason: string; attemptsRun: number; attemptsPlanned: number } | null;
+  /** Tokens counted against `maxRunTokens` (agent attempts + judge calls of this run). */
+  tokensUsed: number;
+  judgeUsage: JudgeUsage;
+}
+
 /** Runs task × model × mode × attempt with bounded concurrency (default 4). Returns the new results. */
 export async function runSuite(opts: RunSuiteOptions): Promise<TaskRunResult[]> {
+  return (await runSuiteDetailed(opts)).results;
+}
+
+/** `runSuite` plus the spend: tokens used, judge usage, and whether `maxRunTokens` stopped it. */
+export async function runSuiteDetailed(opts: RunSuiteOptions): Promise<RunSuiteOutcome> {
   const jobs: AttemptContext[] = [];
   for (const task of opts.tasks.filter((t) => t.enabled !== false))
     for (const model of opts.models) for (const mode of opts.modes) for (let attempt = 1; attempt <= opts.repeats; attempt++) jobs.push({ task, model, mode, attempt, key: attemptKey(task.key, model, mode, attempt) });
@@ -255,9 +279,24 @@ export async function runSuite(opts: RunSuiteOptions): Promise<TaskRunResult[]> 
   const results: TaskRunResult[] = [];
   let fatal: unknown = null;
   let next = 0;
+  let used = 0;
+  let stopped = false;
+  let ran = 0;
+  const judgeUsage = emptyJudgeUsage();
+  const gtCache = new Map<string, Promise<GroundTruth | null>>();
+  const gtOf = (task: EvalTask) => {
+    if (!opts.groundTruth) return Promise.resolve(null);
+    let p = gtCache.get(task.key);
+    if (!p) gtCache.set(task.key, (p = opts.groundTruth(task).catch(() => null)));
+    return p;
+  };
   const worker = async () => {
     for (;;) {
       if (fatal || opts.signal?.aborted) return;
+      if (opts.maxRunTokens && used >= opts.maxRunTokens) {
+        if (next < jobs.length) stopped = true;
+        return;
+      }
       const job = jobs[next++];
       if (!job) return;
       if (opts.hasResult && (await opts.hasResult(job.key))) {
@@ -265,7 +304,10 @@ export async function runSuite(opts: RunSuiteOptions): Promise<TaskRunResult[]> 
         continue;
       }
       try {
-        const r = await runOne(opts, job);
+        const r = await runOne(opts, job, gtOf);
+        ran++;
+        used += r.inputTokens + r.cacheReadTokens + r.outputTokens + judgeTokens(r.judgeUsage);
+        if (r.judgeUsage) for (const k of ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens'] as const) judgeUsage[k] += r.judgeUsage[k];
         results.push(r);
         await opts.onResult?.(r);
       } catch (err) {
@@ -280,10 +322,55 @@ export async function runSuite(opts: RunSuiteOptions): Promise<TaskRunResult[]> 
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.concurrency ?? 4, total || 1)) }, worker));
   if (fatal) throw fatal;
-  return results;
+  const incomplete = stopped ? { reason: `--max-run-tokens ${opts.maxRunTokens} reached (${used} tokens used)`, attemptsRun: ran, attemptsPlanned: total } : null;
+  return { results, incomplete, tokensUsed: used, judgeUsage };
 }
 
-async function runOne(opts: RunSuiteOptions, job: AttemptContext): Promise<TaskRunResult> {
+export interface GradeOptions {
+  /** LLM for the rubric judge and the equivalence judge (none: judge assertions fail as "not judged", no equivalence). */
+  llm?: LlmClient | null;
+  judgeModel?: string;
+  groundTruth?: GroundTruth | null;
+  stateReader?: CheckOptions['stateReader'];
+  equivalenceJudge?: boolean;
+  /** A judge verdict to reuse (offline re-grade of a rubric judgment already made). */
+  judge?: JudgeResult | null;
+  signal?: AbortSignal;
+}
+
+/**
+ * Grades one attempt record (the run and the offline re-grade share it): rubric judge when the task has
+ * judge assertions, deterministic checks on the ground truth, then the equivalence judge for answer
+ * checks that normalized matching missed. Judge usage is returned with the check.
+ */
+export async function gradeAttempt(task: EvalTask, record: AttemptRecord, o: GradeOptions): Promise<{ check: CheckResult; judgeUsage: JudgeUsage }> {
+  const usage = emptyJudgeUsage();
+  const model = o.judgeModel ?? 'judge';
+  let judge: JudgeResult | null = o.judge ?? null;
+  const judgeable = record.endReason !== 'error' && record.endReason !== 'refusal';
+  if (!judge && o.llm && needsJudge(task) && judgeable) {
+    try {
+      judge = await judgeAttempt({ llm: o.llm, model, task, record, groundTruth: o.groundTruth ?? null, usage, ...(o.signal ? { signal: o.signal } : {}) });
+    } catch (err) {
+      if (err instanceof LlmKeyError) throw err;
+      judge = { score: 0, verdict: 'fail' as const, reasons: [`judge failed: ${(err as Error).message}`] };
+    }
+  }
+  const base: CheckOptions = { ...(o.stateReader ? { stateReader: o.stateReader } : {}), judge, groundTruth: o.groundTruth ?? null };
+  let check = await checkAttempt(task, record, base);
+  const items = failedAnswerExpectations(task, check, o.groundTruth ?? null);
+  if (o.llm && o.equivalenceJudge !== false && items.length && judgeable && record.finalAnswer.trim()) {
+    try {
+      const equivalence = await judgeEquivalence({ llm: o.llm, model, task, answer: record.finalAnswer, items, usage, ...(o.signal ? { signal: o.signal } : {}) });
+      if (Object.keys(equivalence).length) check = await checkAttempt(task, record, { ...base, equivalence });
+    } catch (err) {
+      if (err instanceof LlmKeyError) throw err;
+    }
+  }
+  return { check, judgeUsage: usage };
+}
+
+async function runOne(opts: RunSuiteOptions, job: AttemptContext, gtOf: (task: EvalTask) => Promise<GroundTruth | null>): Promise<TaskRunResult> {
   const session = await opts.openSession(job);
   try {
     const run = await runAttempt({
@@ -298,16 +385,15 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext): Promise<TaskR
     });
     const calls = session.collectCalls ? await session.collectCalls(run) : callsFromAgent(run.agentCalls);
     const record: AttemptRecord = { ...run, calls };
-    let judge = null;
-    if (needsJudge(job.task) && run.endReason !== 'error' && run.endReason !== 'refusal') {
-      try {
-        judge = await judgeAttempt({ llm: opts.judgeLlm ?? opts.llm, model: opts.judgeModel ?? job.model, task: job.task, record, ...(opts.signal ? { signal: opts.signal } : {}) });
-      } catch (err) {
-        if (err instanceof LlmKeyError) throw err;
-        judge = { score: 0, verdict: 'fail' as const, reasons: [`judge failed: ${(err as Error).message}`] };
-      }
-    }
-    const check = await checkAttempt(job.task, record, { ...(session.stateReader ? { stateReader: session.stateReader } : {}), judge });
+    const groundTruth = await gtOf(job.task);
+    const { check, judgeUsage } = await gradeAttempt(job.task, record, {
+      llm: opts.judgeLlm ?? opts.llm,
+      judgeModel: opts.judgeModel ?? job.model,
+      groundTruth,
+      ...(session.stateReader ? { stateReader: session.stateReader } : {}),
+      ...(opts.equivalenceJudge !== undefined ? { equivalenceJudge: opts.equivalenceJudge } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
     return {
       key: job.key,
       taskKey: job.task.key,
@@ -337,6 +423,11 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext): Promise<TaskR
       error: run.error,
       transcript: run.transcript,
       calls,
+      upstreamCalls: check.upstreamCalls,
+      callBudget: check.callBudget,
+      overBudget: check.overBudget,
+      judgeUsage: judgeUsage.calls ? judgeUsage : null,
+      ...(run.toolsListBytes !== undefined ? { toolsListBytes: run.toolsListBytes } : {}),
     };
   } finally {
     await session.close?.().catch(() => {});

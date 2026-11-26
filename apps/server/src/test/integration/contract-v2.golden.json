@@ -3381,33 +3381,33 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"id\":\"order_1\",\"customerId\":\"cimentarius\",\"status\":\"paid\",\"items\":[{\"sku\":\"tamen\",\"quantity\":75,\"unitPrice\":654.26}],\"total\":989.25,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"bibo\",\"line2\":\"capio\",\"city\":\"summopere\",\"postalCode\":\"demergo\",\"country\":\"alii\"},\"note\":\"depono\",\"createdAt\":\"2025-11-27T03:44:33.051Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":1}}"
+    "text": "{\"ok\":true,\"data\":{\"id\":\"order_1\",\"customerId\":\"ectoderm\",\"status\":\"paid\",\"items\":[{\"sku\":\"SKU-QQNZ78\",\"quantity\":73,\"unitPrice\":472.9}],\"total\":184.68,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"6078 Rodriguez Mountain\",\"line2\":\"Suite 216\",\"city\":\"Jessycafurt\",\"postalCode\":\"44913-4299\",\"country\":\"KN\"},\"note\":\"We need to generate the online SCSI application!\",\"createdAt\":\"2026-01-15T04:38:59.755Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":1}}"
    }
   ],
   "structuredContent": {
    "ok": true,
    "data": {
     "id": "order_1",
-    "customerId": "cimentarius",
+    "customerId": "ectoderm",
     "status": "paid",
     "items": [
      {
-      "sku": "tamen",
-      "quantity": 75,
-      "unitPrice": 654.26
+      "sku": "SKU-QQNZ78",
+      "quantity": 73,
+      "unitPrice": 472.9
      }
     ],
-    "total": 989.25,
+    "total": 184.68,
     "currency": "EUR",
     "shippingAddress": {
-     "line1": "bibo",
-     "line2": "capio",
-     "city": "summopere",
-     "postalCode": "demergo",
-     "country": "alii"
+     "line1": "6078 Rodriguez Mountain",
+     "line2": "Suite 216",
+     "city": "Jessycafurt",
+     "postalCode": "44913-4299",
+     "country": "KN"
     },
-    "note": "depono",
-    "createdAt": "2025-11-27T03:44:33.051Z"
+    "note": "We need to generate the online SCSI application!",
+    "createdAt": "2026-01-15T04:38:59.755Z"
    },
    "page": null,
    "truncated": null,
@@ -3428,33 +3428,33 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"id\":\"order_1\",\"customerId\":\"cimentarius\",\"status\":\"paid\",\"items\":[{\"sku\":\"tamen\",\"quantity\":75,\"unitPrice\":654.26}],\"total\":989.25,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"bibo\",\"line2\":\"capio\",\"city\":\"summopere\",\"postalCode\":\"demergo\",\"country\":\"alii\"},\"note\":\"depono\",\"createdAt\":\"2025-11-27T03:44:33.051Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":2,\"streak\":2}}"
+    "text": "{\"ok\":true,\"data\":{\"id\":\"order_1\",\"customerId\":\"ectoderm\",\"status\":\"paid\",\"items\":[{\"sku\":\"SKU-QQNZ78\",\"quantity\":73,\"unitPrice\":472.9}],\"total\":184.68,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"6078 Rodriguez Mountain\",\"line2\":\"Suite 216\",\"city\":\"Jessycafurt\",\"postalCode\":\"44913-4299\",\"country\":\"KN\"},\"note\":\"We need to generate the online SCSI application!\",\"createdAt\":\"2026-01-15T04:38:59.755Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":2,\"streak\":2}}"
    }
   ],
   "structuredContent": {
    "ok": true,
    "data": {
     "id": "order_1",
-    "customerId": "cimentarius",
+    "customerId": "ectoderm",
     "status": "paid",
     "items": [
      {
-      "sku": "tamen",
-      "quantity": 75,
-      "unitPrice": 654.26
+      "sku": "SKU-QQNZ78",
+      "quantity": 73,
+      "unitPrice": 472.9
      }
     ],
-    "total": 989.25,
+    "total": 184.68,
     "currency": "EUR",
     "shippingAddress": {
-     "line1": "bibo",
-     "line2": "capio",
-     "city": "summopere",
-     "postalCode": "demergo",
-     "country": "alii"
+     "line1": "6078 Rodriguez Mountain",
+     "line2": "Suite 216",
+     "city": "Jessycafurt",
+     "postalCode": "44913-4299",
+     "country": "KN"
     },
-    "note": "depono",
-    "createdAt": "2025-11-27T03:44:33.051Z"
+    "note": "We need to generate the online SCSI application!",
+    "createdAt": "2026-01-15T04:38:59.755Z"
    },
    "page": null,
    "truncated": null,
@@ -3474,7 +3474,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"nextCursor\":\"2\",\"total_count\":20,\"items\":[{\"id\":\"order_1\",\"customerId\":\"cimentarius\",\"status\":\"paid\",\"items\":[{\"sku\":\"tamen\",\"quantity\":75,\"unitPrice\":654.26}],\"total\":989.25,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"bibo\",\"line2\":\"capio\",\"city\":\"summopere\",\"postalCode\":\"demergo\",\"country\":\"alii\"},\"note\":\"depono\",\"createdAt\":\"2025-11-27T03:44:33.051Z\"},{\"id\":\"order_2\",\"customerId\":\"usque\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"trucido\",\"quantity\":47,\"unitPrice\":586.08},{\"sku\":\"adnuo\",\"quantity\":2,\"unitPrice\":373.86},{\"sku\":\"cauda\",\"quantity\":5,\"unitPrice\":232.73}],\"total\":848.26,\"currency\":\"sophismata\",\"shippingAddress\":{\"line1\":\"ver\",\"line2\":\"culpo\",\"city\":\"crur\",\"postalCode\":\"toties\",\"country\":\"deripio\"},\"note\":\"ubi\",\"createdAt\":\"2025-10-27T21:21:05.220Z\"}]},\"page\":{\"count\":2,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":3}}"
+    "text": "{\"ok\":true,\"data\":{\"nextCursor\":\"2\",\"total_count\":20,\"items\":[{\"id\":\"order_1\",\"customerId\":\"ectoderm\",\"status\":\"paid\",\"items\":[{\"sku\":\"SKU-QQNZ78\",\"quantity\":73,\"unitPrice\":472.9}],\"total\":184.68,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"6078 Rodriguez Mountain\",\"line2\":\"Suite 216\",\"city\":\"Jessycafurt\",\"postalCode\":\"44913-4299\",\"country\":\"KN\"},\"note\":\"We need to generate the online SCSI application!\",\"createdAt\":\"2026-01-15T04:38:59.755Z\"},{\"id\":\"order_2\",\"customerId\":\"suitcase\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"SKU-UGL10D\",\"quantity\":26,\"unitPrice\":46.75},{\"sku\":\"SKU-8UNWEE\",\"quantity\":83,\"unitPrice\":497.74},{\"sku\":\"SKU-UCFV3F\",\"quantity\":26,\"unitPrice\":350.8}],\"total\":1993.77,\"currency\":\"usd\",\"shippingAddress\":{\"line1\":\"776 Stark Summit\",\"line2\":\"Suite 518\",\"city\":\"East Sergio\",\"postalCode\":\"92121\",\"country\":\"BN\"},\"note\":\"parsing the panel won't do anything, we need to hack the cross-platform COM interface!\",\"createdAt\":\"2026-01-14T22:47:07.819Z\"}]},\"page\":{\"count\":2,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":3}}"
    }
   ],
   "structuredContent": {
@@ -3485,59 +3485,59 @@
     "items": [
      {
       "id": "order_1",
-      "customerId": "cimentarius",
+      "customerId": "ectoderm",
       "status": "paid",
       "items": [
        {
-        "sku": "tamen",
-        "quantity": 75,
-        "unitPrice": 654.26
+        "sku": "SKU-QQNZ78",
+        "quantity": 73,
+        "unitPrice": 472.9
        }
       ],
-      "total": 989.25,
+      "total": 184.68,
       "currency": "EUR",
       "shippingAddress": {
-       "line1": "bibo",
-       "line2": "capio",
-       "city": "summopere",
-       "postalCode": "demergo",
-       "country": "alii"
+       "line1": "6078 Rodriguez Mountain",
+       "line2": "Suite 216",
+       "city": "Jessycafurt",
+       "postalCode": "44913-4299",
+       "country": "KN"
       },
-      "note": "depono",
-      "createdAt": "2025-11-27T03:44:33.051Z"
+      "note": "We need to generate the online SCSI application!",
+      "createdAt": "2026-01-15T04:38:59.755Z"
      },
      {
       "id": "order_2",
-      "customerId": "usque",
+      "customerId": "suitcase",
       "status": "cancelled",
       "items": [
        {
-        "sku": "trucido",
-        "quantity": 47,
-        "unitPrice": 586.08
+        "sku": "SKU-UGL10D",
+        "quantity": 26,
+        "unitPrice": 46.75
        },
        {
-        "sku": "adnuo",
-        "quantity": 2,
-        "unitPrice": 373.86
+        "sku": "SKU-8UNWEE",
+        "quantity": 83,
+        "unitPrice": 497.74
        },
        {
-        "sku": "cauda",
-        "quantity": 5,
-        "unitPrice": 232.73
+        "sku": "SKU-UCFV3F",
+        "quantity": 26,
+        "unitPrice": 350.8
        }
       ],
-      "total": 848.26,
-      "currency": "sophismata",
+      "total": 1993.77,
+      "currency": "usd",
       "shippingAddress": {
-       "line1": "ver",
-       "line2": "culpo",
-       "city": "crur",
-       "postalCode": "toties",
-       "country": "deripio"
+       "line1": "776 Stark Summit",
+       "line2": "Suite 518",
+       "city": "East Sergio",
+       "postalCode": "92121",
+       "country": "BN"
       },
-      "note": "ubi",
-      "createdAt": "2025-10-27T21:21:05.220Z"
+      "note": "parsing the panel won't do anything, we need to hack the cross-platform COM interface!",
+      "createdAt": "2026-01-14T22:47:07.819Z"
      }
     ]
    },
@@ -3563,7 +3563,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"nextCursor\":\"4\",\"total_count\":20,\"items\":[{\"id\":\"order_3\",\"customerId\":\"sunt\",\"status\":\"delivered\",\"items\":[{\"sku\":\"cilicium\",\"quantity\":89,\"unitPrice\":958.49},{\"sku\":\"soluta\",\"quantity\":34,\"unitPrice\":653.75},{\"sku\":\"triduana\",\"quantity\":64,\"unitPrice\":479.28}],\"total\":724.85,\"currency\":\"accusamus\",\"shippingAddress\":{\"line1\":\"benevolentia\",\"line2\":\"vir\",\"city\":\"deporto\",\"postalCode\":\"defluo\",\"country\":\"aurum\"},\"note\":\"sint\",\"createdAt\":\"2025-12-07T16:54:15.311Z\"},{\"id\":\"order_4\",\"customerId\":\"socius\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"vivo\",\"quantity\":48,\"unitPrice\":389.28},{\"sku\":\"capto\",\"quantity\":92,\"unitPrice\":938.87}],\"total\":880.65,\"currency\":\"crinis\",\"shippingAddress\":{\"line1\":\"supellex\",\"line2\":\"pecto\",\"city\":\"recusandae\",\"postalCode\":\"comes\",\"country\":\"abscido\"},\"note\":\"arca\",\"createdAt\":\"2025-11-11T01:15:24.668Z\"}]},\"page\":{\"count\":2,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":4}}"
+    "text": "{\"ok\":true,\"data\":{\"nextCursor\":\"4\",\"total_count\":20,\"items\":[{\"id\":\"order_3\",\"customerId\":\"provision\",\"status\":\"delivered\",\"items\":[{\"sku\":\"SKU-AVYNBN\",\"quantity\":84,\"unitPrice\":632.3},{\"sku\":\"SKU-HQ07YH\",\"quantity\":47,\"unitPrice\":192.9},{\"sku\":\"SKU-NOUR5F\",\"quantity\":101,\"unitPrice\":998.41}],\"total\":1804.82,\"currency\":\"usd\",\"shippingAddress\":{\"line1\":\"75115 Bertram Plain\",\"line2\":\"Suite 228\",\"city\":\"Rowlett\",\"postalCode\":\"76532\",\"country\":\"PN\"},\"note\":\"I'll hack the 1080p XML microchip, that should hard drive the IB program!\",\"createdAt\":\"2026-01-14T17:32:07.646Z\"},{\"id\":\"order_4\",\"customerId\":\"pasta\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"SKU-YGE8WX\",\"quantity\":89,\"unitPrice\":391.16},{\"sku\":\"SKU-PLMB05\",\"quantity\":46,\"unitPrice\":417.16}],\"total\":941.63,\"currency\":\"chf\",\"shippingAddress\":{\"line1\":\"597 S Central Avenue\",\"line2\":\"Suite 653\",\"city\":\"Port Francisca\",\"postalCode\":\"69114\",\"country\":\"BI\"},\"note\":\"You can't back up the sensor without backing up the wireless XSS array!\",\"createdAt\":\"2026-01-14T10:46:18.257Z\"}]},\"page\":{\"count\":2,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":4}}"
    }
   ],
   "structuredContent": {
@@ -3574,64 +3574,64 @@
     "items": [
      {
       "id": "order_3",
-      "customerId": "sunt",
+      "customerId": "provision",
       "status": "delivered",
       "items": [
        {
-        "sku": "cilicium",
-        "quantity": 89,
-        "unitPrice": 958.49
+        "sku": "SKU-AVYNBN",
+        "quantity": 84,
+        "unitPrice": 632.3
        },
        {
-        "sku": "soluta",
-        "quantity": 34,
-        "unitPrice": 653.75
+        "sku": "SKU-HQ07YH",
+        "quantity": 47,
+        "unitPrice": 192.9
        },
        {
-        "sku": "triduana",
-        "quantity": 64,
-        "unitPrice": 479.28
+        "sku": "SKU-NOUR5F",
+        "quantity": 101,
+        "unitPrice": 998.41
        }
       ],
-      "total": 724.85,
-      "currency": "accusamus",
+      "total": 1804.82,
+      "currency": "usd",
       "shippingAddress": {
-       "line1": "benevolentia",
-       "line2": "vir",
-       "city": "deporto",
-       "postalCode": "defluo",
-       "country": "aurum"
+       "line1": "75115 Bertram Plain",
+       "line2": "Suite 228",
+       "city": "Rowlett",
+       "postalCode": "76532",
+       "country": "PN"
       },
-      "note": "sint",
-      "createdAt": "2025-12-07T16:54:15.311Z"
+      "note": "I'll hack the 1080p XML microchip, that should hard drive the IB program!",
+      "createdAt": "2026-01-14T17:32:07.646Z"
      },
      {
       "id": "order_4",
-      "customerId": "socius",
+      "customerId": "pasta",
       "status": "cancelled",
       "items": [
        {
-        "sku": "vivo",
-        "quantity": 48,
-        "unitPrice": 389.28
+        "sku": "SKU-YGE8WX",
+        "quantity": 89,
+        "unitPrice": 391.16
        },
        {
-        "sku": "capto",
-        "quantity": 92,
-        "unitPrice": 938.87
+        "sku": "SKU-PLMB05",
+        "quantity": 46,
+        "unitPrice": 417.16
        }
       ],
-      "total": 880.65,
-      "currency": "crinis",
+      "total": 941.63,
+      "currency": "chf",
       "shippingAddress": {
-       "line1": "supellex",
-       "line2": "pecto",
-       "city": "recusandae",
-       "postalCode": "comes",
-       "country": "abscido"
+       "line1": "597 S Central Avenue",
+       "line2": "Suite 653",
+       "city": "Port Francisca",
+       "postalCode": "69114",
+       "country": "BI"
       },
-      "note": "arca",
-      "createdAt": "2025-11-11T01:15:24.668Z"
+      "note": "You can't back up the sensor without backing up the wireless XSS array!",
+      "createdAt": "2026-01-14T10:46:18.257Z"
      }
     ]
    },
@@ -3657,7 +3657,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"nextCursor\":\"2\",\"total_count\":20,\"items\":[{\"id\":\"order_1\",\"status\":\"paid\",\"total\":989.25},{\"id\":\"order_2\",\"status\":\"cancelled\",\"total\":848.26}]},\"page\":{\"count\":2,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":5}}"
+    "text": "{\"ok\":true,\"data\":{\"nextCursor\":\"2\",\"total_count\":20,\"items\":[{\"id\":\"order_1\",\"status\":\"paid\",\"total\":184.68},{\"id\":\"order_2\",\"status\":\"cancelled\",\"total\":1993.77}]},\"page\":{\"count\":2,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":5}}"
    }
   ],
   "structuredContent": {
@@ -3669,12 +3669,12 @@
      {
       "id": "order_1",
       "status": "paid",
-      "total": 989.25
+      "total": 184.68
      },
      {
       "id": "order_2",
       "status": "cancelled",
-      "total": 848.26
+      "total": 1993.77
      }
     ]
    },
@@ -3744,19 +3744,19 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"id\":\"customer_1\",\"name\":\"except\",\"email\":\"freddy.torphy53@hotmail.com\",\"phone\":\"785.937.9722 x8216\",\"orderCount\":93,\"lifetimeSpend\":900.94,\"createdAt\":\"2025-12-14T01:36:24.665Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":7}}"
+    "text": "{\"ok\":true,\"data\":{\"id\":\"customer_1\",\"name\":\"Mrs. Alysson Monahan\",\"email\":\"freddy.torphy53@hotmail.com\",\"phone\":\"785.937.9722 x8216\",\"orderCount\":93,\"lifetimeSpend\":900.94,\"createdAt\":\"2026-01-15T01:00:25.279Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":7}}"
    }
   ],
   "structuredContent": {
    "ok": true,
    "data": {
     "id": "customer_1",
-    "name": "except",
+    "name": "Mrs. Alysson Monahan",
     "email": "freddy.torphy53@hotmail.com",
     "phone": "785.937.9722 x8216",
     "orderCount": 93,
     "lifetimeSpend": 900.94,
-    "createdAt": "2025-12-14T01:36:24.665Z"
+    "createdAt": "2026-01-15T01:00:25.279Z"
    },
    "page": null,
    "truncated": null,
@@ -3775,7 +3775,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"nextCursor\":\"3\",\"total_count\":20,\"items\":[{\"id\":\"customer_1\",\"name\":\"except\",\"email\":\"freddy.torphy53@hotmail.com\",\"phone\":\"785.937.9722 x8216\",\"orderCount\":93,\"lifetimeSpend\":900.94,\"createdAt\":\"2025-12-14T01:36:24.665Z\"},{\"id\":\"customer_2\",\"name\":\"stealthily lest including\",\"email\":\"tianna_osinski-haley15@gmail.com\",\"phone\":\"709-246-4052 x47867\",\"orderCount\":48,\"lifetimeSpend\":380.8,\"createdAt\":\"2025-10-02T19:10:37.396Z\"},{\"id\":\"customer_3\",\"name\":\"aha an\",\"email\":\"kaylie_zieme@yahoo.com\",\"phone\":\"390.335.8943\",\"orderCount\":94,\"lifetimeSpend\":425.44,\"createdAt\":\"2025-11-20T16:42:39.152Z\"}]},\"page\":{\"count\":3,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":8}}"
+    "text": "{\"ok\":true,\"data\":{\"nextCursor\":\"3\",\"total_count\":20,\"items\":[{\"id\":\"customer_1\",\"name\":\"Mrs. Alysson Monahan\",\"email\":\"freddy.torphy53@hotmail.com\",\"phone\":\"785.937.9722 x8216\",\"orderCount\":93,\"lifetimeSpend\":900.94,\"createdAt\":\"2026-01-15T01:00:25.279Z\"},{\"id\":\"customer_2\",\"name\":\"Ollie Windler\",\"email\":\"marshall_fisher40@gmail.com\",\"phone\":\"(937) 551-1392 x9637\",\"orderCount\":16,\"lifetimeSpend\":324.58,\"createdAt\":\"2026-01-14T22:18:32.009Z\"},{\"id\":\"customer_3\",\"name\":\"Oren Kuhlman\",\"email\":\"reva15@hotmail.com\",\"phone\":\"351-496-4622 x9013\",\"orderCount\":58,\"lifetimeSpend\":891.26,\"createdAt\":\"2026-01-14T12:34:13.123Z\"}]},\"page\":{\"count\":3,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":8}}"
    }
   ],
   "structuredContent": {
@@ -3786,30 +3786,30 @@
     "items": [
      {
       "id": "customer_1",
-      "name": "except",
+      "name": "Mrs. Alysson Monahan",
       "email": "freddy.torphy53@hotmail.com",
       "phone": "785.937.9722 x8216",
       "orderCount": 93,
       "lifetimeSpend": 900.94,
-      "createdAt": "2025-12-14T01:36:24.665Z"
+      "createdAt": "2026-01-15T01:00:25.279Z"
      },
      {
       "id": "customer_2",
-      "name": "stealthily lest including",
-      "email": "tianna_osinski-haley15@gmail.com",
-      "phone": "709-246-4052 x47867",
-      "orderCount": 48,
-      "lifetimeSpend": 380.8,
-      "createdAt": "2025-10-02T19:10:37.396Z"
+      "name": "Ollie Windler",
+      "email": "marshall_fisher40@gmail.com",
+      "phone": "(937) 551-1392 x9637",
+      "orderCount": 16,
+      "lifetimeSpend": 324.58,
+      "createdAt": "2026-01-14T22:18:32.009Z"
      },
      {
       "id": "customer_3",
-      "name": "aha an",
-      "email": "kaylie_zieme@yahoo.com",
-      "phone": "390.335.8943",
-      "orderCount": 94,
-      "lifetimeSpend": 425.44,
-      "createdAt": "2025-11-20T16:42:39.152Z"
+      "name": "Oren Kuhlman",
+      "email": "reva15@hotmail.com",
+      "phone": "351-496-4622 x9013",
+      "orderCount": 58,
+      "lifetimeSpend": 891.26,
+      "createdAt": "2026-01-14T12:34:13.123Z"
      }
     ]
    },
@@ -3945,7 +3945,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"total_count\":20,\"items\":[{\"sku\":\"product_1\",\"name\":\"meanwhile\",\"price\":194.17,\"currency\":\"dedecor\",\"stock\":97},{\"sku\":\"product_2\",\"name\":\"other\",\"price\":680.52,\"currency\":\"abundans\",\"stock\":83},{\"sku\":\"product_3\",\"name\":\"following\",\"price\":916.05,\"currency\":\"vero\",\"stock\":1}]},\"page\":{\"count\":3,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\",\"scope\":{\"limit\":20}},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":12}}"
+    "text": "{\"ok\":true,\"data\":{\"total_count\":20,\"items\":[{\"sku\":\"product_1\",\"name\":\"Elegant Metal Gloves\",\"price\":392.37,\"currency\":\"cad\",\"stock\":97},{\"sku\":\"product_2\",\"name\":\"Oriental Metal Pizza\",\"price\":1362.64,\"currency\":\"usd\",\"stock\":83},{\"sku\":\"product_3\",\"name\":\"Licensed Rubber Gloves\",\"price\":1832.52,\"currency\":\"usd\",\"stock\":1}]},\"page\":{\"count\":3,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\",\"scope\":{\"limit\":20}},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":12}}"
    }
   ],
   "structuredContent": {
@@ -3955,23 +3955,23 @@
     "items": [
      {
       "sku": "product_1",
-      "name": "meanwhile",
-      "price": 194.17,
-      "currency": "dedecor",
+      "name": "Elegant Metal Gloves",
+      "price": 392.37,
+      "currency": "cad",
       "stock": 97
      },
      {
       "sku": "product_2",
-      "name": "other",
-      "price": 680.52,
-      "currency": "abundans",
+      "name": "Oriental Metal Pizza",
+      "price": 1362.64,
+      "currency": "usd",
       "stock": 83
      },
      {
       "sku": "product_3",
-      "name": "following",
-      "price": 916.05,
-      "currency": "vero",
+      "name": "Licensed Rubber Gloves",
+      "price": 1832.52,
+      "currency": "usd",
       "stock": 1
      }
     ]
@@ -4001,7 +4001,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"total_count\":20,\"items\":[{\"sku\":\"product_4\",\"name\":\"newsletter\",\"price\":213.01,\"currency\":\"sonitus\",\"stock\":43},{\"sku\":\"product_5\",\"name\":\"near\",\"price\":455.27,\"currency\":\"cursim\",\"stock\":1},{\"sku\":\"product_6\",\"name\":\"inside\",\"price\":359.19,\"currency\":\"eligendi\",\"stock\":100}]},\"page\":{\"count\":3,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\",\"scope\":{\"limit\":20}},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":13}}"
+    "text": "{\"ok\":true,\"data\":{\"total_count\":20,\"items\":[{\"sku\":\"product_4\",\"name\":\"Recycled Aluminum Pants\",\"price\":429.95,\"currency\":\"jpy\",\"stock\":43},{\"sku\":\"product_5\",\"name\":\"Licensed Metal Pants\",\"price\":913.26,\"currency\":\"cad\",\"stock\":1},{\"sku\":\"product_6\",\"name\":\"Generic Rubber Keyboard\",\"price\":721.58,\"currency\":\"aud\",\"stock\":100}]},\"page\":{\"count\":3,\"total\":20,\"has_more\":true,\"next_cursor\":\"c_<cursor>\",\"scope\":{\"limit\":20}},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":13}}"
    }
   ],
   "structuredContent": {
@@ -4011,23 +4011,23 @@
     "items": [
      {
       "sku": "product_4",
-      "name": "newsletter",
-      "price": 213.01,
-      "currency": "sonitus",
+      "name": "Recycled Aluminum Pants",
+      "price": 429.95,
+      "currency": "jpy",
       "stock": 43
      },
      {
       "sku": "product_5",
-      "name": "near",
-      "price": 455.27,
-      "currency": "cursim",
+      "name": "Licensed Metal Pants",
+      "price": 913.26,
+      "currency": "cad",
       "stock": 1
      },
      {
       "sku": "product_6",
-      "name": "inside",
-      "price": 359.19,
-      "currency": "eligendi",
+      "name": "Generic Rubber Keyboard",
+      "price": 721.58,
+      "currency": "aud",
       "stock": 100
      }
     ]
@@ -4057,7 +4057,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace\",\"email\":\"ada@example.com\",\"phone\":\"(535) 574-7184 x346\",\"orderCount\":39,\"lifetimeSpend\":267.12,\"createdAt\":\"2026-01-02T04:41:36.878Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":14,\"wrote\":\"create_customer → customer customer_21\"}}"
+    "text": "{\"ok\":true,\"data\":{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace\",\"email\":\"ada@example.com\",\"phone\":\"664-780-9054 x3547\",\"orderCount\":47,\"lifetimeSpend\":799.39,\"createdAt\":\"2026-01-10T05:09:32.930Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":14,\"wrote\":\"create_customer → customer customer_21\"}}"
    }
   ],
   "structuredContent": {
@@ -4066,10 +4066,10 @@
     "id": "customer_21",
     "name": "Ada Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace",
     "email": "ada@example.com",
-    "phone": "(535) 574-7184 x346",
-    "orderCount": 39,
-    "lifetimeSpend": 267.12,
-    "createdAt": "2026-01-02T04:41:36.878Z"
+    "phone": "664-780-9054 x3547",
+    "orderCount": 47,
+    "lifetimeSpend": 799.39,
+    "createdAt": "2026-01-10T05:09:32.930Z"
    },
    "page": null,
    "truncated": null,
@@ -4091,7 +4091,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace …\",\"email\":\"ada@example.com\",\"phone\":\"(535) 574-7184 x346\",\"orderCount\":39,\"lifetimeSpend\":267.12,\"createdAt\":\"2026-01-02T04:41:36.878Z\"},\"page\":null,\"truncated\":{\"fields\":[\"name\"],\"omitted_bytes\":230,\"next\":{\"tool\":\"get_customer\",\"args\":{\"customer_id\":\"customer_21\",\"fields\":[\"name\"]}}},\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":15}}"
+    "text": "{\"ok\":true,\"data\":{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace …\",\"email\":\"ada@example.com\",\"phone\":\"664-780-9054 x3547\",\"orderCount\":47,\"lifetimeSpend\":799.39,\"createdAt\":\"2026-01-10T05:09:32.930Z\"},\"page\":null,\"truncated\":{\"fields\":[\"name\"],\"omitted_bytes\":230,\"next\":{\"tool\":\"get_customer\",\"args\":{\"customer_id\":\"customer_21\",\"fields\":[\"name\"]}}},\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":15}}"
    }
   ],
   "structuredContent": {
@@ -4100,10 +4100,10 @@
     "id": "customer_21",
     "name": "Ada Lovelace Lovelace Lovelace Lovelace …",
     "email": "ada@example.com",
-    "phone": "(535) 574-7184 x346",
-    "orderCount": 39,
-    "lifetimeSpend": 267.12,
-    "createdAt": "2026-01-02T04:41:36.878Z"
+    "phone": "664-780-9054 x3547",
+    "orderCount": 47,
+    "lifetimeSpend": 799.39,
+    "createdAt": "2026-01-10T05:09:32.930Z"
    },
    "page": null,
    "truncated": {
@@ -5255,7 +5255,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":[{\"sku\":\"product_4\",\"name\":\"newsletter\",\"price\":213.01,\"currency\":\"sonitus\",\"stock\":43},{\"sku\":\"product_5\",\"name\":\"near\",\"price\":455.27,\"currency\":\"cursim\",\"stock\":1},{\"sku\":\"product_6\",\"name\":\"inside\",\"price\":359.19,\"currency\":\"eligendi\",\"stock\":100},{\"sku\":\"product_7\",\"name\":\"if unless\",\"price\":966.62,\"currency\":\"sopor\",\"stock\":40},{\"sku\":\"product_8\",\"name\":\"ambitious\",\"price\":508.09,\"currency\":\"totus\",\"stock\":50}],\"page\":{\"count\":5,\"total\":20,\"has_more\":true,\"next_cursor\":null},\"truncated\":{\"items_omitted\":12,\"omitted_bytes\":1008,\"next\":{\"tool\":\"neurouter_read_result\",\"args\":{\"handle\":\"rh_<id>\",\"offset\":8,\"limit\":5}}},\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":43}}"
+    "text": "{\"ok\":true,\"data\":[{\"sku\":\"product_4\",\"name\":\"Recycled Aluminum Pants\",\"price\":429.95,\"currency\":\"jpy\",\"stock\":43},{\"sku\":\"product_5\",\"name\":\"Licensed Metal Pants\",\"price\":913.26,\"currency\":\"cad\",\"stock\":1},{\"sku\":\"product_6\",\"name\":\"Generic Rubber Keyboard\",\"price\":721.58,\"currency\":\"aud\",\"stock\":100},{\"sku\":\"product_7\",\"name\":\"Fantastic Granite Chips\",\"price\":933.49,\"currency\":\"chf\",\"stock\":10},{\"sku\":\"product_8\",\"name\":\"Sleek Marble Bacon\",\"price\":1018.64,\"currency\":\"sek\",\"stock\":50}],\"page\":{\"count\":5,\"total\":20,\"has_more\":true,\"next_cursor\":null},\"truncated\":{\"items_omitted\":12,\"omitted_bytes\":1138,\"next\":{\"tool\":\"neurouter_read_result\",\"args\":{\"handle\":\"rh_<id>\",\"offset\":8,\"limit\":5}}},\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":43}}"
    }
   ],
   "structuredContent": {
@@ -5263,37 +5263,37 @@
    "data": [
     {
      "sku": "product_4",
-     "name": "newsletter",
-     "price": 213.01,
-     "currency": "sonitus",
+     "name": "Recycled Aluminum Pants",
+     "price": 429.95,
+     "currency": "jpy",
      "stock": 43
     },
     {
      "sku": "product_5",
-     "name": "near",
-     "price": 455.27,
-     "currency": "cursim",
+     "name": "Licensed Metal Pants",
+     "price": 913.26,
+     "currency": "cad",
      "stock": 1
     },
     {
      "sku": "product_6",
-     "name": "inside",
-     "price": 359.19,
-     "currency": "eligendi",
+     "name": "Generic Rubber Keyboard",
+     "price": 721.58,
+     "currency": "aud",
      "stock": 100
     },
     {
      "sku": "product_7",
-     "name": "if unless",
-     "price": 966.62,
-     "currency": "sopor",
-     "stock": 40
+     "name": "Fantastic Granite Chips",
+     "price": 933.49,
+     "currency": "chf",
+     "stock": 10
     },
     {
      "sku": "product_8",
-     "name": "ambitious",
-     "price": 508.09,
-     "currency": "totus",
+     "name": "Sleek Marble Bacon",
+     "price": 1018.64,
+     "currency": "sek",
      "stock": 50
     }
    ],
@@ -5305,7 +5305,7 @@
    },
    "truncated": {
     "items_omitted": 12,
-    "omitted_bytes": 1008,
+    "omitted_bytes": 1138,
     "next": {
      "tool": "neurouter_read_result",
      "args": {
@@ -5359,43 +5359,43 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"id\":\"order_2\",\"customerId\":\"usque\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"trucido\",\"quantity\":47,\"unitPrice\":586.08},{\"sku\":\"adnuo\",\"quantity\":2,\"unitPrice\":373.86},{\"sku\":\"cauda\",\"quantity\":5,\"unitPrice\":232.73}],\"total\":848.26,\"currency\":\"sophismata\",\"shippingAddress\":{\"line1\":\"ver\",\"line2\":\"culpo\",\"city\":\"crur\",\"postalCode\":\"toties\",\"country\":\"deripio\"},\"note\":\"ubi\",\"createdAt\":\"2025-10-27T21:21:05.220Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":45}}"
+    "text": "{\"ok\":true,\"data\":{\"id\":\"order_2\",\"customerId\":\"suitcase\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"SKU-UGL10D\",\"quantity\":26,\"unitPrice\":46.75},{\"sku\":\"SKU-8UNWEE\",\"quantity\":83,\"unitPrice\":497.74},{\"sku\":\"SKU-UCFV3F\",\"quantity\":26,\"unitPrice\":350.8}],\"total\":1993.77,\"currency\":\"usd\",\"shippingAddress\":{\"line1\":\"776 Stark Summit\",\"line2\":\"Suite 518\",\"city\":\"East Sergio\",\"postalCode\":\"92121\",\"country\":\"BN\"},\"note\":\"parsing the panel won't do anything, we need to hack the cross-platform COM interface!\",\"createdAt\":\"2026-01-14T22:47:07.819Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":45}}"
    }
   ],
   "structuredContent": {
    "ok": true,
    "data": {
     "id": "order_2",
-    "customerId": "usque",
+    "customerId": "suitcase",
     "status": "cancelled",
     "items": [
      {
-      "sku": "trucido",
-      "quantity": 47,
-      "unitPrice": 586.08
+      "sku": "SKU-UGL10D",
+      "quantity": 26,
+      "unitPrice": 46.75
      },
      {
-      "sku": "adnuo",
-      "quantity": 2,
-      "unitPrice": 373.86
+      "sku": "SKU-8UNWEE",
+      "quantity": 83,
+      "unitPrice": 497.74
      },
      {
-      "sku": "cauda",
-      "quantity": 5,
-      "unitPrice": 232.73
+      "sku": "SKU-UCFV3F",
+      "quantity": 26,
+      "unitPrice": 350.8
      }
     ],
-    "total": 848.26,
-    "currency": "sophismata",
+    "total": 1993.77,
+    "currency": "usd",
     "shippingAddress": {
-     "line1": "ver",
-     "line2": "culpo",
-     "city": "crur",
-     "postalCode": "toties",
-     "country": "deripio"
+     "line1": "776 Stark Summit",
+     "line2": "Suite 518",
+     "city": "East Sergio",
+     "postalCode": "92121",
+     "country": "BN"
     },
-    "note": "ubi",
-    "createdAt": "2025-10-27T21:21:05.220Z"
+    "note": "parsing the panel won't do anything, we need to hack the cross-platform COM interface!",
+    "createdAt": "2026-01-14T22:47:07.819Z"
    },
    "page": null,
    "truncated": null,
@@ -6068,38 +6068,38 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"id\":\"animi\",\"customerId\":\"triumphus\",\"status\":\"delivered\",\"items\":[{\"sku\":\"similique\",\"quantity\":34,\"unitPrice\":860.6},{\"sku\":\"modi\",\"quantity\":94,\"unitPrice\":370.11}],\"total\":442.66,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"creo\",\"line2\":\"calcar\",\"city\":\"vorax\",\"postalCode\":\"aurum\",\"country\":\"vergo\"},\"note\":\"vobis\",\"createdAt\":\"2025-10-18T10:41:37.477Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":62,\"wrote\":\"cancel_order → order order_3\"}}"
+    "text": "{\"ok\":true,\"data\":{\"id\":\"casement\",\"customerId\":\"sonnet\",\"status\":\"delivered\",\"items\":[{\"sku\":\"SKU-NBUKXD\",\"quantity\":45,\"unitPrice\":385.16},{\"sku\":\"SKU-8Z6WY9\",\"quantity\":91,\"unitPrice\":886.96}],\"total\":1132.4,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"24973 Airport Road\",\"line2\":\"Suite 132\",\"city\":\"New Winnifred\",\"postalCode\":\"22135\",\"country\":\"GA\"},\"note\":\"We need to reboot the virtual ADP application!\",\"createdAt\":\"2026-01-15T05:07:27.185Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":62,\"wrote\":\"cancel_order → order order_3\"}}"
    }
   ],
   "structuredContent": {
    "ok": true,
    "data": {
-    "id": "animi",
-    "customerId": "triumphus",
+    "id": "casement",
+    "customerId": "sonnet",
     "status": "delivered",
     "items": [
      {
-      "sku": "similique",
-      "quantity": 34,
-      "unitPrice": 860.6
+      "sku": "SKU-NBUKXD",
+      "quantity": 45,
+      "unitPrice": 385.16
      },
      {
-      "sku": "modi",
-      "quantity": 94,
-      "unitPrice": 370.11
+      "sku": "SKU-8Z6WY9",
+      "quantity": 91,
+      "unitPrice": 886.96
      }
     ],
-    "total": 442.66,
+    "total": 1132.4,
     "currency": "EUR",
     "shippingAddress": {
-     "line1": "creo",
-     "line2": "calcar",
-     "city": "vorax",
-     "postalCode": "aurum",
-     "country": "vergo"
+     "line1": "24973 Airport Road",
+     "line2": "Suite 132",
+     "city": "New Winnifred",
+     "postalCode": "22135",
+     "country": "GA"
     },
-    "note": "vobis",
-    "createdAt": "2025-10-18T10:41:37.477Z"
+    "note": "We need to reboot the virtual ADP application!",
+    "createdAt": "2026-01-15T05:07:27.185Z"
    },
    "page": null,
    "truncated": null,
@@ -6177,38 +6177,38 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"id\":\"order_4\",\"customerId\":\"socius\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"vivo\",\"quantity\":48,\"unitPrice\":389.28},{\"sku\":\"capto\",\"quantity\":92,\"unitPrice\":938.87}],\"total\":880.65,\"currency\":\"crinis\",\"shippingAddress\":{\"line1\":\"supellex\",\"line2\":\"pecto\",\"city\":\"recusandae\",\"postalCode\":\"comes\",\"country\":\"abscido\"},\"note\":\"gift\",\"createdAt\":\"2025-11-11T01:15:24.668Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":64,\"wrote\":\"update_order → order order_4\"}}"
+    "text": "{\"ok\":true,\"data\":{\"id\":\"order_4\",\"customerId\":\"pasta\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"SKU-YGE8WX\",\"quantity\":89,\"unitPrice\":391.16},{\"sku\":\"SKU-PLMB05\",\"quantity\":46,\"unitPrice\":417.16}],\"total\":941.63,\"currency\":\"chf\",\"shippingAddress\":{\"line1\":\"597 S Central Avenue\",\"line2\":\"Suite 653\",\"city\":\"Port Francisca\",\"postalCode\":\"69114\",\"country\":\"BI\"},\"note\":\"gift\",\"createdAt\":\"2026-01-14T10:46:18.257Z\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":64,\"wrote\":\"update_order → order order_4\"}}"
    }
   ],
   "structuredContent": {
    "ok": true,
    "data": {
     "id": "order_4",
-    "customerId": "socius",
+    "customerId": "pasta",
     "status": "cancelled",
     "items": [
      {
-      "sku": "vivo",
-      "quantity": 48,
-      "unitPrice": 389.28
+      "sku": "SKU-YGE8WX",
+      "quantity": 89,
+      "unitPrice": 391.16
      },
      {
-      "sku": "capto",
-      "quantity": 92,
-      "unitPrice": 938.87
+      "sku": "SKU-PLMB05",
+      "quantity": 46,
+      "unitPrice": 417.16
      }
     ],
-    "total": 880.65,
-    "currency": "crinis",
+    "total": 941.63,
+    "currency": "chf",
     "shippingAddress": {
-     "line1": "supellex",
-     "line2": "pecto",
-     "city": "recusandae",
-     "postalCode": "comes",
-     "country": "abscido"
+     "line1": "597 S Central Avenue",
+     "line2": "Suite 653",
+     "city": "Port Francisca",
+     "postalCode": "69114",
+     "country": "BI"
     },
     "note": "gift",
-    "createdAt": "2025-11-11T01:15:24.668Z"
+    "createdAt": "2026-01-14T10:46:18.257Z"
    },
    "page": null,
    "truncated": null,
