@@ -6,11 +6,13 @@
  * attempt are reused unless the task's judge criteria changed; new judging and answer-equivalence
  * calls are made only within a token budget.
  */
+import { checkAttempt } from './check.js';
 import { gradeAttempt } from './run.js';
-import { emptyJudgeUsage, judgeTokens } from './judge.js';
+import { emptyJudgeUsage, isAmbiguousJudged, judgeTokens } from './judge.js';
+import { attemptTokens } from './score.js';
 import type { GroundTruth } from './groundtruth.js';
 import type { LlmClient } from './llm/types.js';
-import type { AgentCall, AttemptRecord, EvalTask, JudgeResult, JudgeUsage, ObservedCall, TaskRunResult, TranscriptItem } from './types.js';
+import type { AgentCall, AttemptRecord, EvalTask, JudgeResult, JudgeUsage, JudgeVotes, ObservedCall, TaskRunResult, TranscriptItem } from './types.js';
 
 /** One entry of a transcripts file (a TaskRunResult plus the prompt). */
 export type TranscriptEntry = Partial<TaskRunResult> & Pick<TaskRunResult, 'taskKey' | 'passed' | 'transcript' | 'calls' | 'model' | 'mode' | 'attempt'> & { prompt?: string | null };
@@ -72,13 +74,39 @@ export function recordFromTranscript(e: TranscriptEntry): AttemptRecord {
     error: e.error ?? null,
     transcript: items,
     neurouterTaskId: e.neurouterTaskId ?? null,
-    framingAvailable: agentCalls.some((c) => c.name === 'neurouter_begin_task') || e.framingPassed !== null,
+    framingAvailable: framingWasAvailable(e, agentCalls),
     calls: unredactCalls(e.calls ?? [], items),
   };
 }
 
+/**
+ * Whether the server offered begin/end framing. Attempts stored through the eval DB (0.3.0) come back with
+ * `framingPassed: false` instead of null on contract 2 (B2), so the recorded "n/a" framing result, and contract-2
+ * traffic (envelopes, `neurouter_report`), also say "not offered".
+ */
+function framingWasAvailable(e: TranscriptEntry, agentCalls: AgentCall[]): boolean {
+  if (agentCalls.some((c) => c.name === 'neurouter_begin_task')) return true;
+  if (e.assertionResults?.some((r) => r.assertion.type === 'framing' && r.detail.startsWith('n/a'))) return false;
+  if (contractOf(e) === 2) return false;
+  return e.framingPassed !== null && e.framingPassed !== undefined;
+}
+
+/** The agent contract an attempt ran on, from its traffic: contract-2 envelopes or `neurouter_report` (else 1). */
+export function contractOf(e: Pick<TranscriptEntry, 'transcript'>): 1 | 2 {
+  for (const it of e.transcript ?? []) {
+    if (it.kind === 'tool_call' && (it.name === 'neurouter_report' || it.name === 'neurouter_begin_task')) return it.name === 'neurouter_report' ? 2 : 1;
+    if (it.kind === 'tool_result' && /^\{"ok":(true|false),"data":/.test(it.text) && /"state":\{/.test(it.text)) return 2;
+  }
+  return 1;
+}
+
 export interface RegradeRow {
   taskKey: string;
+  category: string;
+  /** Agent tokens of the attempt (uncached + cached input + output), unchanged by re-grading. */
+  tokens: number;
+  /** Judge tokens this re-grade spent on the attempt. */
+  judgeTokens: number;
   model: string;
   mode: string;
   attempt: number;
@@ -93,6 +121,12 @@ export interface RegradeRow {
   failed: string[];
   /** Judge verdict could not be made (budget exhausted). */
   unjudged: boolean;
+  /** Every judge call this re-grade made for the attempt (borderline verdicts voted). */
+  judgeVotes?: JudgeVotes | null;
+  /** The rubric verdict the new grade used (recorded or new; `judged`: made by this re-grade), when the task has one. */
+  judge?: (JudgeResult & { judged: boolean }) | null;
+  /** Assertions that passed by a 0.3.1 rule (equivalent path, ambiguous waiver, decline judge): their details. */
+  notes?: string[];
 }
 
 export interface RegradeOptions {
@@ -121,17 +155,27 @@ export async function regradeTranscripts(entries: TranscriptEntry[], o: RegradeO
     if (!gtCache.has(task.key)) gtCache.set(task.key, await o.groundTruth(task));
     const gt = gtCache.get(task.key) ?? null;
     const rec = recordFromTranscript(e);
-    // reuse the recorded rubric verdict, except for a new choice criterion, and for failed verdicts of
-    // criteria that now get the ground truth (the recorded judge never saw the API's results)
+    // reuse the recorded rubric verdict, except: ambiguous tasks (0.3.1 criterion: asking or an explicit assumption
+    // both pass), and failed verdicts (0.3.1: the judge sees whole tool results and the ground truth, B8). A recorded
+    // pass is kept: more evidence would only let the judge confirm or overturn a pass it already gave.
     const js = task.assertions.filter((a) => a.type === 'judge');
-    const newCriteria = js.some((a) => a.kind === 'choice') || (e.judge?.verdict === 'fail' && js.some((a) => a.groundTruth));
-    const reuse: JudgeResult | null = !newCriteria && e.judge ? e.judge : null;
+    const newCriteria = isAmbiguousJudged(task) || (e.judge?.verdict === 'fail' && js.length > 0);
+    let reuse: JudgeResult | null = !newCriteria && e.judge ? e.judge : null;
+    // a new verdict cannot change an attempt that fails even with a passing judge (a write, a wrong answer): keep the
+    // recorded one and spend no judge tokens on it
+    if (!reuse && js.length) {
+      const best = await checkAttempt(task, rec, { groundTruth: gt, judge: { score: 1, verdict: 'pass', reasons: [], path: 'assumed' } });
+      if (!best.passed) reuse = e.judge ?? { score: 0, verdict: 'fail', reasons: ['not re-judged: fails without the judge'] };
+    }
     const budgetLeft = judgeTokens(usage) < cap;
     const { check, judgeUsage } = await gradeAttempt(task, rec, { llm: budgetLeft ? (o.llm ?? null) : null, ...(o.judgeModel ? { judgeModel: o.judgeModel } : {}), groundTruth: gt, judge: reuse });
     for (const k of ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens'] as const) usage[k] += judgeUsage[k];
     const unjudged = check.results.some((r) => r.assertion.type === 'judge' && r.detail === 'not judged');
     rows.push({
       taskKey: e.taskKey,
+      category: task.category,
+      tokens: attemptTokens({ inputTokens: e.inputTokens ?? 0, outputTokens: e.outputTokens ?? 0, cacheReadTokens: e.cacheReadTokens ?? 0 }),
+      judgeTokens: judgeTokens(judgeUsage),
       model: e.model,
       mode: e.mode,
       attempt: e.attempt,
@@ -143,9 +187,53 @@ export async function regradeTranscripts(entries: TranscriptEntry[], o: RegradeO
       matchedByJudge: check.results.some((r) => r.matchedBy === 'judge'),
       failed: check.results.filter((r) => !r.passed && r.assertion.type !== 'framing').map((r) => `${r.assertion.type}: ${r.detail}`),
       unjudged,
+      ...(check.judgeVotes ? { judgeVotes: check.judgeVotes } : {}),
+      ...(js.length ? { judge: check.judge ? { ...check.judge, judged: !reuse && judgeUsage.calls > 0 } : null } : {}),
+      notes: check.results.filter((r) => r.passed && (r.waived || r.matchedBy === 'judge' || /\(judge: /.test(r.detail))).map((r) => `${r.assertion.type}: ${r.detail}`.slice(0, 300)),
     });
   }
   return { rows, judgeUsage: usage, skippedTasks: [...skipped] };
+}
+
+export interface RegradeCategoryRow {
+  model: string;
+  mode: string;
+  category: string;
+  attempts: number;
+  oldPassed: number;
+  newPassed: number;
+  /** Agent tokens per attempt (the same before and after: re-grading does not rerun agents). */
+  tokensPerAttempt: number;
+}
+
+/** Per (model, mode, category): attempts, old and new passes, tokens per attempt; then an "all" row per cell. */
+export function regradeByCategory(rows: RegradeRow[]): RegradeCategoryRow[] {
+  const out = new Map<string, RegradeCategoryRow & { tokens: number }>();
+  const add = (r: RegradeRow, category: string) => {
+    const k = `${r.model}|${r.mode}|${category}`;
+    const c = out.get(k) ?? { model: r.model, mode: r.mode, category, attempts: 0, oldPassed: 0, newPassed: 0, tokensPerAttempt: 0, tokens: 0 };
+    c.attempts++;
+    if (r.oldPassed) c.oldPassed++;
+    if (r.newPassed) c.newPassed++;
+    c.tokens += r.tokens;
+    out.set(k, c);
+  };
+  const order = ['single', 'multi', 'ambiguous', 'impossible'];
+  for (const r of rows.filter((x) => !x.excluded)) {
+    add(r, r.category);
+    add(r, 'all');
+  }
+  return [...out.values()]
+    .map(({ tokens, ...c }) => ({ ...c, tokensPerAttempt: c.attempts ? Math.round(tokens / c.attempts) : 0 }))
+    .sort((a, b) => a.model.localeCompare(b.model) || a.mode.localeCompare(b.mode) || (order.indexOf(a.category) + 1 || 9) - (order.indexOf(b.category) + 1 || 9));
+}
+
+/** Plain-text table of `regradeByCategory` (first in the CLI output). */
+export function renderRegradeCategories(cats: RegradeCategoryRow[]): string {
+  const pct = (n: number, d: number) => (d ? `${Math.round((100 * n) / d)}%` : '-');
+  const rows = [['model', 'mode', 'category', 'attempts', 'old', 'new', 'tokens/attempt'], ...cats.map((c) => [c.model, c.mode, c.category, String(c.attempts), `${c.oldPassed} (${pct(c.oldPassed, c.attempts)})`, `${c.newPassed} (${pct(c.newPassed, c.attempts)})`, String(c.tokensPerAttempt)])];
+  const w = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
+  return rows.map((r) => r.map((x, i) => x.padEnd(w[i]!)).join('  ')).join('\n');
 }
 
 /** Pass rates of a re-grade (old over all attempts of the retained tasks; new without provider refusals). */

@@ -6,7 +6,7 @@ import type { Draft, ErrorSpec } from './draft.js';
 import { buildError } from './errors.js';
 import { envelopeErrors, typedErrors } from './schema.js';
 import { type StateSource } from './state.js';
-import { BUDGET, type Envelope, type ErrorInfo, type StateFlag } from './types.js';
+import { BUDGET, clipLogs, type Envelope, type ErrorInfo, type StateFlag } from './types.js';
 import type { McpToolResult } from './v1.js';
 
 /**
@@ -123,6 +123,7 @@ export class EnvelopeRenderer {
       now: this.d.now(),
     });
     if (draft.hint) env.hint = draft.hint.length <= BUDGET.hintChars ? draft.hint : `${draft.hint.slice(0, BUDGET.hintChars - 1)}…`;
+    if (draft.logs) env.logs = clipLogs(draft.logs);
     this.selfCheck(env, input.name);
     return envelopeResult(env, draft.meta ?? {});
   }

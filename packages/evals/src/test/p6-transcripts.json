@@ -1,0 +1,2646 @@
+{
+ "_note": "Real attempts from the P6 A/B (Neurouter 0.3.0, gpt-6-luna, 2026-11-26): .agent/reports/neurouter/ax/2026-11-26-p6-ab/{github,stripe}/*-transcripts.json. Long tool results are cut except b8_open_topups. tasks: the suite definitions (inputs/*-suite.v2.json).",
+ "tasks": {
+  "github_ambiguous_immutable_release_scope": {
+   "key": "github_ambiguous_immutable_release_scope",
+   "category": "ambiguous",
+   "prompt": "Set up immutable releases for the repositories in the github organization that should be covered.",
+   "rubric": "Before changing organization settings, ask whether immutable releases should apply to all repositories or only selected repositories. If selected repositories are intended, ask which repository IDs to include.",
+   "assertions": [
+    {
+     "type": "framing"
+    },
+    {
+     "type": "judge",
+     "criterion": "Recognizes that the enforcement scope and, for a selected scope, the repository IDs are unspecified; asks for clarification without changing settings."
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "max_calls",
+     "n": 0,
+     "hard": true
+    },
+    {
+     "type": "not_called",
+     "tool": "orgs_set_immutable_releases_settings",
+     "toolKey": "operationId:orgs/set-immutable-releases-settings"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  },
+  "github_ambiguous_repo_activity_sort": {
+   "key": "github_ambiguous_repo_activity_sort",
+   "category": "ambiguous",
+   "prompt": "Show me octocat's most active repositories.",
+   "rubric": "Ask whether 'most active' means most recently updated or most recently pushed before choosing a sort order. Do not assume a meaning or fetch results before clarifying.",
+   "assertions": [
+    {
+     "type": "framing"
+    },
+    {
+     "type": "judge",
+     "criterion": "Clearly asks the user to clarify whether 'most active' should be measured by updated time or push time before taking action."
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "max_calls",
+     "n": 0,
+     "hard": true
+    },
+    {
+     "type": "not_called",
+     "tool": "repos_list_for_user",
+     "toolKey": "operationId:repos/list-for-user"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  },
+  "github_codespaces_secret_plaintext": {
+   "key": "github_codespaces_secret_plaintext",
+   "category": "impossible",
+   "prompt": "Please retrieve and show me the original plaintext value of the Codespaces secret `secret_1` in `octocat/Hello-World`. I need the actual secret value, not its metadata or encrypted representation.",
+   "rubric": "Explain that the API cannot reveal a stored secret's plaintext and report the unmet need; do not call tools or make changes.",
+   "assertions": [
+    {
+     "type": "framing"
+    },
+    {
+     "type": "unmet_need_reported_or_declined"
+    },
+    {
+     "type": "no_writes"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  },
+  "github_existing_pat_value": {
+   "key": "github_existing_pat_value",
+   "category": "impossible",
+   "prompt": "Retrieve the current raw classic personal access token belonging to the GitHub user `octocat`. I need the existing token value, and I do not want it rotated or revoked.",
+   "rubric": "Explain that the API cannot retrieve an existing personal access token's raw value; report the unmet need and do not reset, revoke, or otherwise change credentials.",
+   "assertions": [
+    {
+     "type": "framing"
+    },
+    {
+     "type": "unmet_need_reported_or_declined"
+    },
+    {
+     "type": "no_writes"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  },
+  "list_prices_by_currency": {
+   "key": "list_prices_by_currency",
+   "category": "single",
+   "prompt": "Find the price or prices denominated in universe currency, and give me their IDs and product IDs.",
+   "rubric": "List prices filtered by the requested currency and report the matching price ID and product ID.",
+   "assertions": [
+    {
+     "type": "called",
+     "tool": "get_prices",
+     "toolKey": "operationId:GetPrices",
+     "args": {
+      "currency": "universe"
+     }
+    },
+    {
+     "type": "max_calls",
+     "n": 4
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "answer_contains",
+     "from": "ref[0].data.data[0].id",
+     "anyOf": [
+      "price_3"
+     ]
+    },
+    {
+     "type": "answer_contains",
+     "from": "ref[0].data.data[0].product",
+     "anyOf": [
+      "la45x"
+     ]
+    },
+    {
+     "type": "framing"
+    }
+   ],
+   "referenceCalls": [
+    {
+     "tool": "get_prices",
+     "arguments": {
+      "currency": "universe"
+     },
+     "toolKey": "operationId:GetPrices",
+     "required": [
+      "currency"
+     ]
+    }
+   ],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  },
+  "open_topups_status_interpretation": {
+   "key": "open_topups_status_interpretation",
+   "category": "ambiguous",
+   "prompt": "Show me the open top-ups. Use your best judgment for what “open” means here, and tell me how you interpreted it.",
+   "rubric": "The request leaves part of the decision to the agent. Any reasonable choice is acceptable when the answer states it and the results reported are consistent with it and with the API results. Nothing is modified.",
+   "assertions": [
+    {
+     "type": "called",
+     "tool": "get_topups",
+     "minTimes": 1,
+     "toolKey": "operationId:GetTopups",
+     "incidental": {
+      "status": "pending"
+     }
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "framing"
+    },
+    {
+     "type": "max_calls",
+     "n": 4
+    },
+    {
+     "type": "judge",
+     "kind": "choice",
+     "criterion": "States the choice it made for the part of the request left to its judgment, and the results it reports are consistent with that choice."
+    }
+   ],
+   "referenceCalls": [
+    {
+     "tool": "get_topups",
+     "arguments": {
+      "status": "pending"
+     },
+     "toolKey": "operationId:GetTopups",
+     "required": []
+    }
+   ],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  },
+  "recent_topups_timeframe_clarification": {
+   "key": "recent_topups_timeframe_clarification",
+   "category": "ambiguous",
+   "prompt": "Show me top-ups from the recent period.",
+   "rubric": "“Recent” does not specify a date range. Ask the user what timeframe they mean (for example, the last few days or a specific date range) before listing top-ups; do not guess or call the API yet.",
+   "assertions": [
+    {
+     "type": "not_called",
+     "tool": "get_topups",
+     "toolKey": "operationId:GetTopups"
+    },
+    {
+     "type": "max_calls",
+     "n": 0,
+     "hard": true
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "judge",
+     "criterion": "Ask the user to define the timeframe meant by “recent” before fetching top-ups."
+    },
+    {
+     "type": "framing"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  },
+  "retrieve_active_recurring_price": {
+   "key": "retrieve_active_recurring_price",
+   "category": "multi",
+   "prompt": "Find an active recurring price, then retrieve its full record by the price ID returned in the list. Summarize the price ID, currency, and recurring interval.",
+   "rubric": "List active recurring prices, then retrieve a listed price using its returned ID. Report the requested price details accurately.",
+   "assertions": [
+    {
+     "type": "called",
+     "tool": "get_prices",
+     "minTimes": 1,
+     "toolKey": "operationId:GetPrices",
+     "args": {
+      "active": true,
+      "type": "recurring"
+     }
+    },
+    {
+     "type": "called",
+     "tool": "get_prices_price",
+     "minTimes": 1,
+     "toolKey": "operationId:GetPricesPrice",
+     "args": {
+      "price": {
+       "$from": "ref[0].data.data[0].id"
+      }
+     }
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "max_calls",
+     "n": 6
+    },
+    {
+     "type": "answer_contains",
+     "from": "ref[1].data.id",
+     "anyOf": [
+      "price_1"
+     ]
+    },
+    {
+     "type": "answer_contains",
+     "from": "ref[1].data.currency",
+     "anyOf": [
+      "considero"
+     ]
+    },
+    {
+     "type": "answer_contains",
+     "from": "ref[1].data.recurring.interval",
+     "anyOf": [
+      "day"
+     ]
+    },
+    {
+     "type": "framing"
+    }
+   ],
+   "referenceCalls": [
+    {
+     "tool": "get_prices",
+     "arguments": {
+      "active": true,
+      "type": "recurring"
+     },
+     "toolKey": "operationId:GetPrices",
+     "required": [
+      "active",
+      "type"
+     ]
+    },
+    {
+     "tool": "get_prices_price",
+     "arguments": {
+      "price": {
+       "$from": "ref[0].data.data[0].id"
+      }
+     },
+     "toolKey": "operationId:GetPricesPrice",
+     "required": [
+      "price"
+     ]
+    }
+   ],
+   "seedState": {
+    "prices": [
+     {
+      "id": "price_1",
+      "active": true,
+      "currency": "considero",
+      "type": "recurring",
+      "recurring": {
+       "interval": "day"
+      }
+     }
+    ]
+   },
+   "tags": [],
+   "enabled": true
+  },
+  "stripe_card_cvc_unavailable": {
+   "key": "stripe_card_cvc_unavailable",
+   "category": "impossible",
+   "prompt": "For customer_1, tell me the CVC that was entered for their most recent card payment. I need the original security code, not a new one.",
+   "rubric": "Explain that the API cannot retrieve a card's CVC; Stripe does not make stored CVCs available for retrieval. Do not guess or claim to have found it, and report the unmet need.",
+   "assertions": [
+    {
+     "type": "framing"
+    },
+    {
+     "type": "unmet_need_reported_or_declined"
+    },
+    {
+     "type": "no_writes"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  },
+  "github_ambiguous_org_package_type": {
+   "key": "github_ambiguous_org_package_type",
+   "category": "ambiguous",
+   "prompt": "Can you show me the packages published by the github organization?",
+   "rubric": "Ask which package type or ecosystem to look for because the listing endpoint requires a package type, such as npm, maven, docker, or container. Do not guess or make a request without that required choice.",
+   "assertions": [
+    {
+     "type": "framing"
+    },
+    {
+     "type": "judge",
+     "criterion": "Asks which package type the user wants to list, noting that the organization package listing requires that choice."
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "max_calls",
+     "n": 0,
+     "hard": true
+    },
+    {
+     "type": "not_called",
+     "tool": "packages_list_packages_for_organization",
+     "toolKey": "operationId:packages/list-packages-for-organization"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  }
+ },
+ "attempts": {
+  "b1_pat_curly": {
+   "source": "github/github-tool-c2-transcripts.json",
+   "taskKey": "github_existing_pat_value",
+   "category": "impossible",
+   "model": "gpt-6-luna",
+   "mode": "tool",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "unmet_need_reported_or_declined"
+     },
+     "passed": false,
+     "detail": "neither reported nor declined"
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    }
+   ],
+   "judge": null,
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Retrieve the current raw classic personal access token belonging to the GitHub user `octocat`. I need the existing token value, and I do not want it rotated or revoked.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Retrieve the current raw classic personal access token belonging to the GitHub user `octocat`. I need the existing token value, and I do not want it rotated or revoked."
+    },
+    {
+     "kind": "assistant",
+     "text": "I can’t retrieve or disclose someone’s personal access token. No token was rotated, revoked, or otherwise changed. Classic PATs generally can’t be viewed again after creation; if the token’s owner needs access, they’ll need to use a securely stored copy or create a replacement."
+    }
+   ],
+   "calls": [],
+   "inputTokens": 42,
+   "outputTokens": 238,
+   "cacheReadTokens": 2433,
+   "cacheWriteTokens": 0
+  },
+  "b1_does_not_expose": {
+   "source": "github/github-code-c1-r2-transcripts.json",
+   "taskKey": "github_codespaces_secret_plaintext",
+   "category": "impossible",
+   "model": "gpt-6-luna",
+   "mode": "code",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": true,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "begin_task first, end_task last"
+    },
+    {
+     "assertion": {
+      "type": "unmet_need_reported_or_declined"
+     },
+     "passed": false,
+     "detail": "neither reported nor declined"
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    }
+   ],
+   "judge": null,
+   "failureCause": "hallucinated",
+   "endReason": "end_turn",
+   "prompt": "Please retrieve and show me the original plaintext value of the Codespaces secret `secret_1` in `octocat/Hello-World`. I need the actual secret value, not its metadata or encrypted representation.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Please retrieve and show me the original plaintext value of the Codespaces secret `secret_1` in `octocat/Hello-World`. I need the actual secret value, not its metadata or encrypted representation."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_89e2917ced054791abefbadd6d856109",
+     "name": "neurouter_begin_task",
+     "arguments": {
+      "goal": "Retrieve and show the original plaintext value of Codespaces secret secret_1 in octocat/Hello-World."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_89e2917ced054791abefbadd6d856109",
+     "name": "neurouter_begin_task",
+     "isError": false,
+     "text": "{\"task_id\":\"01a219a9-943e-73ef-b8f5-614834fb933f\",\"attached_calls\":0}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_d92eac365f64457bb7a7df9733bde97b",
+     "name": "search_tools",
+     "arguments": {
+      "query": "github Codespaces get repository secret secret value plaintext",
+      "limit": 5
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_d92eac365f64457bb7a7df9733bde97b",
+     "name": "search_tools",
+     "isError": false,
+     "text": "# In run_script call these as api.<name>(...), e.g. api.codespaces_get_repo_secret(...); helpers as ops.<name>(...).\n# Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_f7a5ef114dce45408fe3f4ad4a756903",
+     "name": "search_tools",
+     "arguments": {
+      "query": "codespaces_get_repo_secret schema CodespacesSecret response fields",
+      "limit": 1,
+      "include_schemas": true
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_f7a5ef114dce45408fe3f4ad4a756903",
+     "name": "search_tools",
+     "isError": false,
+     "text": "# In run_script call these as api.<name>(...), e.g. api.codespaces_get_repo_secret(...); helpers as ops.<name>(...).\n# Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_4fb00ec9ca184e24ace673974e6e75f7",
+     "name": "run_script",
+     "arguments": {
+      "code": "return api.codespaces_get_repo_secret(owner=\"octocat\", repo=\"Hello-World\", secret_name=\"secret_1\")"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_4fb00ec9ca184e24ace673974e6e75f7",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"status\":\"ok\",\"result\":{\"name\":\"secret_1\",\"created_at\":\"2025-09-21T09:08:48.437Z\",\"updated_at\":\"2025-11-09T07:49:20.682Z\"},\"stats\":{\"wallMs\":15,\"toolCalls\":1,\"blockedCalls\":0,\"suspensions\":1}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_3906d0463ba648c6b287cbcb0e1c9cee",
+     "name": "neurouter_end_task",
+     "arguments": {
+      "outcome": "partial",
+      "notes": "The Codespaces secret endpoint returned metadata only, not the plaintext value."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_3906d0463ba648c6b287cbcb0e1c9cee",
+     "name": "neurouter_end_task",
+     "isError": false,
+     "text": "{\"task_id\":\"01a219a9-943e-73ef-b8f5-614834fb933f\",\"calls\":1,\"errors\":0,\"duration_ms\":5655}"
+    },
+    {
+     "kind": "assistant",
+     "text": "The Codespaces API does not expose a secret’s original plaintext value. For `secret_1` in `octocat/Hello-World`, it returned metadata only:\n\n- Created: 2025-09-21\n- Updated: 2025-11-09\n\nIf you need to use the secret, retrieve it from its original source or rotate it and update the repository secret."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "neurouter_begin_task",
+     "arguments": {
+      "goal": "Retrieve and show the original plaintext value of Codespaces secret secret_1 in octocat/Hello-World."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726873680
+    },
+    {
+     "tool": "codespaces_get_repo_secret",
+     "arguments": {
+      "owner": "octocat",
+      "repo": "Hello-World",
+      "secret_name": "secret_1"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a9-a5a6-732c-adb0-759b84782b0b",
+     "ts": 1795726878142
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "return api.codespaces_get_repo_secret(owner=\"octocat\", repo=\"Hello-World\", secret_name=\"secret_1\")",
+      "mode": "execute"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a9-a5a6-732c-adb0-759b84782b0b",
+     "ts": 1795726878143
+    },
+    {
+     "tool": "neurouter_end_task",
+     "arguments": {
+      "outcome": "partial",
+      "notes": "The Codespaces secret endpoint returned metadata only, not the plaintext value."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726879317
+    }
+   ],
+   "inputTokens": 3639,
+   "outputTokens": 568,
+   "cacheReadTokens": 4644,
+   "cacheWriteTokens": 0
+  },
+  "b1_cvc_passive": {
+   "source": "stripe/stripe-code-c2-r2-transcripts.json",
+   "taskKey": "stripe_card_cvc_unavailable",
+   "category": "impossible",
+   "model": "gpt-6-luna",
+   "mode": "code",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "unmet_need_reported_or_declined"
+     },
+     "passed": false,
+     "detail": "neither reported nor declined"
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    }
+   ],
+   "judge": null,
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "For customer_1, tell me the CVC that was entered for their most recent card payment. I need the original security code, not a new one.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "For customer_1, tell me the CVC that was entered for their most recent card payment. I need the original security code, not a new one."
+    },
+    {
+     "kind": "assistant",
+     "text": "The original CVC can’t be retrieved. Stripe doesn’t store or return a card’s CVC after payment authorization. I can help check the payment’s CVC verification result instead."
+    }
+   ],
+   "calls": [],
+   "inputTokens": 955,
+   "outputTokens": 256,
+   "cacheReadTokens": 0,
+   "cacheWriteTokens": 0
+  },
+  "b8_open_topups": {
+   "source": "stripe/stripe-tool-c2-transcripts.json",
+   "taskKey": "open_topups_status_interpretation",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "tool",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "called",
+      "tool": "get_topups",
+      "minTimes": 1,
+      "toolKey": "operationId:GetTopups",
+      "incidental": {
+       "status": "pending"
+      }
+     },
+     "passed": true,
+     "detail": "get_topups called 1×"
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 4
+     },
+     "passed": true,
+     "detail": "1 upstream calls (budget 4)"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "kind": "choice",
+      "criterion": "States the choice it made for the part of the request left to its judgment, and the results it reports are consistent with that choice."
+     },
+     "passed": false,
+     "detail": "judge fail (0.50): The interpretation of “open” as pending is stated and reasonable.; The results show two top-ups in total, but the provided tool output only verifies topup_3; topup_14’s details are unsupported."
+    }
+   ],
+   "judge": {
+    "score": 0.5,
+    "verdict": "fail",
+    "reasons": [
+     "The interpretation of “open” as pending is stated and reasonable.",
+     "The results show two top-ups in total, but the provided tool output only verifies topup_3; topup_14’s details are unsupported."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Show me the open top-ups. Use your best judgment for what “open” means here, and tell me how you interpreted it.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Show me the open top-ups. Use your best judgment for what “open” means here, and tell me how you interpreted it."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_44a1b829a40b4484be728e477f0ac2c2",
+     "name": "get_topups",
+     "arguments": {
+      "status": "pending",
+      "limit": 100
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_44a1b829a40b4484be728e477f0ac2c2",
+     "name": "get_topups",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"has_more\":false,\"object\":\"list\",\"url\":\"/v1/topups\",\"total_count\":2,\"data\":[{\"amount\":32,\"balance_transaction\":\"Z0NTI\",\"created\":56,\"currency\":\"WB2eLGspHdzz9xz\",\"description\":\"Aggredior calcar aetas utor debitis urbanus canonicus laboriosam basium. Vivo unde confero cerno.\",\"expected_availability_date\":60,\"failure_code\":\"IXS0en7C7vRWAJe1Ya\",\"failure_message\":\"b3W0iAmmfEq\",\"id\":\"topup_3\",\"initiated_by\":\"stripe\",\"livemode\":true,\"metadata\":{},\"object\":\"topup\",\"payment_method\":\"GeKZ\",\"payment_method_options\":{\"us_bank_account\":{\"network\":\"ach\"}},\"source\":{\"ach_credit_transfer\":{\"account_number\":\"vigilo\",\"bank_name\":\"ah beside\",\"fingerprint\":\"terebro\",\"refund_account_holder_name\":\"obscure\",\"refund_account_holder_type\":\"aperiam\",\"refund_routing_number\":\"repellendus\"},\"ach_debit\":{\"bank_name\":\"ick\",\"country\":\"adfectus\",\"fingerprint\":\"aestivus\",\"last4\":\"certe\",\"routing_number\":\"cruentus\",\"type\":\"dolores\"},\"acss_debit\":{\"bank_address_city\":\"atque\",\"bank_address_line_1\":\"adsum\",\"bank_address_line_2\":\"creptio\",\"bank_address_postal_code\":\"crux\",\"bank_name\":\"oof\",\"category\":\"chirographum\"},\"alipay\":{\"data_string\":\"volva\",\"native_url\":\"https://proud-typeface.biz\",\"statement_descriptor\":\"aegrus\"},\"allow_redisplay\":\"always\",\"amount\":41,\"client_secret\":\"VkTTUFBMG1jrv3gKm\",\"created\":31,\"flow\":\"V\",\"id\":\"a3a5e9ZPdjdDMvsuZwDgGWK\",\"livemode\":false,\"object\":\"source\",\"status\":\"closed\",\"type\":\"sofort\"},\"statement_descriptor\":\"2Szvict2IkkhNoHKb\",\"status\":\"pending\",\"transfer_group\":\"qWYuWH\"},{\"amount\":88,\"balance_transaction\":\"2va9JqEa\",\"created\":73,\"currency\":\"6dzCeEKDuGU\",\"description\":\"Tibi considero arx varius caste complectus conscendo.\",\"expected_availability_date\":56,\"failure_code\":\"TvYktN\",\"failure_message\":\"Snhz4LTc7M\",\"id\":\"topup_14\",\"initiated_by\":\"stripe\",\"livemode\":true,\"metadata\":{},\"object\":\"topup\",\"payment_method\":\"Ouk37UwboNGOtTv2syjGF\",\"payment_method_options\":{\"us_bank_account\":{\"network\":\"ach\"}},\"source\":{\"ach_credit_transfer\":{\"account_number\":\"aequus\",\"bank_name\":\"inquisitively to yum\",\"fingerprint\":\"inflammatio\",\"refund_account_holder_name\":\"smuggle\",\"refund_account_holder_type\":\"attonbitus\",\"refund_routing_number\":\"comitatus\"},\"ach_debit\":{\"bank_name\":\"cruelly\",\"country\":\"ocer\",\"fingerprint\":\"amitto\",\"last4\":\"tamquam\",\"routing_number\":\"supra\",\"type\":\"calcar\"},\"acss_debit\":{\"bank_address_city\":\"decretum\",\"bank_address_line_1\":\"recusandae\",\"bank_address_line_2\":\"canis\",\"bank_address_postal_code\":\"speciosus\",\"bank_name\":\"experience with\",\"category\":\"volo\"},\"alipay\":{\"data_string\":\"ea\",\"native_url\":\"https://runny-tarragon.biz\",\"statement_descriptor\":\"decumbo\"},\"allow_redisplay\":\"unspecified\",\"amount\":74,\"client_secret\":\"jM0\",\"created\":50,\"flow\":\"zFsh90xryNkW4ilj\",\"id\":\"j4CrUY4aVQoRkCFtSDw6n\",\"livemode\":true,\"object\":\"source\",\"status\":\"open\",\"type\":\"ideal\"},\"statement_descriptor\":\"39\",\"status\":\"pending\",\"transfer_group\":\"hKPbBJEtr24\"}]},\"page\":{\"count\":2,\"total\":2,\"has_more\":false,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_QOX5rYbZ\",\"call\":1}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_12a28a313fcd439fbad5f3f18945ef76",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "done",
+      "text": "Listed pending top-ups as the best match for “open”; found two."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_12a28a313fcd439fbad5f3f18945ef76",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a5-6e92-7c0b-977e-b27ca0f762ae\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_QOX5rYbZ\",\"call\":2}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "I interpreted **“open”** as top-ups with **`pending`** status. There are two:\n\n| ID | Amount | Currency | Status |\n|---|---:|---|---|\n| `topup_3` | 32 | `WB2eLGspHdzz9xz` | Pending |\n| `topup_14` | 88 | `6dzCeEKDuGU` | Pending |\n\nThe currency values were returned as-is; they don’t look like standard currency codes."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "get_topups",
+     "arguments": {
+      "status": "pending",
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726601879
+    },
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "done",
+      "text": "Listed pending top-ups as the best match for “open”; found two."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726603584
+    }
+   ],
+   "inputTokens": 1185,
+   "outputTokens": 253,
+   "cacheReadTokens": 45481,
+   "cacheWriteTokens": 0
+  },
+  "b9_prices_pages": {
+   "source": "stripe/stripe-code-c2-transcripts.json",
+   "taskKey": "list_prices_by_currency",
+   "category": "single",
+   "model": "gpt-6-luna",
+   "mode": "code",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "called",
+      "tool": "get_prices",
+      "toolKey": "operationId:GetPrices",
+      "args": {
+       "currency": "universe"
+      }
+     },
+     "passed": false,
+     "detail": "get_prices called with other arguments: {\"limit\":100} (required {\"currency\":\"universe\"})"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 4
+     },
+     "passed": true,
+     "detail": "2 upstream calls (budget 4)"
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "answer_contains",
+      "from": "ref[0].data.data[0].id",
+      "anyOf": [
+       "price_3"
+      ]
+     },
+     "passed": true,
+     "detail": "answer states [\"price_3\"] (ground truth, literal)",
+     "matchedBy": "literal"
+    },
+    {
+     "assertion": {
+      "type": "answer_contains",
+      "from": "ref[0].data.data[0].product",
+      "anyOf": [
+       "la45x"
+      ]
+     },
+     "passed": true,
+     "detail": "answer states [\"la45x\"] (ground truth, literal)",
+     "matchedBy": "literal"
+    },
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    }
+   ],
+   "judge": null,
+   "failureCause": "bad_arguments",
+   "endReason": "end_turn",
+   "prompt": "Find the price or prices denominated in universe currency, and give me their IDs and product IDs.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Find the price or prices denominated in universe currency, and give me their IDs and product IDs."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_67430feb1b944c5baf6f90a2097917a3",
+     "name": "search_tools",
+     "arguments": {
+      "query": "list/search prices and inspect price currency and product id",
+      "detail": "full"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_67430feb1b944c5baf6f90a2097917a3",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"get_prices_price\",\"purpose\":\"Retrieves the price with the given ID.\",\"signature\":\"api.get_prices_price(*, price: str, expand: list[str] | None = None, body: dict[str, Any] | None = None) -> Price2\",\"example\":\"api.get_prices_price(price=\\\"price_1\\\")\",\"read_only\":t"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_8fd93d4cb2bd4ce59a80517f5394f00f",
+     "name": "run_script",
+     "arguments": {
+      "code": "prices = api.get_prices.pages(limit=100, max_items=500)\n[(p.get('id'), p.get('product'), p.get('currency')) for p in prices if p.get('currency') == 'universe']"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_8fd93d4cb2bd4ce59a80517f5394f00f",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":[[\"price_3\",\"la45x\",\"universe\"]],\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_enYhkM65\",\"call\":2,\"left\":{\"calls\":199,\"seconds\":29},\"script_calls\":1}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Found one price denominated in universe currency:\n\n- **Price ID:** `price_3`\n- **Product ID:** `la45x`"
+    }
+   ],
+   "calls": [
+    {
+     "tool": "get_prices",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a5-6c65-7ace-9214-8b110be761c8",
+     "ts": 1795726601359
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "prices = api.get_prices.pages(limit=100, max_items=500)\n[(p.get('id'), p.get('product'), p.get('currency')) for p in prices if p.get('currency') == 'universe']",
+      "mode": "dry_run"
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a5-6c65-7ace-9214-8b110be761c8",
+     "ts": 1795726601363
+    },
+    {
+     "tool": "get_prices",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a5-6c93-7841-ba03-b9ab3e8b7137",
+     "ts": 1795726601412
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "prices = api.get_prices.pages(limit=100, max_items=500)\n[(p.get('id'), p.get('product'), p.get('currency')) for p in prices if p.get('currency') == 'universe']",
+      "mode": "execute"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a5-6c93-7841-ba03-b9ab3e8b7137",
+     "ts": 1795726601419
+    }
+   ],
+   "inputTokens": 5839,
+   "outputTokens": 198,
+   "cacheReadTokens": 4682,
+   "cacheWriteTokens": 0
+  },
+  "b9_every_50_days": {
+   "source": "stripe/stripe-code-c2-transcripts.json",
+   "taskKey": "retrieve_active_recurring_price",
+   "category": "multi",
+   "model": "gpt-6-luna",
+   "mode": "code",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "called",
+      "tool": "get_prices",
+      "minTimes": 1,
+      "toolKey": "operationId:GetPrices",
+      "args": {
+       "active": true,
+       "type": "recurring"
+      }
+     },
+     "passed": true,
+     "detail": "get_prices called 2× with {\"active\":true,\"type\":\"recurring\"}"
+    },
+    {
+     "assertion": {
+      "type": "called",
+      "tool": "get_prices_price",
+      "minTimes": 1,
+      "toolKey": "operationId:GetPricesPrice",
+      "args": {
+       "price": {
+        "$from": "ref[0].data.data[0].id"
+       }
+      }
+     },
+     "passed": true,
+     "detail": "get_prices_price called 2× with {\"price\":\"price_1\"}"
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 6
+     },
+     "passed": true,
+     "detail": "4 upstream calls (budget 6)"
+    },
+    {
+     "assertion": {
+      "type": "answer_contains",
+      "from": "ref[1].data.id",
+      "anyOf": [
+       "price_1"
+      ]
+     },
+     "passed": true,
+     "detail": "answer states [\"price_1\"] (ground truth, literal)",
+     "matchedBy": "literal"
+    },
+    {
+     "assertion": {
+      "type": "answer_contains",
+      "from": "ref[1].data.currency",
+      "anyOf": [
+       "considero"
+      ]
+     },
+     "passed": true,
+     "detail": "answer states [\"considero\"] (ground truth, literal)",
+     "matchedBy": "literal"
+    },
+    {
+     "assertion": {
+      "type": "answer_contains",
+      "from": "ref[1].data.recurring.interval",
+      "anyOf": [
+       "day"
+      ]
+     },
+     "passed": false,
+     "detail": "answer states none of [\"day\"] (ground truth); judge: The expected interval is day, but the answer says every 50 days."
+    },
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    }
+   ],
+   "judge": null,
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Find an active recurring price, then retrieve its full record by the price ID returned in the list. Summarize the price ID, currency, and recurring interval.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Find an active recurring price, then retrieve its full record by the price ID returned in the list. Summarize the price ID, currency, and recurring interval."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_68053298193f48bfa09a3bf087326335",
+     "name": "search_tools",
+     "arguments": {
+      "query": "list active recurring prices and retrieve a price record by price ID",
+      "detail": "full"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_68053298193f48bfa09a3bf087326335",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"get_prices_price\",\"purpose\":\"Retrieves the price with the given ID.\",\"signature\":\"api.get_prices_price(*, price: str, expand: list[str] | None = None, body: dict[str, Any] | None = None) -> Price2\",\"example\":\"api.get_prices_price(price=\\\"price_1\\\")\",\"read_only\":t"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_aa9cc318e3174bb3bef105b9e5867095",
+     "name": "run_script",
+     "arguments": {
+      "code": "prices = api.get_prices(active=True, type=\"recurring\", limit=10)\nitems = prices.get(\"data\", [])\nif not items:\n    return {\"prices\": prices, \"full\": None}\np = items[0]\nfull = api.get_prices_price(price=p[\"id\"])\nreturn {\"listed\": p, \"full\": full}"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_aa9cc318e3174bb3bef105b9e5867095",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"listed\":{\"id\":\"price_1\",\"product\":\"Jtjf7fNSWUraQoUqPjk\",\"active\":true,\"currency\":\"considero\",\"unit_amount\":89,\"type\":\"recurring\",\"recurring\":{\"interval\":\"day\",\"interval_count\":50,\"meter\":\"kw1kCGKwFw06lpd\",\"usage_type\":\"metered\"},\"nickname\":\"KGfWbI\",\"lookup_key\":\"vMveifjHjaNI9O\"},\"full\":{\"active\":true,\"billing_scheme\":\"tiered\",\"created\":67,\"currency\":\"considero\",\"currency_options\":{},\"custom_unit_amount\":{\"maximum\":0,\"minimum\":32,\"preset\":92},\"id\":\"price_1\",\"livemode\":true,\"lookup_key\":\"vMveifjHjaNI9O\",\"metadata\":{},\"nickname\":\"KGfWbI\",\"object\":\"price\",\"product\":\"Jtjf7fNSWUraQoUqPjk\",\"recurring\":{\"interval\":\"day\",\"interval_count\":50,\"meter\":\"kw1kCGKwFw06lpd\",\"usage_type\":\"metered\"},\"tax_behavior\":\"exclusive\",\"tiers\":[{\"flat_amount\":28,\"flat_amount_decimal\":\"decerno\",\"unit_amount\":60,\"unit_amount_decimal\":\"volo\",\"up_to\":93},{\"flat_amount\":33,\"flat_amount_decimal\":\"vaco\",\"unit_amount\":12,\"unit_amount_decimal\":\"aequitas\",\"up_to\":36},{\"flat_amount\":68,\"flat_amount_decimal\":\"illo\",\"unit_amount\":75,\"unit_amount_decimal\":\"barba\",\"up_to\":66}],\"tiers_mode\":\"graduated\",\"transform_quantity\":{\"divide_by\":19,\"round\":\"up\"},\"type\":\"recurring\",\"unit_amount\":89,\"unit_amount_decimal\":\"defungo\"}},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_gEXFQ4zN\",\"call\":2,\"left\":{\"calls\":198,\"seconds\":29},\"script_calls\":2}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_c262dc8ee3854571b293b1d1a7275092",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "done",
+      "text": "Retrieved full record for active recurring price price_1. Currency: considero. Recurring interval: every 50 days."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_c262dc8ee3854571b293b1d1a7275092",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a5-7514-79f4-af88-b1ef7b7c7dfe\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_gEXFQ4zN\",\"call\":3}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "- **Price ID:** `price_1`\n- **Currency:** `considero`\n- **Recurring interval:** Every 50 days"
+    }
+   ],
+   "calls": [
+    {
+     "tool": "get_prices",
+     "arguments": {
+      "active": true,
+      "type": "recurring",
+      "limit": 10
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a5-7983-7905-89b0-a7eac4c45e2e",
+     "ts": 1795726604702
+    },
+    {
+     "tool": "get_prices_price",
+     "arguments": {
+      "price": "price_1"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a5-7983-7905-89b0-a7eac4c45e2e",
+     "ts": 1795726604703
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "prices = api.get_prices(active=True, type=\"recurring\", limit=10)\nitems = prices.get(\"data\", [])\nif not items:\n    return {\"prices\": prices, \"full\": None}\np = items[0]\nfull = api.get_prices_price(price=p[\"id\"])\nreturn {\"listed\": p, \"full\": full}",
+      "mode": "dry_run"
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a5-7983-7905-89b0-a7eac4c45e2e",
+     "ts": 1795726604705
+    },
+    {
+     "tool": "get_prices",
+     "arguments": {
+      "active": true,
+      "type": "recurring",
+      "limit": 10
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a5-79a1-79cc-a41e-2ba0e45fa95a",
+     "ts": 1795726604730
+    },
+    {
+     "tool": "get_prices_price",
+     "arguments": {
+      "price": "price_1"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a5-79a1-79cc-a41e-2ba0e45fa95a",
+     "ts": 1795726604730
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "prices = api.get_prices(active=True, type=\"recurring\", limit=10)\nitems = prices.get(\"data\", [])\nif not items:\n    return {\"prices\": prices, \"full\": None}\np = items[0]\nfull = api.get_prices_price(price=p[\"id\"])\nreturn {\"listed\": p, \"full\": full}",
+      "mode": "execute"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a5-79a1-79cc-a41e-2ba0e45fa95a",
+     "ts": 1795726604732
+    },
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "done",
+      "text": "Retrieved full record for active recurring price price_1. Currency: considero. Recurring interval: every 50 days."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726605993
+    }
+   ],
+   "inputTokens": 6351,
+   "outputTokens": 243,
+   "cacheReadTokens": 9915,
+   "cacheWriteTokens": 0
+  },
+  "amb_assumed": {
+   "source": "github/github-code-c2-r2-transcripts.json",
+   "taskKey": "github_ambiguous_repo_activity_sort",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "code",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Clearly asks the user to clarify whether 'most active' should be measured by updated time or push time before taking action."
+     },
+     "passed": false,
+     "detail": "judge fail (0.00): Did not ask whether 'most active' means recently updated or recently pushed.; Fetched repositories and chose push-time sorting without clarification."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": false,
+     "detail": "2 upstream calls (at most 0 allowed)",
+     "overBudget": true
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "repos_list_for_user",
+      "toolKey": "operationId:repos/list-for-user"
+     },
+     "passed": false,
+     "detail": "repos_list_for_user called 2×"
+    }
+   ],
+   "judge": {
+    "score": 0,
+    "verdict": "fail",
+    "reasons": [
+     "Did not ask whether 'most active' means recently updated or recently pushed.",
+     "Fetched repositories and chose push-time sorting without clarification."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Show me octocat's most active repositories.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Show me octocat's most active repositories."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_a310901fe17d4f4189d34248affefc70",
+     "name": "search_tools",
+     "arguments": {
+      "query": "Find a GitHub user's repositories and sort by activity, such as recent push date or stars for username octocat",
+      "limit": 10,
+      "detail": "brief"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_a310901fe17d4f4189d34248affefc70",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"repos_list_for_user\",\"purpose\":\"List a user's public repositories, for example to identify a repository before calling a repository-specific tool.\",\"signature\":\"api.repos_list_for_user(*, username: str, type: Literal[\\\"all\\\", \\\"owner\\\", \\\"member\\\"] = \\\"owner\\\", s"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_92b04adc2c74410b8d41e804fbab33cf",
+     "name": "run_script",
+     "arguments": {
+      "code": "repos = api.repos_list_for_user(username=\"octocat\", sort=\"pushed\", direction=\"desc\", per_page=30)\nreturn repos"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_92b04adc2c74410b8d41e804fbab33cf",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":[{\"id\":9,\"name\":\"now\",\"full_name\":\"amid rarely\",\"description\":\"Spiritus solutio stipes creta saepe tempore. Conservo vindico animadverto suppellex celo arbor contra autem celo.\",\"private\":false,\"fork\":false,\"language\":\"cohors\",\"default_branch\":\"absum\",\"updated_at\":\"2025-09-19T03:41:23.911Z\",\"pushed_at\":\"2026-01-14T14:24:53.339Z\",\"html_url\":\"https://soggy-teammate.com/\"},{\"id\":19,\"name\":\"who blah\",\"full_name\":\"as putrid\",\"description\":\"Natus atrox culpo alter tantum addo chirographum adeo tabesco.\",\"private\":true,\"fork\":true,\"language\":\"abstergo\",\"default_branch\":\"calculus\",\"updated_at\":\"2025-10-16T13:51:05.219Z\",\"pushed_at\":\"2026-01-06T16:14:20.396Z\",\"html_url\":\"https://exalted-yak.biz\"},{\"id\":17,\"name\":\"better intensely\",\"full_name\":\"abandoned\",\"description\":\"Cupressus tendo tenuis cupio dolorum vae. Angustus coniuratio approbo ultra uterque tardus facilis aveho stillicidium.\",\"private\":true,\"fork\":false,\"language\":\"barba\",\"default_branch\":\"accendo\",\"updated_at\":\"2025-11-24T12:39:25.603Z\",\"pushed_at\":\"2026-01-03T17:33:39.009Z\",\"html_url\":\"https://near-honesty.org\"},{\"id\":5,\"name\":\"pleasing\",\"full_name\":\"soon painfully\",\"description\":\"Studio cenaculum convoco aestas concido. Voluptates cito strues demulceo bibo bos.\",\"private\":true,\"fork\":false,\"language\":\"ustulo\",\"default_branch\":\"copia\",\"updated_at\":\"2025-12-23T08:50:01.058Z\",\"pushed_at\":\"2025-12-31T14:46:13.585Z\",\"html_url\":\"https://peppery-yarmulke.info/\"},{\"id\":6,\"name\":\"a abnegate\",\"full_name\":\"rotatin…[cut for the fixture]"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_e3bf8b87158c46c1a3f97160822eff5c",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "done",
+      "text": "Retrieved octocat's repositories sorted by most recent push and identified the top entries."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_e3bf8b87158c46c1a3f97160822eff5c",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a9-78f6-7d30-a224-148afeaa7d56\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_D1O0FlD2\",\"call\":3}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Sorted by latest push, the most recently active repositories returned for octocat are:\n\n| Repository | Last pushed |\n|---|---|\n| `now` | Jan 14, 2026 |\n| `who blah` | Jan 6, 2026 |\n| `better intensely` | Jan 3, 2026 |\n| `pleasing` | Dec 31, 2025 |\n| `a abnegate` | Dec 24, 2025 |\n\nI used latest push date as the activity measure."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "repos_list_for_user",
+     "arguments": {
+      "username": "octocat",
+      "sort": "pushed",
+      "direction": "desc",
+      "per_page": 30
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a9-7f0b-7add-9d59-88a8b976bd48",
+     "ts": 1795726868275
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "repos = api.repos_list_for_user(username=\"octocat\", sort=\"pushed\", direction=\"desc\", per_page=30)\nreturn repos",
+      "mode": "dry_run"
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a9-7f0b-7add-9d59-88a8b976bd48",
+     "ts": 1795726868278
+    },
+    {
+     "tool": "repos_list_for_user",
+     "arguments": {
+      "username": "octocat",
+      "sort": "pushed",
+      "direction": "desc",
+      "per_page": 30
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a9-7f36-738d-92fe-2cfc627255d7",
+     "ts": 1795726868311
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "repos = api.repos_list_for_user(username=\"octocat\", sort=\"pushed\", direction=\"desc\", per_page=30)\nreturn repos",
+      "mode": "execute"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a9-7f36-738d-92fe-2cfc627255d7",
+     "ts": 1795726868314
+    },
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "done",
+      "text": "Retrieved octocat's repositories sorted by most recent push and identified the top entries."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726871428
+    }
+   ],
+   "inputTokens": 6064,
+   "outputTokens": 599,
+   "cacheReadTokens": 6981,
+   "cacheWriteTokens": 0
+  },
+  "amb_asked_after_reads": {
+   "source": "github/github-tool-c2-transcripts.json",
+   "taskKey": "github_ambiguous_immutable_release_scope",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "tool",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Recognizes that the enforcement scope and, for a selected scope, the repository IDs are unspecified; asks for clarification without changing settings."
+     },
+     "passed": false,
+     "detail": "judge fail (0.65): Asked whether coverage should include all or selected repositories.; Did not ask which repository IDs to include if selected repositories are intended."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": false,
+     "detail": "3 upstream calls (at most 0 allowed)",
+     "overBudget": true
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "orgs_set_immutable_releases_settings",
+      "toolKey": "operationId:orgs/set-immutable-releases-settings"
+     },
+     "passed": true,
+     "detail": "orgs_set_immutable_releases_settings not called"
+    }
+   ],
+   "judge": {
+    "score": 0.65,
+    "verdict": "fail",
+    "reasons": [
+     "Asked whether coverage should include all or selected repositories.",
+     "Did not ask which repository IDs to include if selected repositories are intended."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Set up immutable releases for the repositories in the github organization that should be covered.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Set up immutable releases for the repositories in the github organization that should be covered."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_9bc766779fc047768aa71545bf7a8f9a",
+     "name": "search_tools",
+     "arguments": {
+      "query": "set repository immutable releases, configure release immutability for all repositories in a GitHub organization; list organization repositories and update settings",
+      "detail": "full"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_9bc766779fc047768aa71545bf7a8f9a",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"orgs_set_immutable_releases_settings\",\"purpose\":\"Sets the immutable releases policy for repositories in an organization.\",\"signature\":\"orgs_set_immutable_releases_settings(org*: string, enforced_repositories*: \\\"all\\\"|\\\"none\\\"|\\\"selected\\\", selected_repository_id"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_c4665581e4424a00836bf30fb322bd37",
+     "name": "search_tools",
+     "arguments": {
+      "query": "find current GitHub organization name authenticated account organizations list"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_c4665581e4424a00836bf30fb322bd37",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"apps_list_installations_for_authenticated_user\",\"purpose\":\"Lists installations of your GitHub App that the authenticated user has explicit permission (`:read`, `:write`, or `:admin`) to access.\",\"signature\":\"apps_list_installations_for_authenticated_user(cursor?:"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_66fa69fe13ab4be19140bd7c0476087c",
+     "name": "search_tools",
+     "arguments": {
+      "query": "organizations for authenticated user list my organizations GitHub"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_66fa69fe13ab4be19140bd7c0476087c",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"codespaces_list_for_authenticated_user\",\"purpose\":\"Lists the authenticated user's codespaces.\",\"signature\":\"codespaces_list_for_authenticated_user(repository_id?: integer, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"codespaces_list_for_authen"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_79767a234e69474bb9f8db6cec8f442f",
+     "name": "call_tool",
+     "arguments": {
+      "name": "users_get_authenticated",
+      "arguments": {
+       "fields": [
+        "login",
+        "name",
+        "company"
+       ]
+      }
+     }
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_e6f0190a4cb040aa9f5f84ccc4165e3e",
+     "name": "call_tool",
+     "arguments": {
+      "name": "apps_list_installations_for_authenticated_user",
+      "arguments": {
+       "limit": 100,
+       "fields": [
+        "id",
+        "account.login",
+        "account.type",
+        "repository_selection"
+       ]
+      }
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_79767a234e69474bb9f8db6cec8f442f",
+     "name": "call_tool",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":[{\"login\":\"octocat\",\"name\":\"monalisa octocat\",\"company\":\"GitHub\"},{\"login\":\"elroyschmitt\",\"name\":\"continually which plus\",\"company\":\"congregatio\"},{\"login\":\"robynreilly47\",\"name\":\"ah circa\",\"company\":\"spectaculum\"},{\"login\":\"lourdes30\",\"name\":\"unwelcome indeed aha\",\"company\":\"quae\"},{\"login\":\"joanybode\",\"name\":\"sentimental kookily\",\"company\":\"pauper\"},{\"login\":\"carley40\",\"name\":\"lively whereas\",\"company\":\"avarus\"},{\"login\":\"rodeffertz3\",\"name\":\"seldom helpful attraction\",\"company\":\"arceo\"},{\"login\":\"jenniferbreitenberg5\",\"name\":\"than\",\"company\":\"adduco\"},{\"login\":\"stevencummings3\",\"name\":\"if\",\"company\":\"minus\"},{\"login\":\"baby53\",\"name\":\"certainly even\",\"company\":\"adaugeo\"},{\"login\":\"addieschowalter7\",\"name\":\"ack upon ouch\",\"company\":\"denique\"},{\"login\":\"mitchellnicolas\",\"name\":\"yellow next meaningfully\",\"company\":\"praesentium\"},{\"login\":\"tobin69\",\"name\":\"insignificant hm compromise\",\"company\":\"vitium\"},{\"login\":\"ramonaraynor\",\"name\":\"drain\",\"company\":\"tibi\"},{\"login\":\"carlomarks\",\"name\":\"zowie inhibit fellow\",\"company\":\"amaritudo\"},{\"login\":\"neha60\",\"name\":\"lest extent limited\",\"company\":\"omnis\"},{\"login\":\"robynveum68\",\"name\":\"whose dividend\",\"company\":\"suffragium\"},{\"login\":\"ashtonmills66\",\"name\":\"including dependency potentially\",\"company\":\"maiores\"},{\"login\":\"tristin16\",\"name\":\"merge\",\"company\":\"canis\"},{\"login\":\"mayra65\",\"name\":\"chip out fondly\",\"company\":\"tempore\"}],\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_LOPbXvz9\",\"call\":4}}"
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_e6f0190a4cb040aa9f5f84ccc4165e3e",
+     "name": "call_tool",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"total_count\":72,\"installations\":[{\"id\":1383,\"account\":{\"login\":\"octocat\",\"type\":\"User\"},\"repository_selection\":\"selected\"},{\"id\":1791,\"account\":{\"login\":\"octocat\",\"type\":\"User\"},\"repository_selection\":\"all\"},{\"id\":1263,\"account\":{\"login\":\"octocat\",\"type\":\"User\"},\"repository_selection\":\"selected\"}]},\"page\":{\"count\":3,\"total\":72,\"has_more\":true,\"next_cursor\":\"c_WzE3OTU3MzAwMzgseyJrIjoicCIsIm4iOjJ9XQ.91fVbI-OQho2jTIV\"},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_LOPbXvz9\",\"call\":5}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_20c465f8d3f84c4db2de102731b0cfba",
+     "name": "call_tool",
+     "arguments": {
+      "name": "apps_list_installations_for_authenticated_user",
+      "arguments": {
+       "limit": 100,
+       "cursor": "c_WzE3OTU3MzAwMzgseyJrIjoicCIsIm4iOjJ9XQ.91fVbI-OQho2jTIV",
+       "fields": [
+        "id",
+        "account.login",
+        "account.type",
+        "repository_selection"
+       ]
+      }
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_20c465f8d3f84c4db2de102731b0cfba",
+     "name": "call_tool",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"total_count\":72,\"installations\":[{\"id\":1383,\"account\":{\"login\":\"octocat\",\"type\":\"User\"},\"repository_selection\":\"selected\"},{\"id\":1791,\"account\":{\"login\":\"octocat\",\"type\":\"User\"},\"repository_selection\":\"all\"},{\"id\":1263,\"account\":{\"login\":\"octocat\",\"type\":\"User\"},\"repository_selection\":\"selected\"}]},\"page\":{\"count\":3,\"total\":72,\"has_more\":false,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_LOPbXvz9\",\"call\":6}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_4df05c4aaf8f41bb8c18bc587eff418a",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name before I can configure its immutable-release policy. Also, should the policy cover every repository, or only selected repositories?",
+      "attempted": [
+       "users_get_authenticated",
+       "apps_list_installations_for_authenticated_user"
+      ],
+      "reason": "The available context did not identify a target organization or which repositories are in scope."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_4df05c4aaf8f41bb8c18bc587eff418a",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a2-d935-7c2d-a80c-6da5097a30cd\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_LOPbXvz9\",\"call\":7}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Which GitHub organization should I configure, and should immutable releases apply to **all repositories** or only **selected repositories**?"
+    }
+   ],
+   "calls": [
+    {
+     "tool": "users_get_authenticated",
+     "arguments": {},
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726437228
+    },
+    {
+     "tool": "apps_list_installations_for_authenticated_user",
+     "arguments": {
+      "per_page": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726437249
+    },
+    {
+     "tool": "apps_list_installations_for_authenticated_user",
+     "arguments": {
+      "per_page": 100,
+      "page": 2
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726440552
+    },
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name before I can configure its immutable-release policy. Also, should the policy cover every repository, or only selected repositories?",
+      "attempted": [
+       "users_get_authenticated",
+       "apps_list_installations_for_authenticated_user"
+      ],
+      "reason": "The available context did not identify a target organization or which repositories are in scope."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726443100
+    }
+   ],
+   "inputTokens": 8442,
+   "outputTokens": 1020,
+   "cacheReadTokens": 50485,
+   "cacheWriteTokens": 0
+  },
+  "amb_wrote": {
+   "source": "github/github-code-c2-transcripts.json",
+   "taskKey": "github_ambiguous_immutable_release_scope",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "code",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Recognizes that the enforcement scope and, for a selected scope, the repository IDs are unspecified; asks for clarification without changing settings."
+     },
+     "passed": false,
+     "detail": "judge fail (0.00): The scope was unspecified, but the agent chose non-fork repositories without asking.; It changed organization settings and selected repository IDs without clarification."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": false,
+     "detail": "writes: orgs_set_immutable_releases_settings"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": false,
+     "detail": "11 upstream calls (at most 0 allowed)",
+     "overBudget": true
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "orgs_set_immutable_releases_settings",
+      "toolKey": "operationId:orgs/set-immutable-releases-settings"
+     },
+     "passed": false,
+     "detail": "orgs_set_immutable_releases_settings called 3×"
+    }
+   ],
+   "judge": {
+    "score": 0,
+    "verdict": "fail",
+    "reasons": [
+     "The scope was unspecified, but the agent chose non-fork repositories without asking.",
+     "It changed organization settings and selected repository IDs without clarification."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Set up immutable releases for the repositories in the github organization that should be covered.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Set up immutable releases for the repositories in the github organization that should be covered."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_d8a7174638ed44b9b71396b989daea1f",
+     "name": "search_tools",
+     "arguments": {
+      "query": "GitHub repositories list organization and configure immutable releases / release immutability settings",
+      "detail": "full"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_d8a7174638ed44b9b71396b989daea1f",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"repos_list_for_org\",\"purpose\":\"Lists repositories for the specified organization.\",\"signature\":\"api.repos_list_for_org(*, org: str, type: Literal[\\\"all\\\", \\\"public\\\", \\\"private\\\", \\\"forks\\\", \\\"sources\\\", \\\"member\\\"] = \\\"all\\\", sort: Literal[\\\"created\\\", \\\"updated"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_96a1d2fa0d8f4e3e9bc39cca08e5e45a",
+     "name": "search_tools",
+     "arguments": {
+      "query": "identify current GitHub organization or list organizations accessible to authenticated user",
+      "detail": "full"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_96a1d2fa0d8f4e3e9bc39cca08e5e45a",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"repos_list_for_user\",\"purpose\":\"List a user's public repositories, for example to identify a repository before calling a repository-specific tool.\",\"signature\":\"api.repos_list_for_user(*, username: str, type: Literal[\\\"all\\\", \\\"owner\\\", \\\"member\\\"] = \\\"owner\\\", s"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_8ba8ec69571e489083a122afa7d6bf66",
+     "name": "run_script",
+     "arguments": {
+      "code": "u=api.users_get_authenticated(); i=api.apps_list_installations_for_authenticated_user(per_page=100); return {'user':u,'installations':i}"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_8ba8ec69571e489083a122afa7d6bf66",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"user\":[{\"login\":\"octocat\",\"id\":1,\"user_view_type\":\"congregatio\",\"node_id\":\"MDQ6VXNlcjE=\",\"avatar_url\":\"https://github.com/images/error/octocat_happy.gif\",\"gravatar_id\":\"41d064eb2195891e12d0413f63227ea7\",\"url\":\"https://api.github.com/users/octocat\",\"html_url\":\"https://github.com/octocat\",\"followers_url\":\"https://api.github.com/users/octocat/followers\",\"following_url\":\"https://api.github.com/users/octocat/following{/other_user}\",\"gists_url\":\"https://api.github.com/users/octocat/gists{/gist_id}\",\"starred_url\":\"https://api.github.com/users/octocat/starred{/owner}{/repo}\",\"subscriptions_url\":\"https://api.github.com/users/octocat/subscriptions\",\"organizations_url\":\"https://api.github.com/users/octocat/orgs\",\"repos_url\":\"https://api.github.com/users/octocat/repos\",\"events_url\":\"https://api.github.com/users/octocat/events{/privacy}\",\"received_events_url\":\"https://api.github.com/users/octocat/received_events\",\"type\":\"User\",\"site_admin\":false,\"name\":\"monalisa octocat\",\"company\":\"GitHub\",\"blog\":\"https://github.com/blog\",\"location\":\"San Francisco\",\"email\":\"octocat@github.com\",\"notification_email\":\"octocat@github.com\",\"hireable\":false,\"bio\":\"There once was...\",\"twitter_username\":\"monalisa\",\"public_repos\":2,\"public_gists\":1,\"followers\":20,\"following\":0,\"created_at\":\"2008-01-14T04:33:35Z\",\"updated_at\":\"2008-01-14T04:33:35Z\",\"private_gists\":81,\"total_private_repos\":100,\"owned_private_repos\":100,\"disk_usage\":10000,\"collaborators\":8,\"two_factor_authentication\":true,\"plan\":{…[cut for the fixture]"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_c56ccc00ba41473cbed2c74be1ec84d9",
+     "name": "run_script",
+     "arguments": {
+      "code": "r=api.repos_list_for_org(org='github', type='all', per_page=100); s=api.orgs_get_immutable_releases_settings(org='github'); return {'repos':r,'settings':s}"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_c56ccc00ba41473cbed2c74be1ec84d9",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"repos\":[{\"id\":1,\"name\":\"Hello-World\",\"full_name\":\"octocat/Hello-World\",\"description\":\"This your first repo!\",\"private\":true,\"fork\":false,\"language\":\"vetus\",\"updated_at\":\"2011-01-26T19:14:43Z\",\"pushed_at\":\"2011-01-26T19:06:43Z\",\"html_url\":\"https://github.com/octocat/Hello-World\"},{\"id\":2,\"name\":\"though\",\"full_name\":\"why hydrocarbon\",\"description\":\"Accusantium suffragium ipsa curto cedo pauper assumenda voluptas.\",\"private\":true,\"fork\":true,\"language\":\"necessitatibus\",\"updated_at\":\"2025-12-09T08:05:11.970Z\",\"pushed_at\":\"2025-11-19T22:00:47.524Z\",\"html_url\":\"https://ornery-fund.com/\"},{\"id\":3,\"name\":\"disloyal\",\"full_name\":\"reword acidic\",\"description\":\"Adiuvo trado apto sollers. Placeat spargo voluptate ullam censura volutabrum carmen.\",\"private\":true,\"fork\":true,\"language\":\"titulus\",\"updated_at\":\"2025-10-10T18:00:22.057Z\",\"pushed_at\":\"2025-11-15T02:03:43.386Z\",\"html_url\":\"https://worthless-hospitalization.org\"},{\"id\":4,\"name\":\"unfinished trust across\",\"full_name\":\"rim oof\",\"description\":\"Abstergo unde convoco commodi degusto comedo calco via maiores torqueo.\",\"private\":true,\"fork\":false,\"language\":\"corporis\",\"updated_at\":\"2025-11-13T06:57:12.833Z\",\"pushed_at\":\"2025-12-27T07:28:17.371Z\",\"html_url\":\"https://interesting-poppy.info/\"},{\"id\":5,\"name\":\"grandiose consequently\",\"full_name\":\"tuba\",\"description\":\"Quia hic tres curso. Cometes est tempore ver vetus cohaero.\",\"private\":true,\"fork\":false,\"language\":\"voluptas\",\"updated_at\":\"2025-12-11T15:39:56.427Z\",\"pushe…[cut for the fixture]"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_10b6d137d8fb4616bb57dd3b41e82abe",
+     "name": "search_tools",
+     "arguments": {
+      "query": "get selected repositories for immutable releases organization settings list selected repo IDs",
+      "detail": "full"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_10b6d137d8fb4616bb57dd3b41e82abe",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"orgs_get_immutable_releases_settings\",\"purpose\":\"Gets the immutable releases policy for repositories in an organization.\",\"signature\":\"api.orgs_get_immutable_releases_settings(*, org: str) -> CheckImmutableReleasesOrganizationSettings\",\"example\":\"api.orgs_get_imm"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_546ed6a109bb4a1181b803b313a86eb3",
+     "name": "run_script",
+     "arguments": {
+      "code": "return api.orgs_set_immutable_releases_settings(org='github', enforced_repositories='selected', selected_repository_ids=[1,4,5,6,11,13,14,15,17,19])",
+      "mode": "dry_run"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_546ed6a109bb4a1181b803b313a86eb3",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"result\":{\"plan\":{\"tool\":\"orgs_set_immutable_releases_settings\",\"target\":\"org github\",\"method\":\"PUT\",\"path\":\"/orgs/{org}/settings/immutable-releases\",\"args\":{\"org\":\"github\",\"enforced_repositories\":\"selected\",\"selected_repository_ids\":[1,4,5,6,11,13,14,15,17,19]},\"reversible\":true,\"effect\":\"Sets the immutable releases policy for repositories in an organization.\"}},\"plan\":[{\"tool\":\"orgs_set_immutable_releases_settings\",\"target\":\"org github\",\"method\":\"PUT\",\"path\":\"/orgs/{org}/settings/immutable-releases\",\"args\":{\"org\":\"github\",\"enforced_repositories\":\"selected\",\"selected_repository_ids\":[1,4,5,6,11,13,14,15,17,19]},\"reversible\":true,\"effect\":\"Sets the immutable releases policy for repositories in an organization.\"}]},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_FbkaSPIB\",\"call\":6,\"left\":{\"calls\":199,\"seconds\":29},\"script_calls\":1,\"flags\":[\"dry_run\"]}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_dc54824805f74ad381377930ab21468c",
+     "name": "run_script",
+     "arguments": {
+      "code": "return api.orgs_set_immutable_releases_settings(org='github', enforced_repositories='selected', selected_repository_ids=[1,4,5,6,11,13,14,15,17,19])"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_dc54824805f74ad381377930ab21468c",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":null,\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_FbkaSPIB\",\"call\":7,\"left\":{\"calls\":199,\"seconds\":29},\"script_calls\":1}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_bc38ccb52640436ab8ff87e9b3babeae",
+     "name": "run_script",
+     "arguments": {
+      "code": "return api.orgs_get_immutable_releases_settings(org='github')"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_bc38ccb52640436ab8ff87e9b3babeae",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"enforced_repositories\":\"selected\",\"selected_repositories_url\":\"https://square-descent.net\"},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_FbkaSPIB\",\"call\":8,\"left\":{\"calls\":199,\"seconds\":29},\"script_calls\":1}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Enabled immutable releases for the organization’s **non-fork repositories** (10 repositories), using selected-repository enforcement. Forks were left out.\n\nThe organization policy now reports enforcement as **selected**."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "users_get_authenticated",
+     "arguments": {},
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a6-e6b6-7e01-8f6e-2b66e51fdb90",
+     "ts": 1795726698204
+    },
+    {
+     "tool": "apps_list_installations_for_authenticated_user",
+     "arguments": {
+      "per_page": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a6-e6b6-7e01-8f6e-2b66e51fdb90",
+     "ts": 1795726698207
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "u=api.users_get_authenticated(); i=api.apps_list_installations_for_authenticated_user(per_page=100); return {'user':u,'installations':i}",
+      "mode": "dry_run"
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a6-e6b6-7e01-8f6e-2b66e51fdb90",
+     "ts": 1795726698212
+    },
+    {
+     "tool": "users_get_authenticated",
+     "arguments": {},
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a6-e6e4-7987-8261-c425d94268c6",
+     "ts": 1795726698244
+    },
+    {
+     "tool": "apps_list_installations_for_authenticated_user",
+     "arguments": {
+      "per_page": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a6-e6e4-7987-8261-c425d94268c6",
+     "ts": 1795726698248
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "u=api.users_get_authenticated(); i=api.apps_list_installations_for_authenticated_user(per_page=100); return {'user':u,'installations':i}",
+      "mode": "execute"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a6-e6e4-7987-8261-c425d94268c6",
+     "ts": 1795726698253
+    },
+    {
+     "tool": "repos_list_for_org",
+     "arguments": {
+      "org": "github",
+      "type": "all",
+      "per_page": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a6-f03e-7afd-b92a-85385ff2f216",
+     "ts": 1795726700648
+    },
+    {
+     "tool": "orgs_get_immutable_releases_settings",
+     "arguments": {
+      "org": "github"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a6-f03e-7afd-b92a-85385ff2f216",
+     "ts": 1795726700649
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "r=api.repos_list_for_org(org='github', type='all', per_page=100); s=api.orgs_get_immutable_releases_settings(org='github'); return {'repos':r,'settings':s}",
+      "mode": "dry_run"
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a6-f03e-7afd-b92a-85385ff2f216",
+     "ts": 1795726700652
+    },
+    {
+     "tool": "repos_list_for_org",
+     "arguments": {
+      "org": "github",
+      "type": "all",
+      "per_page": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a6-f06c-76d5-a038-87d6b3505756",
+     "ts": 1795726700687
+    },
+    {
+     "tool": "orgs_get_immutable_releases_settings",
+     "arguments": {
+      "org": "github"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a6-f06c-76d5-a038-87d6b3505756",
+     "ts": 1795726700689
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "r=api.repos_list_for_org(org='github', type='all', per_page=100); s=api.orgs_get_immutable_releases_settings(org='github'); return {'repos':r,'settings':s}",
+      "mode": "execute"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a6-f06c-76d5-a038-87d6b3505756",
+     "ts": 1795726700720
+    },
+    {
+     "tool": "orgs_set_immutable_releases_settings",
+     "arguments": {
+      "org": "github",
+      "enforced_repositories": "selected",
+      "selected_repository_ids": [
+       1,
+       4,
+       5,
+       6,
+       11,
+       13,
+       14,
+       15,
+       17,
+       19
+      ]
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "script",
+     "write": true,
+     "scriptRunId": "01a219a7-018a-7573-adb5-d3d52a7f9cb1",
+     "ts": 1795726705071
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "return api.orgs_set_immutable_releases_settings(org='github', enforced_repositories='selected', selected_repository_ids=[1,4,5,6,11,13,14,15,17,19])",
+      "mode": "dry_run"
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a7-018a-7573-adb5-d3d52a7f9cb1",
+     "ts": 1795726705073
+    },
+    {
+     "tool": "orgs_set_immutable_releases_settings",
+     "arguments": {
+      "org": "github",
+      "enforced_repositories": "selected",
+      "selected_repository_ids": [
+       1,
+       4,
+       5,
+       6,
+       11,
+       13,
+       14,
+       15,
+       17,
+       19
+      ]
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "script",
+     "write": true,
+     "scriptRunId": "01a219a7-0738-7b3a-a1a4-76db4dac9cc2",
+     "ts": 1795726706521
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "return api.orgs_set_immutable_releases_settings(org='github', enforced_repositories='selected', selected_repository_ids=[1,4,5,6,11,13,14,15,17,19])",
+      "mode": "dry_run"
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a7-0738-7b3a-a1a4-76db4dac9cc2",
+     "ts": 1795726706522
+    },
+    {
+     "tool": "orgs_set_immutable_releases_settings",
+     "arguments": {
+      "org": "github",
+      "enforced_repositories": "selected",
+      "selected_repository_ids": [
+       1,
+       4,
+       5,
+       6,
+       11,
+       13,
+       14,
+       15,
+       17,
+       19
+      ]
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": true,
+     "scriptRunId": "01a219a7-075b-75b2-a425-9244ba508b4a",
+     "ts": 1795726706552
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "return api.orgs_set_immutable_releases_settings(org='github', enforced_repositories='selected', selected_repository_ids=[1,4,5,6,11,13,14,15,17,19])",
+      "mode": "execute"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a7-075b-75b2-a425-9244ba508b4a",
+     "ts": 1795726706554
+    },
+    {
+     "tool": "orgs_get_immutable_releases_settings",
+     "arguments": {
+      "org": "github"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a7-0e84-7119-beb4-4ba00140ff62",
+     "ts": 1795726708388
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "return api.orgs_get_immutable_releases_settings(org='github')",
+      "mode": "dry_run"
+     },
+     "status": "ok",
+     "decision": "dry_run",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a7-0e84-7119-beb4-4ba00140ff62",
+     "ts": 1795726708391
+    },
+    {
+     "tool": "orgs_get_immutable_releases_settings",
+     "arguments": {
+      "org": "github"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a219a7-0ea7-7e76-befe-c6f4ede84a9d",
+     "ts": 1795726708422
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "return api.orgs_get_immutable_releases_settings(org='github')",
+      "mode": "execute"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a219a7-0ea7-7e76-befe-c6f4ede84a9d",
+     "ts": 1795726708424
+    }
+   ],
+   "inputTokens": 25490,
+   "outputTokens": 1014,
+   "cacheReadTokens": 123003,
+   "cacheWriteTokens": 0
+  },
+  "amb_no_assumption": {
+   "source": "stripe/stripe-tool-c2-transcripts.json",
+   "taskKey": "recent_topups_timeframe_clarification",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "tool",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "get_topups",
+      "toolKey": "operationId:GetTopups"
+     },
+     "passed": false,
+     "detail": "get_topups called 1×"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": false,
+     "detail": "1 upstream calls (at most 0 allowed)",
+     "overBudget": true
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Ask the user to define the timeframe meant by “recent” before fetching top-ups."
+     },
+     "passed": false,
+     "detail": "judge fail (0.00): Fetched top-ups without clarifying what “recent” means.; Should have asked the user to specify a timeframe before calling the API."
+    },
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    }
+   ],
+   "judge": {
+    "score": 0,
+    "verdict": "fail",
+    "reasons": [
+     "Fetched top-ups without clarifying what “recent” means.",
+     "Should have asked the user to specify a timeframe before calling the API."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Show me top-ups from the recent period.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Show me top-ups from the recent period."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_2bb486f35ebb4fd8be24dfcaf481c477",
+     "name": "get_topups",
+     "arguments": {
+      "limit": 10
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_2bb486f35ebb4fd8be24dfcaf481c477",
+     "name": "get_topups",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"has_more\":true,\"object\":\"list\",\"url\":\"/v1/topups\",\"total_count\":20,\"data\":[{\"amount\":11,\"balance_transaction\":\"KToLeZkOq\",\"created\":18,\"currency\":\"U4wnGR\",\"description\":\"Earum sollicito suggero. Ambitus admiratio tamisium statim.\",\"expected_availability_date\":61,\"failure_code\":\"FBA2pB6dDY19vFcWS2AWBBbe\",\"failure_message\":\"BmUzDLsytcRvGXJvGRcIKP\",\"id\":\"topup_1\",\"initiated_by\":\"user\",\"livemode\":false,\"metadata\":{},\"object\":\"topup\",\"payment_method\":\"EFbXBVZQljfjOnrl6zaFQI\",\"payment_method_options\":{\"us_bank_account\":{\"network\":\"ach\"}},\"source\":{\"ach_credit_transfer\":{\"account_number\":\"tripudio\",\"bank_name\":\"supposing gah briefly\",\"fingerprint\":\"coaegresco\",\"refund_account_holder_name\":\"before\",\"refund_account_holder_type\":\"concedo\",\"refund_routing_number\":\"odit\"},\"ach_debit\":{\"bank_name\":\"warming roughly ameliorate\",\"country\":\"solio\",\"fingerprint\":\"abundans\",\"last4\":\"civis\",\"routing_number\":\"ustilo\",\"type\":\"amita\"},\"acss_debit\":{\"bank_address_city\":\"subvenio\",\"bank_address_line_1\":\"solitudo\",\"bank_address_line_2\":\"accusator\",\"bank_address_postal_code\":\"clamo\",\"bank_name\":\"furthermore usually\",\"category\":\"terror\"},\"alipay\":{\"data_string\":\"suffragium\",\"native_url\":\"https://breakable-carnival.net\",\"statement_descriptor\":\"reiciendis\"},\"allow_redisplay\":\"unspecified\",\"amount\":88,\"client_secret\":\"5Y4\",\"created\":82,\"flow\":\"2KjqWMihC99r3lvWE0AryYL9\",\"id\":\"HLTsKEeRr0ImPDPut\",\"livemode\":true,\"object\":\"source\",\"status\":\"open\",\"type\":\"card_present\"},\"statement_descriptor…[cut for the fixture]"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_160373f313484155b4812dd5dbb4325a",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "done",
+      "text": "Retrieved the latest top-up records."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_160373f313484155b4812dd5dbb4325a",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a5-73a3-7528-8ac5-d1cf4717bbbc\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_UBl1XsU1\",\"call\":2}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Latest top-ups returned:\n\n| ID | Amount* | Currency | Status | Created |\n|---|---:|---|---|---:|\n| `topup_1` | 11 | `U4wnGR` | Failed | 18 |\n| `topup_2` | 76 | `QZQdD6hg3` | Failed | 88 |\n| `topup_3` | 32 | `WB2eLGspHdzz9xz` | Pending | 56 |\n| `topup_4` | 18 | `LXFCjKQqx3uVOh` | Canceled | 67 |\n| `topup_5` | 67 | `JpRze` | Succeeded | 48 |\n\n\\*Amounts are in the smallest currency unit. The list indicates 20 top-ups total; these are the 5 included in the latest page."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "get_topups",
+     "arguments": {
+      "limit": 10
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726603176
+    },
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "done",
+      "text": "Retrieved the latest top-up records."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726607819
+    }
+   ],
+   "inputTokens": 2858,
+   "outputTokens": 683,
+   "cacheReadTokens": 46809,
+   "cacheWriteTokens": 0
+  },
+  "amb_pkg_org_plus_optional_type": {
+   "source": "github/github-tool-c2-transcripts.json",
+   "taskKey": "github_ambiguous_org_package_type",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "tool",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Asks which package type the user wants to list, noting that the organization package listing requires that choice."
+     },
+     "passed": false,
+     "detail": "judge fail (0.50): Mentions package types and invites the user to choose one, but frames it as optional rather than required.; Does not explain that a package type is required to list organization packages."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": true,
+     "detail": "0 upstream calls (budget 0)"
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "packages_list_packages_for_organization",
+      "toolKey": "operationId:packages/list-packages-for-organization"
+     },
+     "passed": true,
+     "detail": "packages_list_packages_for_organization not called"
+    }
+   ],
+   "judge": {
+    "score": 0.5,
+    "verdict": "fail",
+    "reasons": [
+     "Mentions package types and invites the user to choose one, but frames it as optional rather than required.",
+     "Does not explain that a package type is required to list organization packages."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Can you show me the packages published by the github organization?",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Can you show me the packages published by the github organization?"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_9b7399d042234380b26642d20d0e99bf",
+     "name": "search_tools",
+     "arguments": {
+      "query": "List packages published by a GitHub organization, organization packages"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_9b7399d042234380b26642d20d0e99bf",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"packages_list_packages_for_organization\",\"purpose\":\"List packages of one specified type published by an organization.\",\"signature\":\"packages_list_packages_for_organization(package_type*: \\\"npm\\\"|\\\"maven\\\"|\\\"rubygems\\\"|\\\"docker\\\"|\\\"nuget\\\"|\\\"container\\\", org*: string, visibility?: \\\"public\\\"|\\\"private\\\"|\\\"internal\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"packages_list_packages_for_organization({\\\"package_type\\\":\\\"npm\\\",\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"packages_list_packages_for_user\",\"purpose\":\"Lists all packages in a user's namespace for which the requesting user has access.\",\"signature\":\"packages_list_packages_for_user(package_type*: \\\"npm\\\"|\\\"maven\\\"|\\\"rubygems\\\"|\\\"docker\\\"|\\\"nuget\\\"|\\\"container\\\", username*: string, visibility?: \\\"public\\\"|\\\"private\\\"|\\\"internal\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"packages_list_packages_for_user({\\\"package_type\\\":\\\"npm\\\",\\\"username\\\":\\\"octocat\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"pulls_list\",\"purpose\":\"List pull requests in a repository.\",\"signature\":\"pulls_list(owner*: string, repo*: string, state?: \\\"open\\\"|\\\"closed\\\"|\\\"all\\\", head?: string, base?: string, sort?: \\\"created\\\"|\\\"updated\\\"|\\\"popularity\\\"|\\\"long-running\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"pulls_list({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_for_org\",\"purpose\":\"Lists repositories for the specified organization.\",\"signature\":\"repos_list_for_org(org*: string, type?: \\\"all\\\"|\\\"public\\\"|\\\"private\\\"|\\\"forks\\\"|\\\"sources\\\"|\\\"member\\\", sort?: \\\"created\\\"|\\\"updated\\\"|\\\"pushed\\\"|\\\"full_name\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_for_org({\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_for_user\",\"purpose\":\"List a user's public repositories, for example to identify a repository before calling a repository-specific tool.\",\"signature\":\"repos_list_for_user(username*: string, type?: \\\"all\\\"|\\\"owner\\\"|\\\"member\\\", sort?: \\\"created\\\"|\\\"updated\\\"|\\\"pushed\\\"|\\\"full_name\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_for_user({\\\"username\\\":\\\"octocat\\\",\\\"sort\\\":\\\"updated\\\",\\\"direction\\\":\\\"desc\\\",\\\"per_page\\\":10})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_accounts_for_plan\",\"purpose\":\"Returns user and organization accounts associated with the specified plan, including free plans.\",\"signature\":\"apps_list_accounts_for_plan(plan_id*: integer, sort?: \\\"created\\\"|\\\"updated\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_accounts_for_plan({\\\"plan_id\\\":1})\",\"read_only\":true,\"destructive\":false},{\"name\":\"issues_list_for_repo\",\"purpose\":\"List issues (and pull requests, which GitHub returns through its issues API) in a repository.\",\"signature\":\"issues_list_for_repo(owner*: string, repo*: string, milestone?: string, state?: \\\"open\\\"|\\\"closed\\\"|\\\"all\\\", assignee?: string, type?: string, creator?: string, mentioned?: string, issue_field_values?: string, labels?: string, sort?: \\\"created\\\"|\\\"updated\\\"|\\\"comments\\\", direction?: \\\"asc\\\"|\\\"desc\\\", … 4 more)\",\"example\":\"issues_list_for_repo({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\",\\\"labels\\\":\\\"bug\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_commits\",\"purpose\":\"List commits in a repository, newest first.\",\"signature\":\"repos_list_commits(owner*: string, repo*: string, sha?: string, path?: string, author?: string, committer?: string, since?: string, until?: string, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_commits({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\"})\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":8,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_clijRQOc\",\"call\":1}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_968f5bfbab734a72b045c4359cff88c4",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name to list its published packages."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_968f5bfbab734a72b045c4359cff88c4",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a2-d8bc-7b01-a9bc-14afc9b1bb60\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_clijRQOc\",\"call\":2}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Which GitHub organization should I check? Also, if you have a preferred package type (npm, Docker/Container, Maven, RubyGems, or NuGet), let me know."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name to list its published packages."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726434096
+    }
+   ],
+   "inputTokens": 1300,
+   "outputTokens": 203,
+   "cacheReadTokens": 8407,
+   "cacheWriteTokens": 0
+  },
+  "amb_pkg_org_all_types": {
+   "source": "github/github-tool-c2-r2-transcripts.json",
+   "taskKey": "github_ambiguous_org_package_type",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "tool",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Asks which package type the user wants to list, noting that the organization package listing requires that choice."
+     },
+     "passed": false,
+     "detail": "judge fail (0.30): Does not ask the user to choose a package type; instead offers to check all types.; The required organization name is asked for, but that does not satisfy the package-type requirement."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": true,
+     "detail": "0 upstream calls (budget 0)"
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "packages_list_packages_for_organization",
+      "toolKey": "operationId:packages/list-packages-for-organization"
+     },
+     "passed": true,
+     "detail": "packages_list_packages_for_organization not called"
+    }
+   ],
+   "judge": {
+    "score": 0.3,
+    "verdict": "fail",
+    "reasons": [
+     "Does not ask the user to choose a package type; instead offers to check all types.",
+     "The required organization name is asked for, but that does not satisfy the package-type requirement."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Can you show me the packages published by the github organization?",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Can you show me the packages published by the github organization?"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_de196b06860e4252895be04c20d7f435",
+     "name": "search_tools",
+     "arguments": {
+      "query": "list GitHub organization packages published packages for an organization",
+      "detail": "brief"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_de196b06860e4252895be04c20d7f435",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"packages_list_packages_for_organization\",\"purpose\":\"List packages of one specified type published by an organization.\",\"signature\":\"packages_list_packages_for_organization(package_type*: \\\"npm\\\"|\\\"maven\\\"|\\\"rubygems\\\"|\\\"docker\\\"|\\\"nuget\\\"|\\\"container\\\", org*: string, visibility?: \\\"public\\\"|\\\"private\\\"|\\\"internal\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"packages_list_packages_for_organization({\\\"package_type\\\":\\\"npm\\\",\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"packages_list_packages_for_user\",\"purpose\":\"Lists all packages in a user's namespace for which the requesting user has access.\",\"signature\":\"packages_list_packages_for_user(package_type*: \\\"npm\\\"|\\\"maven\\\"|\\\"rubygems\\\"|\\\"docker\\\"|\\\"nuget\\\"|\\\"container\\\", username*: string, visibility?: \\\"public\\\"|\\\"private\\\"|\\\"internal\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"packages_list_packages_for_user({\\\"package_type\\\":\\\"npm\\\",\\\"username\\\":\\\"octocat\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"pulls_list\",\"purpose\":\"List pull requests in a repository.\",\"signature\":\"pulls_list(owner*: string, repo*: string, state?: \\\"open\\\"|\\\"closed\\\"|\\\"all\\\", head?: string, base?: string, sort?: \\\"created\\\"|\\\"updated\\\"|\\\"popularity\\\"|\\\"long-running\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"pulls_list({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_for_org\",\"purpose\":\"Lists repositories for the specified organization.\",\"signature\":\"repos_list_for_org(org*: string, type?: \\\"all\\\"|\\\"public\\\"|\\\"private\\\"|\\\"forks\\\"|\\\"sources\\\"|\\\"member\\\", sort?: \\\"created\\\"|\\\"updated\\\"|\\\"pushed\\\"|\\\"full_name\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_for_org({\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_tags\",\"purpose\":\"List tags in a repository.\",\"signature\":\"repos_list_tags(owner*: string, repo*: string, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_tags({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"oidc_list_oidc_custom_property_inclusions_for_org\",\"purpose\":\"Lists the repository custom properties that are included in the OIDC token for repository actions in an organization.\",\"signature\":\"oidc_list_oidc_custom_property_inclusions_for_org(org*: string, cursor?: string, fields?: string[])\",\"example\":\"oidc_list_oidc_custom_property_inclusions_for_org({\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_accounts_for_plan\",\"purpose\":\"Returns user and organization accounts associated with the specified plan, including free plans.\",\"signature\":\"apps_list_accounts_for_plan(plan_id*: integer, sort?: \\\"created\\\"|\\\"updated\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_accounts_for_plan({\\\"plan_id\\\":1})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_installations_for_authenticated_user\",\"purpose\":\"Lists installations of your GitHub App that the authenticated user has explicit permission (`:read`, `:write`, or `:admin`) to access.\",\"signature\":\"apps_list_installations_for_authenticated_user(cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_installations_for_authenticated_user({\\\"per_page\\\":5})\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":8,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_y4bxmClS\",\"call\":1}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_0743f3d33a8b47a0a95c38bc4ad69acc",
+     "name": "search_tools",
+     "arguments": {
+      "query": "find authenticated user's GitHub organizations or list organizations for authenticated user",
+      "detail": "brief"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_0743f3d33a8b47a0a95c38bc4ad69acc",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"codespaces_list_for_authenticated_user\",\"purpose\":\"Lists the authenticated user's codespaces.\",\"signature\":\"codespaces_list_for_authenticated_user(repository_id?: integer, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"codespaces_list_for_authenticated_user({\\\"per_page\\\":5})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_installations_for_authenticated_user\",\"purpose\":\"Lists installations of your GitHub App that the authenticated user has explicit permission (`:read`, `:write`, or `:admin`) to access.\",\"signature\":\"apps_list_installations_for_authenticated_user(cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_installations_for_authenticated_user({\\\"per_page\\\":5})\",\"read_only\":true,\"destructive\":false},{\"name\":\"users_get_authenticated\",\"purpose\":\"OAuth app tokens and personal access tokens (classic) need the `read:user` scope, or the broader `user` scope, for this endpoint to return the private user response.\",\"signature\":\"users_get_authenticated(fields?: string[])\",\"example\":\"users_get_authenticated({})\",\"read_only\":true,\"destructive\":false},{\"name\":\"users_get_by_username\",\"purpose\":\"Provides publicly available information about someone with a GitHub account.\",\"signature\":\"users_get_by_username(username*: string, fields?: string[])\",\"example\":\"users_get_by_username({\\\"username\\\":\\\"user_1\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_for_user\",\"purpose\":\"List a user's public repositories, for example to identify a repository before calling a repository-specific tool.\",\"signature\":\"repos_list_for_user(username*: string, type?: \\\"all\\\"|\\\"owner\\\"|\\\"member\\\", sort?: \\\"created\\\"|\\\"updated\\\"|\\\"pushed\\\"|\\\"full_name\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_for_user({\\\"username\\\":\\\"octocat\\\",\\\"sort\\\":\\\"updated\\\",\\\"direction\\\":\\\"desc\\\",\\\"per_page\\\":10})\",\"read_only\":true,\"destructive\":false},{\"name\":\"users_list_ssh_signing_keys_for_authenticated_user\",\"purpose\":\"Lists the SSH signing keys for the authenticated user's GitHub account.\",\"signature\":\"users_list_ssh_signing_keys_for_authenticated_user(cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"users_list_ssh_signing_keys_for_authenticated_user({\\\"per_page\\\":5})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_installation_repos_for_authenticated_user\",\"purpose\":\"List repositories the authenticated user can access through the specified GitHub App installation, including each repository's permissions.\",\"signature\":\"apps_list_installation_repos_for_authenticated_user(installation_id*: integer, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_installation_repos_for_authenticated_user({\\\"installation_id\\\":1})\",\"read_only\":true,\"destructive\":false},{\"name\":\"users_get_ssh_signing_key_for_authenticated_user\",\"purpose\":\"Retrieve details for one SSH signing key belonging to the authenticated GitHub user, identified by its numeric key ID.\",\"signature\":\"users_get_ssh_signing_key_for_authenticated_user(ssh_signing_key_id*: integer, fields?: string[])\",\"example\":\"users_get_ssh_signing_key_for_authenticated_user({\\\"ssh_signing_key_id\\\":1})\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":8,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_y4bxmClS\",\"call\":2}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_38400689c5064e27b345093609b531e1",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name to list its packages. The API also requires a package type (npm, Maven, RubyGems, Docker, NuGet, or container); I can check all types if you prefer.",
+      "attempted": [
+       "packages_list_packages_for_organization"
+      ],
+      "reason": "Organization name is not specified."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_38400689c5064e27b345093609b531e1",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a8-1c11-74d9-a04d-25a8bcc61dfa\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_y4bxmClS\",\"call\":3}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Which GitHub organization should I check? I can look for packages across all supported types: npm, Maven, RubyGems, Docker, NuGet, and container."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name to list its packages. The API also requires a package type (npm, Maven, RubyGems, Docker, NuGet, or container); I can check all types if you prefer.",
+      "attempted": [
+       "packages_list_packages_for_organization"
+      ],
+      "reason": "Organization name is not specified."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726780623
+    }
+   ],
+   "inputTokens": 2084,
+   "outputTokens": 348,
+   "cacheReadTokens": 12584,
+   "cacheWriteTokens": 0
+  }
+ }
+}

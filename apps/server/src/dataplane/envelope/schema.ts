@@ -71,6 +71,7 @@ export const ENVELOPE_SCHEMA: Schema = {
       additionalProperties: false,
     },
     hint: { type: 'string', maxLength: 200 },
+    logs: { type: 'string', maxLength: 2000 },
   },
   required: ['ok', 'data', 'page', 'truncated', 'error', 'state'],
   additionalProperties: false,

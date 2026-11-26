@@ -1,5 +1,5 @@
 import type { Assertion } from '@neurouter/shared';
-import { EQUIV_MARKER, GENERATOR_MARKER, JUDGE_MARKER, SUGGEST_MARKER, readMarkerInput } from '../prompts.js';
+import { DECLINE_MARKER, EQUIV_MARKER, GENERATOR_MARKER, JUDGE_MARKER, SUGGEST_MARKER, readMarkerInput } from '../prompts.js';
 import { firstSentence, mulberry32, shuffle, tokens } from '../rng.js';
 import type { GeneratedTask, GeneratorCategoryInput, GenTool } from '../types.js';
 import { llmResponse } from './fake.js';
@@ -26,6 +26,8 @@ export class StubLlmClient implements LlmClient {
     if (first.includes(SUGGEST_MARKER)) return this.reply(req, [{ type: 'text', text: '{}' }]);
     // the stub never rules an answer equivalent: normalized matching decides alone
     if (first.includes(EQUIV_MARKER)) return this.reply(req, [{ type: 'text', text: '{"items":[]}' }]);
+    // nor a decline the patterns missed
+    if (first.includes(DECLINE_MARKER)) return this.reply(req, [{ type: 'text', text: '{"declined":false,"reason":"stub"}' }]);
     return this.reply(req, stubAgentStep(req));
   }
 
@@ -242,12 +244,12 @@ export interface StubJudgeInput {
   calls: Array<{ tool: string; status: string }>;
 }
 
-export function stubJudge(input: StubJudgeInput): { score: number; verdict: 'pass' | 'fail'; reasons: string[] } {
+export function stubJudge(input: StubJudgeInput): { score: number; verdict: 'pass' | 'fail'; reasons: string[]; path: 'asked' | 'assumed' | 'neither' } {
   const answered = input.finalAnswer.trim().length > 0;
   const acted = input.calls.some((c) => c.status === 'ok');
   const asked = input.finalAnswer.includes('?');
-  if (answered && (acted || asked)) return { score: 0.8, verdict: 'pass', reasons: [asked ? 'asks for clarification' : 'made a choice and answered'] };
-  return { score: 0.2, verdict: 'fail', reasons: [answered ? 'no supporting tool call' : 'no final answer'] };
+  if (answered && (acted || asked)) return { score: 0.8, verdict: 'pass', reasons: [asked ? 'asks for clarification' : 'made a choice and answered'], path: asked ? 'asked' : 'assumed' };
+  return { score: 0.2, verdict: 'fail', reasons: [answered ? 'no supporting tool call' : 'no final answer'], path: 'neither' };
 }
 
 /* ------------------------------------------------------------------ agent */

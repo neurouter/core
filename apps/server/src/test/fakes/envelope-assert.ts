@@ -18,7 +18,8 @@ export function assertEnvelope(result: unknown, label = 'result'): Record<string
   expect(r.content![0]!.text, `${label}: text = compact structuredContent`).toBe(JSON.stringify(env));
   const keys = Object.keys(env);
   expect(keys.slice(0, 6), `${label}: key order`).toEqual(KEYS);
-  expect(keys.length === 6 || (keys.length === 7 && keys[6] === 'hint'), `${label}: only hint may follow`).toBe(true);
+  // optional tail: hint, then logs (run_script)
+  expect(['hint', 'logs'].filter((k) => keys.includes(k)), `${label}: only hint and logs may follow`).toEqual(keys.slice(6));
   expect(Boolean(r.isError), `${label}: isError = !ok`).toBe(!env.ok);
   expect(envelopeErrors(env), `${label}: envelope schema`).toEqual([]);
   expect(JSON.stringify(env.state).length, `${label}: state ≤ 50 tokens`).toBeLessThanOrEqual(BUDGET.stateChars);
@@ -27,5 +28,6 @@ export function assertEnvelope(result: unknown, label = 'result'): Record<string
     expect(JSON.stringify(env.error), `${label}: no stack traces or explain_error steering`).not.toMatch(/Traceback|__neurouter_main__|neurouter_explain_error| at [\w.]+ \(/);
   }
   if (env.hint !== undefined) expect(env.hint.length).toBeLessThanOrEqual(BUDGET.hintChars);
+  if (env.logs !== undefined) expect(env.logs.length).toBeLessThanOrEqual(BUDGET.logsChars);
   return env;
 }

@@ -123,6 +123,33 @@ describe('neurouter eval (in-process, stub provider)', () => {
     expect((JSON.parse(readFileSync(join(dir, 'r2.json'), 'utf8')) as { score: { headline: number } }).score.headline).toBe(report.score.headline);
   }, 120_000);
 
+  it('--contract 1|2 pins the eval server\'s contract, the report records it, categories come first; no framing component on contract 2 (B2)', async () => {
+    process.env.NEUROUTER_EVAL_LLM = 'stub';
+    process.env.NEUROUTER_EXECUTOR_MODE = 'local';
+    const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));
+    try {
+      const gen = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--generate', '--counts', '2,0,0,1', '--calibrate-only', '--save-suite', join(dir, 's.json')]);
+      expect(gen.code).toBeUndefined();
+      type Rep = { run: { contract: number }; categories: Array<{ category: string }>; score: { cells: Array<{ components: Array<{ key: string }> }> } };
+      const byContract: Record<string, Rep> = {};
+      for (const c of ['1', '2']) {
+        const r = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--suite', join(dir, 's.json'), '--repeats', '1', '--modes', 'tool', '--contract', c, '--out', join(dir, `r${c}.json`)]);
+        expect(r.err).toContain(`agent contract ${c} (--contract)`);
+        expect(r.out.split('\n')[0]).toMatch(/^model\s+mode\s+category\s+success/);
+        expect(r.out).toContain(`agent contract ${c}`);
+        byContract[c] = JSON.parse(readFileSync(join(dir, `r${c}.json`), 'utf8')) as Rep;
+        expect(byContract[c]!.run.contract).toBe(Number(c));
+      }
+      expect(byContract['2']!.categories.map((x) => x.category)).toEqual(['single', 'impossible']);
+      // the score the eval report prints: framing is n/a on contract 2 (weights renormalize), measured on contract 1
+      expect(byContract['2']!.score.cells[0]!.components.map((x) => x.key)).not.toContain('framing');
+      expect(byContract['1']!.score.cells[0]!.components.map((x) => x.key)).toContain('framing');
+      await expect(run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--suite', join(dir, 's.json'), '--contract', '3'])).rejects.toThrow('--contract must be 1 or 2');
+    } finally {
+      delete process.env.NEUROUTER_EXECUTOR_MODE;
+    }
+  }, 120_000);
+
   it('--generate exits 2 without running when the generator produces no tasks', async () => {
     process.env.NEUROUTER_EVAL_LLM = 'stub';
     const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));

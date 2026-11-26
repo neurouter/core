@@ -166,7 +166,8 @@ describe('contract 2 (acme, mock)', () => {
     it('scripts: an uncaught tool error keeps its code; next is the run_script call of the fix', async () => {
       const m = c();
       const { out } = await follow(m, 'run_script', { code: 'return acme.get_order(order_id="ord_nope")' }, 'not_found');
-      expect(out.data.items).toHaveLength(20);
+      // 20 orders are over the 8,192-char script result budget (B3): the first ones, the rest counted in truncated
+      expect(out.data.items.length + (out.truncated?.fields?.length ? 0 : (out.truncated?.items_omitted ?? 0))).toBe(20);
       await follow(m, 'run_script', { code: 'return acme.list_orders(limit=500)' }, 'invalid_args');
     });
 

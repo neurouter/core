@@ -137,6 +137,10 @@ export interface AssertionResult {
   matchedBy?: 'literal' | 'normalized' | 'judge';
   /** max_calls: over the soft budget (efficiency) without failing. */
   overBudget?: boolean;
+  /** answer_contains: the expected values came from the ground truth (not a literal hint). */
+  groundTruth?: boolean;
+  /** called / not_called / max_calls: failed as written, passed by an equivalence rule (B9 path, ambiguous waiver). */
+  waived?: string;
 }
 
 /** LLM usage of judge calls (rubric judge + answer-equivalence judge). */
@@ -151,11 +155,21 @@ export interface JudgeResult {
   score: number;
   verdict: 'pass' | 'fail';
   reasons: string[];
+  /** Ambiguous tasks: how the agent handled the ambiguity (a clarifying question, an explicit assumption, neither). */
+  path?: 'asked' | 'assumed' | 'neither';
+}
+
+/** Every judge call behind a verdict (borderline verdicts are voted: up to 3 calls, majority). */
+export interface JudgeVotes {
+  rubric?: JudgeResult[];
+  /** answer-equivalence judge: one map (assertion index → ruling) per call */
+  equivalence?: Array<Record<number, { equivalent: boolean; reason: string }>>;
 }
 
 export interface CheckResult {
   passed: boolean;
   results: AssertionResult[];
+  judgeVotes?: JudgeVotes;
   /** null when the task has no `framing` assertion. */
   framingPassed: boolean | null;
   judge: JudgeResult | null;
@@ -207,6 +221,8 @@ export interface TaskRunResult {
   overBudget?: boolean;
   /** Judge LLM usage for this attempt. */
   judgeUsage?: JudgeUsage | null;
+  /** All judge calls behind the verdicts (voting on borderline ones). */
+  judgeVotes?: JudgeVotes | null;
   toolsListBytes?: number;
 }
 

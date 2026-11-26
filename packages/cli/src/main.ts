@@ -84,6 +84,7 @@ export function buildProgram(): Command {
     .option('--transcript-max-chars <n>', 'with --transcripts: trim each transcript item (text, tool result) to n characters (default: untrimmed)')
     .option('--suggest', 'print fix suggestions', false)
     .option('--embeddings', 'enable local search embeddings', false)
+    .option('--contract <1|2>', 'with --spec: the agent contract of the server eval creates (default: NEUROUTER_NEW_SERVER_CONTRACT, i.e. 2); recorded in the report as run.contract')
     .option('--max-run-tokens <n>', 'hard token cap for the run (agent + judge tokens): stops starting attempts once reached and marks the run incomplete')
     .option('--no-calibrate', 'with --suite: skip the calibration gate (each task\'s reference solution through its own assertions)')
     .option('--calibrate-with <model>', 'calibration: also run one tool-mode pass with this model and flag tasks whose answers disagree with the ground truth (for review; not dropped)')

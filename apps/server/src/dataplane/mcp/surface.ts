@@ -286,7 +286,9 @@ function instructionsV2(ctx: RunContext, surface: Surface): string {
   if (surface.mode !== 'code' && areas) lines.push(`Tools by area: ${areas}.${listedSearch ? ' Not all tools are listed: use search_tools, then call_tool.' : ''}`);
   else if (surface.mode === 'code' && areas) lines.push(`Tools by area: ${areas}. Find functions with search_tools.`);
   if (surface.code) lines.push(`For multi-step work use run_script: Python calling ${ns}.<fn>(...); mode="dry_run" for writes.`);
-  if (reportEnabled(ctx)) lines.push('If no tool can do it or you need the user, call neurouter_report.');
+  // ask first (P6): without begin_task framing, agents acted on ambiguous requests instead of asking; one sentence, no extra call
+  const ask = 'If the request is ambiguous (which records, period or scope), state your plan and ask the user before acting, and never write on a guess.';
+  lines.push(reportEnabled(ctx) ? `${ask} If no tool can do it, call neurouter_report.` : ask);
   return lines.join('\n');
 }
 

@@ -197,7 +197,6 @@ servers:
     const flip = (x: string) => `${x.slice(0, 5)}${x[5] === 'A' ? 'B' : 'A'}${x.slice(6)}`;
     for (const [args, tool] of [
       [{ limit: 2, cursor: flip(cur) }, 'list_widgets'],
-      [{ limit: 3, cursor: cur }, 'list_widgets'],
       [{ limit: 2, cursor: cur }, 'list_gizmos'],
     ] as const) {
       const e = await call(mock, tool, args);
@@ -205,6 +204,16 @@ servers:
       expect(e.error.message).toMatch(/nothing was called/);
       expect(e.error.next).toEqual([{ tool, args: { limit: args.limit } }]);
     }
+    // other query arguments (B5): the first suggestion continues the cursor with its own arguments, the second starts over
+    const other3 = await call(mock, 'list_widgets', { limit: 3, cursor: cur, fields: ['id'] });
+    expect(other3.error).toMatchObject({ code: 'invalid_args', fields: [{ field: 'cursor' }] });
+    expect(other3.error.message).toMatch(/issued for other arguments \(limit\); nothing was called/);
+    // the 600-char error budget keeps the first suggestion (the cursor is long); the page-1 call is the second when it fits
+    expect(other3.error.next[0]).toEqual({ tool: 'list_widgets', args: { limit: 2, fields: ['id'], cursor: cur } });
+    expect(other3.error.next.slice(1)).toEqual(other3.error.next.length > 1 ? [{ tool: 'list_widgets', args: { limit: 3, fields: ['id'] } }] : []);
+    const cont = await call(mock, other3.error.next[0].tool, other3.error.next[0].args);
+    expect(cont.ok).toBe(true);
+    expect(cont.data.data.map((x: any) => x.id)).not.toContain(good.data.data[0].id);
     const other = rawMcp(`${s.url}/mcp/paging/mock`, await keyFor(s, 'paging', 'mock', ['tools:read']), { headers: V2 });
     await other.initialize();
     expect((await call(other, 'list_widgets', { limit: 2, cursor: cur })).error).toMatchObject({ code: 'invalid_args', fields: [{ field: 'cursor' }] });
@@ -212,14 +221,18 @@ servers:
     void c;
   });
 
-  it('fields: per-item projection on lists (bound into the cursor), default set from the overlay; clipped objects name the fields and the call that returns them', async () => {
+  it('fields: per-item projection on lists (not bound into the cursor), default set from the overlay; clipped objects name the fields and the call that returns them', async () => {
     const def = await call(mock, 'list_widgets', { limit: 2 });
     expect(Object.keys(def.data.data[0]).sort()).toEqual(['id', 'name', 'status']);
     const only = await call(mock, 'list_widgets', { limit: 2, fields: ['id', 'color'] });
     expect(Object.keys(only.data.data[0]).sort()).toEqual(['color', 'id']);
     const next = await call(mock, 'list_widgets', { limit: 2, fields: ['id', 'color'], cursor: only.page.next_cursor });
     expect(next.ok).toBe(true);
-    expect((await call(mock, 'list_widgets', { limit: 2, cursor: only.page.next_cursor })).error.code).toBe('invalid_args');
+    // the cursor binds the query, not the projection (B5): dropping or changing fields keeps the cursor valid
+    const dropped = await call(mock, 'list_widgets', { limit: 2, cursor: only.page.next_cursor });
+    expect(dropped.ok, JSON.stringify(dropped.error)).toBe(true);
+    expect(dropped.data.data.map((x: any) => x.id)).toEqual(next.data.data.map((x: any) => x.id));
+    expect(Object.keys(dropped.data.data[0]).sort()).toEqual(['id', 'name', 'status']);
     const bad = await call(mock, 'list_widgets', { fields: 'id' });
     expect(bad.error).toMatchObject({ code: 'invalid_args', fields: [{ field: 'fields' }], next: [{ tool: 'list_widgets', args: {} }] });
 
@@ -230,6 +243,22 @@ servers:
     const full = await call(mock, clipped.truncated.next.tool, clipped.truncated.next.args);
     expect(full.truncated).toBeNull();
     expect(full.data).toEqual({ body: created.data.body });
+  });
+
+  it('B5 (P6: apps_list_accounts_for_plan, codespaces_list_for_authenticated_user): fields and a default limit added to a next_cursor call keep the cursor', async () => {
+    // P6, list_accounts_for_plan_1313 (tool, contract 2): {plan_id, limit: 100} → Neurouter cut → the agent added
+    // fields: ["login"] to the next call and got invalid_args; error.next dropped the cursor (page 1 again)
+    const first = await call(mock, 'list_notes', {});
+    expect(first.page).toMatchObject({ count: 4, has_more: true });
+    const second = await call(mock, 'list_notes', { cursor: first.page.next_cursor, fields: ['id'] });
+    expect(second.ok, JSON.stringify(second.error)).toBe(true);
+    expect(second.data.map((x: any) => Object.keys(x))).toEqual([['id'], ['id'], ['id'], ['id']]);
+    expect(second.data.map((x: any) => x.id)).not.toContain(first.data[0].id);
+    // codespaces (r2): the agent added limit: 30 (the default) and fields; list_widgets' default limit is 5
+    const w = await call(mock, 'list_widgets', {});
+    const w2 = await call(mock, 'list_widgets', { cursor: w.page.next_cursor, limit: 5, fields: ['id', 'name'] });
+    expect(w2.ok, JSON.stringify(w2.error)).toBe(true);
+    expect(w2.data.data.map((x: any) => x.id)).not.toContain(w.data.data[0].id);
   });
 
   it('code mode: ops.pages iterates every page with the same cursors (minimal; P4 adds .pages())', async () => {

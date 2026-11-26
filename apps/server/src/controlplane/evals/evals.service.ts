@@ -31,7 +31,7 @@ import {
   type SuggestTool,
   type TaskRunResult,
 } from '@neurouter/evals';
-import { HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, PROVIDER_ENV_KEYS, type EvalCategory, type ToolDef } from '@neurouter/shared';
+import { DETERMINISTIC_JUDGE_MODEL, HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, HEADER_REFERENCE, PROVIDER_ENV_KEYS, type EvalCategory, type ToolDef } from '@neurouter/shared';
 import type { ModelKeyPolicy, TenantResolver } from '../../kernel/tenancy/types.js';
 import type { AuditStore } from '../../kernel/audit/store.js';
 import type { EvalRunsTable, EvalSuitesTable, EvalTasksTable, MainDB, SuggestionsTable } from '../../kernel/db/schema.js';
@@ -45,7 +45,7 @@ import type { SettingsService } from '../../kernel/settings/settings.service.js'
 import type { Metrics } from '../../kernel/observability/metrics.js';
 import type { ApiKeysService } from '../keys/api-keys.service.js';
 import type { BuildsService } from '../servers/builds.service.js';
-import { providerKeys } from './model-keys.js';
+import { hasProviderKey, providerKeys } from './model-keys.js';
 import type { ServersService } from '../servers/servers.service.js';
 
 export type EvalRunRowDb = Selectable<EvalRunsTable>;
@@ -159,6 +159,15 @@ export class EvalsService {
    * stored, encrypted keys); stub/fake per env. With `models`, 412 unless each model's provider has
    * a key.
    */
+  /** The judge model: the `judgeModel` setting, else the deterministic Gemini judge when a Gemini key is available, else `fallback`. */
+  async judgeModel(tenantId: string, fallback: string): Promise<string> {
+    const set = await this.d.settings.get('judgeModel', tenantId);
+    if (set) return set;
+    const t = await this.d.tenancy.byId(tenantId);
+    if (t && (await hasProviderKey({ env: this.d.env, settings: this.d.settings, tenantId, allowEnvKeys: this.d.modelKeys.allowEnvKeys(t) }, 'gemini'))) return DETERMINISTIC_JUDGE_MODEL;
+    return fallback;
+  }
+
   async llm(tenantId: string, models?: string[]): Promise<LlmClient> {
     const testLlm = this.d.env.NEUROUTER_EVAL_LLM || this.d.env.NEUROUTER_EVAL_FAKE_LLM;
     const t = await this.d.tenancy.byId(tenantId);
@@ -236,7 +245,8 @@ export class EvalsService {
     return async () => {
       const name = withMockDataVersion(`gen:${key.id}:gt-${newId()}`, dv);
       const ns: MockNs = { tenantId: env.tenant_id, environmentId: env.id, name };
-      const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: 'tools' };
+      // full objects (B7): ground-truth paths may name fields the overlay's default projection leaves out
+      const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: 'tools', [HEADER_REFERENCE]: '1' };
       if (build) headers[HEADER_BUILD] = build;
       const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
       return {
@@ -473,7 +483,7 @@ export class EvalsService {
     // 412 early when a run model's (or the judge's) provider has no key
     const stubLlm = !this.d.env.NEUROUTER_EVAL_FAKE_LLM && this.d.env.NEUROUTER_EVAL_LLM === 'stub';
     const runModels = input.models?.length ? input.models : [await this.model(tenantId)];
-    await this.llm(tenantId, stubLlm ? [] : [...runModels, (await this.d.settings.get('judgeModel', tenantId)) ?? runModels[0]!]);
+    await this.llm(tenantId, stubLlm ? [] : [...runModels, await this.judgeModel(tenantId, runModels[0]!)]);
     let suiteId = input.suiteId ?? null;
     if (!suiteId) {
       const latest = await this.d.db.selectFrom('eval_suites').select(['id', 'task_count']).where('tenant_id', '=', tenantId).where('server_id', '=', input.serverId).orderBy('version', 'desc').executeTakeFirst();
@@ -567,7 +577,7 @@ export class EvalsService {
       const llm = await this.llm(tenantId);
       const effort = await this.d.settings.get('evalEffort', tenantId);
       const fallbacks = await this.d.settings.get('evalFallbacks', tenantId);
-      const judgeModel = (await this.d.settings.get('judgeModel', tenantId)) ?? models[0]!;
+      const judgeModel = await this.judgeModel(tenantId, models[0]!);
       const total = tasks.length * models.length * modes.length * run.repeats;
       const existing = new Set((await db.selectFrom('eval_task_runs').where('tenant_id', '=', tenantId).select(['task_id', 'model', 'mode', 'attempt']).where('run_id', '=', runId).execute()).map((r) => `${r.task_id}|${r.model}|${r.mode}|${r.attempt}`));
       const taskIds = new Map((await this.suiteTasks(tenantId, run.suite_id)).map((t) => [t.key, t.id]));
@@ -626,7 +636,7 @@ export class EvalsService {
               served_by_model: r.servedByModel,
               fallback_used: r.fallbackUsed ? 1 : 0,
               task_id_neurouter: r.neurouterTaskId,
-              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes }),
+              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes, framingPassed: r.framingPassed, judgeVotes: r.judgeVotes ?? null }),
               created_at: this.d.clock.now(),
             })
             .execute();
@@ -680,7 +690,7 @@ export class EvalsService {
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
     const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.cache_read_tokens', 'r.cache_write_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
-      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
+      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number; framingPassed?: boolean | null; judgeVotes?: TaskRunResult['judgeVotes'] } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
       return {
         key: `${r.key}|${r.model}|${r.mode}|${r.attempt}`,
         taskKey: r.key,
@@ -689,7 +699,8 @@ export class EvalsService {
         mode: r.mode,
         attempt: r.attempt,
         passed: r.passed === 1,
-        framingPassed: r.framing_ok === 1,
+        // null = framing not offered (contract 2): kept in the transcript blob, the framing_ok column is NOT NULL (B2)
+        framingPassed: tr && 'framingPassed' in tr ? (tr.framingPassed ?? null) : r.framing_ok === 1,
         assertionResults: parseJsonColumn(r.assertion_results) ?? [],
         judge: parseJsonColumn(r.judge),
         failureCause: (r.failure_cause as TaskRunResult['failureCause']) ?? null,
@@ -712,6 +723,7 @@ export class EvalsService {
         ...(tr?.upstreamCalls !== undefined ? { upstreamCalls: tr.upstreamCalls, callBudget: tr.callBudget ?? null, overBudget: tr.overBudget ?? false } : {}),
         ...(tr?.judgeUsage ? { judgeUsage: tr.judgeUsage } : {}),
         ...(tr?.toolsListBytes !== undefined ? { toolsListBytes: tr.toolsListBytes } : {}),
+        ...(tr?.judgeVotes ? { judgeVotes: tr.judgeVotes } : {}),
       } as TaskRunResult;
     });
   }

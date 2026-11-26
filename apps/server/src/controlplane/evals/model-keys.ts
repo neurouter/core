@@ -39,6 +39,11 @@ export async function providerKeys(d: ModelKeyDeps): Promise<Record<LlmProviderK
   return out;
 }
 
+/** True when the given provider has a key for the tenant (env when allowed, or stored), without decrypting anything. */
+export async function hasProviderKey(d: Pick<ModelKeyDeps, 'env' | 'settings' | 'tenantId' | 'allowEnvKeys'>, k: LlmProviderKind): Promise<boolean> {
+  return Boolean((d.allowEnvKeys && d.env[PROVIDER_ENV_KEYS[k]]) || (await d.settings.get(SECRET_ID_SETTING[k], d.tenantId)));
+}
+
 /** True when any provider has a key for the tenant (env when allowed, or stored) — without decrypting anything. */
 export async function anyProviderKey(d: Pick<ModelKeyDeps, 'env' | 'settings' | 'tenantId' | 'allowEnvKeys'>): Promise<boolean> {
   for (const k of LLM_PROVIDER_KINDS) if ((d.allowEnvKeys && d.env[PROVIDER_ENV_KEYS[k]]) || (await d.settings.get(SECRET_ID_SETTING[k], d.tenantId))) return true;

@@ -62,6 +62,8 @@ export interface Draft {
   scriptCalls?: number;
   /** contract-2 `_meta` (call id, task id, script run id) */
   meta?: Record<string, unknown>;
+  /** run_script: the script's print() output (rendered as `logs`, bounded) */
+  logs?: string;
 }
 
 export const okDraft = (data: unknown, extra: Omit<Draft, 'ok' | 'data'> = {}): Draft => ({ ok: true, data, ...extra });

@@ -103,6 +103,8 @@ describe('env model providers (all three keys, as in production)', () => {
   it('lists one env provider per kind; the default resolves to openai / gpt-6-luna; env providers are not deletable', async () => {
     const s = await t.json(t.admin, { url: '/api/settings' }, 200);
     expect(s.models.evalModel).toBe('gpt-6-luna');
+    // a Gemini key makes the reproducible Gemini judge the default (temperature 0 + seed); no key → the eval model (line 15)
+    expect(s.models.judgeModel).toBe('gemini-3.5-flash-lite');
     expect(s.models.keys).toEqual({ openai: { configured: true, source: 'env', last4: 'aaaa' }, anthropic: { configured: true, source: 'env', last4: 'bbbb' }, gemini: { configured: true, source: 'env', last4: 'cccc' } });
     const p = await t.json(t.admin, { url: '/api/settings/model-providers' }, 200);
     expect(p.items.map((x: any) => [x.id, x.isDefault, x.defaultModel])).toEqual([['openai-env', true, 'gpt-6-luna'], ['anthropic-env', false, 'claude-opus-5-5'], ['gemini-env', false, 'gemini-3.5-flash-lite']]);

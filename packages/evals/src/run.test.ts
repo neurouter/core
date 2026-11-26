@@ -197,7 +197,10 @@ describe('ground truth, judges, spend (0.2.2)', () => {
     const { check, judgeUsage } = await gradeAttempt(t, record({ finalAnswer: 'It is the dog called Rex' }), { llm: judge, judgeModel: 'j', groundTruth: gt });
     expect(check.passed).toBe(true);
     expect(check.results[0]!.matchedBy).toBe('judge');
-    expect(judgeUsage).toEqual({ calls: 2, inputTokens: 500, outputTokens: 30, cacheReadTokens: 0 });
+    // 0.9 is borderline (within 0.2 of 0.7) and equivalence rulings are always voted: two agreeing calls each
+    expect(judgeUsage).toEqual({ calls: 4, inputTokens: 1000, outputTokens: 60, cacheReadTokens: 0 });
+    expect(check.judgeVotes?.rubric).toHaveLength(2);
+    expect(check.judgeVotes?.equivalence).toHaveLength(2);
     // the rubric judge saw the ground truth
     expect(String(reqs[0]!.messages[0]!.content)).toContain('groundTruth');
   });

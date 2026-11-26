@@ -135,6 +135,14 @@ export function isFromRef(v: unknown): v is { $from: string } {
   return isObj(v) && typeof v.$from === 'string' && Object.keys(v).length === 1;
 }
 
+/** The `$from` paths in a value that do not resolve against `gt`. */
+export function unresolvedFrom(v: unknown, gt: GroundTruth): string[] {
+  if (isFromRef(v)) return resolvePath(gt, v.$from).length ? [] : [v.$from];
+  if (Array.isArray(v)) return v.flatMap((x) => unresolvedFrom(x, gt));
+  if (isObj(v)) return Object.values(v).flatMap((x) => unresolvedFrom(x, gt));
+  return [];
+}
+
 /** Replaces `{"$from": path}` values by the first value at the path (unresolvable ones stay as they are). */
 export function resolveArgs<T>(v: T, gt: GroundTruth | null | undefined): T {
   if (isFromRef(v)) {
@@ -156,6 +164,12 @@ export async function computeGroundTruth(refs: ReferenceCall[], open: () => Prom
   const s = await open();
   try {
     for (const r of refs) {
+      // a $from path that resolves to nothing is reported, not sent as a missing argument (B7)
+      const missing = unresolvedFrom(r.arguments, gt);
+      if (missing.length) {
+        gt.refs.push({ tool: r.tool, ok: false, data: null, error: `$from ${missing.join(', ')} does not resolve in the earlier reference results; ${r.tool} was not called` });
+        continue;
+      }
       const args = resolveArgs(r.arguments, gt);
       const fail = (tool: string) => (err: unknown): RefOutcome => ({ tool, ok: false, data: null, error: (err as Error).message });
       let out = await s.call(r.tool, args).catch(fail(r.tool));

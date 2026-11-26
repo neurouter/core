@@ -1,6 +1,6 @@
 /**
  * Agent contract v2 (contract-v2.md §2): one envelope for every `tools/call` result. Key order is fixed:
- * `ok, data, page, truncated, error, state[, hint]`. Neurouter-authored keys are snake_case; `data` keeps
+ * `ok, data, page, truncated, error, state[, hint][, logs]`. Neurouter-authored keys are snake_case; `data` keeps
  * the upstream's shape and casing.
  */
 
@@ -107,7 +107,17 @@ export interface Envelope {
   error: ErrorInfo | null;
   state: State;
   hint?: string;
+  /** run_script only: what the script printed (bounded, `BUDGET.logsChars`) */
+  logs?: string;
 }
 
 /** Size budgets (contract-v2 §7): characters ÷ 4 ≈ tokens. */
-export const BUDGET = { stateChars: 200, errorChars: 600, hintChars: 200, messageChars: 200, upstreamChars: 300 } as const;
+export const BUDGET = { stateChars: 200, errorChars: 600, hintChars: 200, messageChars: 200, upstreamChars: 300, logsChars: 2000 } as const;
+
+/** Text cut to `max` characters, ending with how much was left out. */
+export function clipLogs(s: string, max: number = BUDGET.logsChars): string {
+  if (s.length <= max) return s;
+  const tail = (n: number) => `… (${n} more characters)`;
+  const keep = max - tail(s.length).length;
+  return `${s.slice(0, keep)}${tail(s.length - keep)}`;
+}

@@ -68,15 +68,21 @@ Tool results follow one of two contracts, chosen per session:
   `structuredContent`. `data` is the API's payload unchanged; `page` says `count`/`total`/`has_more` on list tools,
   with `next_cursor`: pass it as `cursor` to the same tool with the same other arguments for the next page, whatever
   the upstream's paging style (cursor tokens, page/per_page, offset/limit, `starting_after`, `Link` headers) and
-  for the rest of a list Neurouter cut. Cursors are signed, bound to the tool, arguments and credential, and last
-  1 hour. Every tool takes `fields` (dot paths, per item on lists; the overlay `include` is the default set) and
+  for the rest of a list Neurouter cut. Cursors are signed, bound to the tool, the query arguments (not `fields`) and
+  the credential, and last 1 hour; a cursor sent with other arguments answers with the call that continues it. Every tool takes `fields` (dot paths, per item on lists; the overlay `include` is the default set) and
   list tools take `limit` (the upstream page size); names the upstream already uses get an `nr_` prefix.
   `truncated` names the object fields Neurouter clipped and the `fields` call that returns them; `error` has a code, a short message,
   every invalid field with its allowed values, `retry` and `next` (the exact call to make next); `state` carries the
   environment, write mode, task and call counter (and identical-result streaks). Unknown tools answer with an
-  envelope (`unknown_tool` + closest names), not a JSON-RPC error. In `run_script`, tool functions return plain data
-  and raise `LookupError`/`ValueError`/`PermissionError`/… whose message is the error object;
-  `ops.pages(fn="ns.list_x", args={…}, max_items=500)` returns the items of every page.
+  envelope (`unknown_tool` + closest names), not a JSON-RPC error. In `run_script`, tool functions return plain data;
+  `ns.list_x.page(…)` returns a `Result` (`.data`, `.items`, `.page`, `.next()`, `.pages()`) and `ns.list_x.pages(…,
+  max_items=500)` the items of every page (`ops.pages(fn="ns.list_x", …)` is a deprecated alias). Tool errors raise
+  typed exceptions: `NotFound` (a `LookupError`), `InvalidArgs` (`ValueError`), `Forbidden`, `WritesDisabled` and
+  `ConfirmationRequired` (`PermissionError`), `Timeout` (`TimeoutError`), `RateLimited` and `UpstreamError`
+  (`RuntimeError`); catch them by name, by base or as `ToolError`. `str(e)` is short (code, message, next call) and
+  `ops.error(e)` returns the structured error (`code`, `message`, `retry`, `next`, `fields`, `plan`). `print()` output
+  comes back as `logs` (up to 2,000 characters); a return value over 8,192 characters (`limits.code.resultChars`) is
+  cut with `truncated` (`truncated.next` reads the rest) and a hint to return less.
   There is no task framing: Neurouter infers tasks per credential, client and MCP session (10-minute idle gap),
   counts `state.call`/`streak` in the task row (the same on every instance), and shows `state.left` when a
   rate limit is down to 20%. One ops tool is listed, `neurouter_report(kind: done|blocked|unmet_need|tool_problem|
