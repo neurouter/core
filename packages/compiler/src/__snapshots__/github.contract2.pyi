@@ -1,4 +1,4 @@
-# github.pyi  (generated; Neurouter compiler 0.1.0; contract 2)
+# github.pyi  (generated; Neurouter compiler 0.3.0; contract 2)
 # Call as github.<function>(name=value, ...): keyword arguments only; results are plain data (whole values, no cuts).
 # Lists: github.<fn>.pages(..., max_items=500) → all items; github.<fn>.page(...) → Result(.data, .items, .page, .next()).
 # Errors: except NotFound / InvalidArgs / Forbidden / WritesDisabled / ConfirmationRequired / RateLimited / Timeout / UpstreamError, or ToolError for all; ops.error(e) → {code, message, next, fields, retry, …}.

@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`python stubs > matches the Petstore snapshot 1`] = `
-"# petstore.pyi  (generated; Neurouter compiler 0.1.0; build 1ff2025816a6)
+"# petstore.pyi  (generated; Neurouter compiler 0.3.0; build 29c73a43c78b)
 # Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type, iter, next, repr, chr, ord, hex, print (type takes one argument). No map/filter (use comprehensions), no getattr/hasattr (results are dicts).
 # Inside run_script, tool results are whole values (no maxItems/maxBytes truncation); keep what you return small.
 from typing import Any, Literal, NotRequired, TypedDict

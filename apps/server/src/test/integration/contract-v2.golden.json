@@ -9,7 +9,7 @@
   "serverInfo": {
    "name": "neurouter-acme",
    "title": "Acme Orders via Neurouter",
-   "version": "0.2.1",
+   "version": "0.3.0",
    "_meta": {
     "dev.neurouter/contract": 2
    }
@@ -6469,7 +6469,7 @@
   "serverInfo": {
    "name": "neurouter-acme",
    "title": "Acme Orders via Neurouter",
-   "version": "0.2.1",
+   "version": "0.3.0",
    "_meta": {
     "dev.neurouter/contract": 2
    }

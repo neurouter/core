@@ -18,7 +18,7 @@ describe('build hash and def hash', () => {
     const get = (r: typeof a) => r.tools.find((t) => t.key === 'operationId:getNote')!.defHash;
     expect(get(c)).not.toBe(get(a));
     expect(c.tools.find((t) => t.key === 'operationId:listNotes')!.defHash).toBe(a.tools.find((t) => t.key === 'operationId:listNotes')!.defHash);
-    expect(COMPILER_VERSION).toBe('0.1.0');
+    expect(COMPILER_VERSION).toBe('0.3.0');
   });
 });
 

@@ -13,7 +13,7 @@ describe('python stubs', () => {
   it('renders keyword-only args, defaults, Literal enums, TypedDicts and docstrings', async () => {
     const r = await compileText(NOTES_SPEC, 'overlay: 1\ntools:\n  "operationId:listNotes": { response: { maxItems: 5 } }\n', 'notes');
     const pyi = r.pythonStubs.notes!;
-    expect(pyi).toMatch(/^# notes\.pyi {2}\(generated; Neurouter compiler 0\.1\.0; build [0-9a-f]{12}\)\n# Built-ins: len, range, .*isinstance, type, iter, next.*\n# Inside run_script, tool results are whole values .*\nfrom typing import Any, Literal, NotRequired, TypedDict\n/);
+    expect(pyi).toMatch(/^# notes\.pyi {2}\(generated; Neurouter compiler 0\.3\.0; build [0-9a-f]{12}\)\n# Built-ins: len, range, .*isinstance, type, iter, next.*\n# Inside run_script, tool results are whole values .*\nfrom typing import Any, Literal, NotRequired, TypedDict\n/);
     expect(pyi).toContain('class Note(TypedDict):\n    id: int\n    title: str\n    body: NotRequired[str]\n    state: NotRequired[Literal["open", "closed"]]');
     expect(pyi).toContain('def list_notes(*, project: str, state: Literal["open", "closed"] | None = None, per_page: int = 30, page: int = 1) -> list[Note]:');
     expect(pyi).toContain('    """List notes in a project\n\n    Args:\n        project (required): Project key\n        state: Filter by state\n        per_page: Page size\n        page: Page number\n\n    Read-only."""');
