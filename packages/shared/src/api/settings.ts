@@ -25,6 +25,18 @@ export type KeyStatus = z.infer<typeof KeyStatus>;
 
 const KeyWrite = z.union([z.object({ value: z.string().min(8).max(512) }), z.object({ clear: z.literal(true) })]);
 
+/** Audit export to a SIEM (§9.7): a signed webhook and/or OTel logs; delivered by a leader job every 5 s. */
+export const AuditExport = z.object({
+  webhookUrl: z.string().nullable(),
+  webhookEnabled: z.boolean(),
+  /** Where the HMAC signing secret comes from (`env` = an env:NAME reference in neurouter.yaml); never returned. */
+  webhookSecret: z.enum(['env', 'stored']).nullable(),
+  otelLogsEnabled: z.boolean(),
+  /** Delivery state per enabled sink. */
+  sinks: z.array(z.object({ name: z.enum(['webhook', 'otel_logs']), lastSeq: z.number().int(), lastError: z.string().nullable(), updatedAt: IsoDateTime.nullable() })),
+});
+export type AuditExport = z.infer<typeof AuditExport>;
+
 export const Settings = z.object({
   general: z.object({ orgName: z.string(), publicUrl: z.string(), retentionDays: z.number().int() }),
   models: z.object({
@@ -43,7 +55,7 @@ export const Settings = z.object({
   retention: z.object({ auditDays: z.number().int(), taskDays: z.number().int() }),
   telemetry: z.object({ otelEnabled: z.boolean(), metricsEnabled: z.boolean(), otlpEndpoint: z.string().nullable() }),
   discovery: z.object({ nativeSearchClients: z.array(z.string()) }),
-  audit: z.object({ storeOutputs: z.boolean() }),
+  audit: z.object({ storeOutputs: z.boolean(), export: AuditExport }),
   /** Dotted setting keys set by neurouter.yaml (read-only in the console; 409 config_managed). */
   fileManaged: z.array(z.string()),
 });
@@ -72,7 +84,21 @@ export const SettingsPatch = z.object({
   codeMode: z.object({ enabled: z.boolean(), defaults: CodeLimits.partial() }).partial().optional(),
   retention: z.object({ auditDays: z.number().int().min(1).max(3650), taskDays: z.number().int().min(1).max(3650) }).partial().optional(),
   discovery: z.object({ nativeSearchClients: z.array(z.string().max(200)).max(50) }).partial().optional(),
-  audit: z.object({ storeOutputs: z.boolean() }).partial().optional(),
+  audit: z
+    .object({
+      storeOutputs: z.boolean(),
+      export: z
+        .object({
+          webhookUrl: z.url({ protocol: /^https?$/ }).nullable(),
+          webhookEnabled: z.boolean(),
+          /** Write-only HMAC secret (stored encrypted); null clears it. */
+          webhookSecret: z.string().min(16).max(512).nullable(),
+          otelLogsEnabled: z.boolean(),
+        })
+        .partial(),
+    })
+    .partial()
+    .optional(),
 });
 export type SettingsPatch = z.infer<typeof SettingsPatch>;
 

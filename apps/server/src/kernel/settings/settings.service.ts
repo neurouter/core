@@ -13,6 +13,7 @@ export interface SettingValues {
   cimdPolicy: { mode: 'any' | 'allowlist'; allowedHosts: string[] };
   dcrEnabled: boolean;
   metricsRetention: { minuteDays: number; hourDays: number };
+  /** SIEM export; `secretRef`: `env:NAME` (neurouter.yaml) or `stored` (console, encrypted named secret settings/audit/webhook_secret). */
   auditSinks: { webhook: { url: string | null; secretRef: string | null; enabled: boolean }; otelLogs: { enabled: boolean } };
   /** Set once at first boot (audit genesis, HKDF salt). */
   installId: string | null;

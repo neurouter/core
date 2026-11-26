@@ -38,7 +38,7 @@ export interface StartOptions {
   /** Listen (default true); false = build only (tests, `inject`). */
   listen?: boolean;
   /** Overrides for service construction (tests). */
-  services?: Partial<Pick<ServiceInputs, 'upstreamFetch' | 'outboundFetch' | 'embedder' | 'executor' | 'defaultMetrics'>>;
+  services?: Partial<Pick<ServiceInputs, 'upstreamFetch' | 'outboundFetch' | 'embedder' | 'executor' | 'defaultMetrics' | 'otelLogProvider'>>;
   /** Start the background job scheduler (default true when listening). */
   jobs?: boolean;
   loadDotenv?: boolean;

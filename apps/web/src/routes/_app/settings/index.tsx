@@ -49,7 +49,12 @@ function SettingsPage() {
           {tab === 'kill-switches' ? <KillSwitches /> : null}
           {tab === 'code-mode' ? <CodeMode /> : null}
           {tab === 'retention' ? <Retention /> : null}
-          {tab === 'telemetry' ? <Telemetry /> : null}
+          {tab === 'telemetry' ? (
+            <>
+              <Telemetry />
+              <AuditExportCard />
+            </>
+          ) : null}
         </div>
       )}
     </>
@@ -388,6 +393,54 @@ function Telemetry() {
       <p className="text-[12.5px] text-muted-foreground">Set in neurouter.yaml or the environment; read-only here.</p>
       <GatedButton cap="settings:write" demoOp="telemetry.test" variant="outline" className="self-start" disabled={test.isPending} onClick={() => test.mutate(undefined, { onSuccess: (r) => (r.ok ? notifySuccess('Test span sent', r.detail) : notifyError(new Error(r.detail), 'Telemetry test failed')) })}>
         Send a test span
+      </GatedButton>
+    </section>
+  );
+}
+
+/** Audit export to a SIEM (backend §9.7): signed webhook and/or OTel logs, delivered every 5 s. */
+function AuditExportCard() {
+  const s = useQuery(settingsQuery()).data!;
+  const x = s.audit.export;
+  const update = useUpdateSettings();
+  const gate = useGate('settings:write');
+  const fileManaged = s.fileManaged.includes('audit.export');
+  const [url, setUrl] = useState(x.webhookUrl ?? '');
+  const [secret, setSecret] = useState('');
+  const disabled = gate.disabled || fileManaged;
+  const save = (patch: { webhookUrl?: string | null; webhookEnabled?: boolean; webhookSecret?: string | null; otelLogsEnabled?: boolean }, done: string) =>
+    update.mutate({ audit: { export: patch } }, { onSuccess: () => notifySuccess(done), onError: (e) => notifyError(e) });
+  return (
+    <section className={card} aria-labelledby="ax-title">
+      <h2 id="ax-title" className="text-base font-semibold">
+        Audit export
+      </h2>
+      <p className="text-[13px] text-muted-foreground">Sends every audit event to your SIEM, at least once (receivers dedupe on the event id).{fileManaged ? ' Set in neurouter.yaml; read-only here.' : ''}</p>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="ax-url">Webhook URL (signed NDJSON POSTs)</Label>
+        <Input id="ax-url" type="url" placeholder="https://siem.example.com/neurouter" value={url} disabled={disabled} onChange={(e) => setUrl(e.target.value)} className="max-w-lg" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="ax-secret">Signing secret {x.webhookSecret ? `(set${x.webhookSecret === 'env' ? ' from the environment' : ''})` : '(not set: deliveries are unsigned)'}</Label>
+        <Input id="ax-secret" type="password" autoComplete="off" placeholder={x.webhookSecret ? 'Replace the secret' : 'At least 16 characters'} value={secret} disabled={disabled} onChange={(e) => setSecret(e.target.value)} className="max-w-sm" />
+      </div>
+      <label className="flex items-center gap-2.5 text-[13.5px]">
+        <Switch checked={x.webhookEnabled} disabled={disabled || (!x.webhookUrl && !url)} onCheckedChange={(v) => save({ webhookEnabled: v, ...(url !== (x.webhookUrl ?? '') ? { webhookUrl: url || null } : {}) }, v ? 'Webhook export on' : 'Webhook export off')} /> Send to the webhook
+      </label>
+      <label className="flex items-center gap-2.5 text-[13.5px]">
+        <Switch checked={x.otelLogsEnabled} disabled={disabled} onCheckedChange={(v) => save({ otelLogsEnabled: v }, v ? 'OTel log export on' : 'OTel log export off')} /> Send as OpenTelemetry logs (OTLP, standard OTEL_EXPORTER_OTLP_* variables)
+      </label>
+      {x.sinks.length ? (
+        <ul className="flex flex-col gap-1 text-[13px]">
+          {x.sinks.map((k) => (
+            <li key={k.name}>
+              <Pill tone={k.lastError ? 'err' : 'ok'}>{k.name === 'webhook' ? 'Webhook' : 'OTel logs'}</Pill> {k.lastError ? `last error: ${k.lastError}` : k.updatedAt ? `delivered up to event #${k.lastSeq}, ${formatRelative(k.updatedAt)}` : 'nothing delivered yet'}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <GatedButton cap="settings:write" className="self-start" disabled={fileManaged || update.isPending} onClick={() => save({ webhookUrl: url || null, ...(secret ? { webhookSecret: secret } : {}) }, 'Audit export saved')}>
+        Save
       </GatedButton>
     </section>
   );

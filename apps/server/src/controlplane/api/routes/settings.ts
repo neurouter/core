@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { stringify } from 'yaml';
 import { createLlmClient } from '@neurouter/evals';
-import { api, clampCodeLimits, DEFAULT_CODE_LIMITS, parseSecretRef, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
+import { api, clampCodeLimits, DEFAULT_CODE_LIMITS, parseSecretRef, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type AuditExport, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
 import type { CommittedAuditRow } from '../../../kernel/audit/writer.js';
 import { pingDatabase } from '../../../kernel/db/index.js';
 import { toIso, toIsoOrNull } from '../../../kernel/lib/clock.js';
@@ -49,11 +49,31 @@ function fileManagedSettings(c: ApiContext): string[] {
     // applied at boot only for env:NAME references (file-env.ts); other references are ignored with a warning
     if (st?.evals?.apiKey && parseSecretRef(st.evals.apiKey)?.kind === 'env') out.push('models.anthropicKey', 'models.apiKeys');
     if (st?.discovery) out.push('discovery.nativeSearchClients');
-    if (st?.audit) out.push('audit.storeOutputs');
+    if (st?.audit?.storeOutputs !== undefined) out.push('audit.storeOutputs');
+    if (st?.audit?.webhook !== undefined || st?.audit?.otelLogs !== undefined) out.push('audit.export');
     return out;
   } catch {
     return [];
   }
+}
+
+/** Named secret holding the console-set webhook signing secret (owner settings/audit). */
+export const WEBHOOK_SECRET = 'webhook_secret';
+
+async function auditExportView(c: ApiContext): Promise<AuditExport> {
+  const cfg = await c.settings.get('auditSinks');
+  const cursors = await c.dbs.audit.db.selectFrom('audit_sink_cursors').selectAll().execute();
+  const enabled = [...(cfg.webhook.enabled && cfg.webhook.url ? ['webhook' as const] : []), ...(cfg.otelLogs.enabled ? ['otel_logs' as const] : [])];
+  return {
+    webhookUrl: cfg.webhook.url,
+    webhookEnabled: cfg.webhook.enabled,
+    webhookSecret: cfg.webhook.secretRef === 'stored' ? 'stored' : cfg.webhook.secretRef?.startsWith('env:') ? 'env' : null,
+    otelLogsEnabled: cfg.otelLogs.enabled,
+    sinks: enabled.map((name) => {
+      const r = cursors.find((x) => x.sink === name);
+      return { name, lastSeq: r ? Number(r.last_seq) : 0, lastError: r?.last_error ?? null, updatedAt: r ? toIso(Number(r.updated_at)) : null };
+    }),
+  };
 }
 
 async function keyStatus(c: ApiContext, kind: LlmProviderKind): Promise<KeyStatus> {
@@ -80,7 +100,7 @@ async function settingsView(c: ApiContext): Promise<Settings> {
     retention: { auditDays: await s.get('auditRetentionDays'), taskDays: (await s.get('retentionDays')) ?? c.config.env.NEUROUTER_RETENTION_DAYS },
     telemetry: { otelEnabled: !c.config.env.OTEL_SDK_DISABLED, metricsEnabled: c.config.env.METRICS_ENABLED, otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null },
     discovery: { nativeSearchClients: await s.get('nativeSearchClients') },
-    audit: { storeOutputs: await s.get('auditStoreFullOutput') },
+    audit: { storeOutputs: await s.get('auditStoreFullOutput'), export: await auditExportView(c) },
     fileManaged: fileManagedSettings(c),
   };
 }
@@ -183,6 +203,24 @@ export async function settingsRoutes(app: FastifyInstance, c: ApiContext): Promi
     if (b.retention?.taskDays !== undefined) await s.set('retentionDays', b.retention.taskDays, u.id);
     if (b.discovery?.nativeSearchClients) await s.set('nativeSearchClients', b.discovery.nativeSearchClients, u.id);
     if (b.audit?.storeOutputs !== undefined) await s.set('auditStoreFullOutput', b.audit.storeOutputs, u.id);
+    if (b.audit?.export) {
+      const x = b.audit.export;
+      const cur = await s.get('auditSinks');
+      let secretRef = cur.webhook.secretRef;
+      if (x.webhookSecret !== undefined) {
+        if (x.webhookSecret === null) {
+          await c.namedSecrets.delete(c.tenantId, 'settings', 'audit', WEBHOOK_SECRET);
+          secretRef = null;
+        } else {
+          await c.namedSecrets.set(c.tenantId, 'settings', 'audit', WEBHOOK_SECRET, x.webhookSecret, u.id);
+          secretRef = 'stored';
+        }
+      }
+      const url = x.webhookUrl === undefined ? cur.webhook.url : x.webhookUrl;
+      const enabled = x.webhookEnabled ?? cur.webhook.enabled;
+      if (enabled && !url) throw AppError.validation('Set a webhook URL before enabling the webhook', [{ path: ['audit', 'export', 'webhookUrl'], message: 'required', code: 'required' }]);
+      await s.set('auditSinks', { webhook: { url, secretRef, enabled }, otelLogs: { enabled: x.otelLogsEnabled ?? cur.otelLogs.enabled } }, u.id);
+    }
     return settingsView(c);
   });
 

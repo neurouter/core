@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import type { Kysely } from 'kysely';
 import { LineCounter, parseDocument, isMap, isSeq, type Node } from 'yaml';
-import { clampCodeLimits, effectiveConfirm, NeurouterYaml, type Diagnostic, type YamlEnvironment, type YamlServer, type YamlUpstreamAuth } from '@neurouter/shared';
+import { clampCodeLimits, effectiveConfirm, NeurouterYaml, parseSecretRef, type Diagnostic, type YamlEnvironment, type YamlServer, type YamlUpstreamAuth } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import type { CoordinationStore } from '../../kernel/coordination/types.js';
 import type { MainDB } from '../../kernel/db/schema.js';
@@ -293,7 +293,16 @@ export class ConfigSync {
     if (st.evals?.generatorModel) await this.d.settings.set('generatorModel', st.evals.generatorModel);
     if (st.evals?.fallbacks) await this.d.settings.set('evalFallbacks', st.evals.fallbacks);
     if (st.discovery) await this.d.settings.set('nativeSearchClients', st.discovery.nativeSearchClients);
-    if (st.audit) await this.d.settings.set('auditStoreFullOutput', st.audit.storeOutputs);
+    if (st.audit?.storeOutputs !== undefined) await this.d.settings.set('auditStoreFullOutput', st.audit.storeOutputs);
+    if (st.audit?.webhook !== undefined || st.audit?.otelLogs !== undefined) {
+      const cur = await this.d.settings.get('auditSinks');
+      const w = st.audit.webhook;
+      const secretRef = w?.secret && parseSecretRef(w.secret)?.kind === 'env' ? w.secret : null;
+      await this.d.settings.set('auditSinks', {
+        webhook: w ? { url: w.url, secretRef, enabled: w.enabled } : cur.webhook,
+        otelLogs: { enabled: st.audit.otelLogs ?? cur.otelLogs.enabled },
+      });
+    }
     // settings.tasks: deprecated, ignored (warned by parseConfigYaml); evals.apiKey is read at boot (file-env.ts)
     if (st.evals?.effort) await this.d.settings.set('evalEffort', st.evals.effort);
     if (st.evals?.repeats) await this.d.settings.set('evalRepeats', st.evals.repeats);

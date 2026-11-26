@@ -191,7 +191,15 @@ export const YamlSettings = z.strictObject({
   retentionDays: z.number().int().min(1).max(3650).optional(),
   discovery: z.strictObject({ nativeSearchClients: z.array(z.string()).default([]) }).optional(),
   tasks: z.strictObject({ labelInferred: z.boolean().default(false) }).optional(),
-  audit: z.strictObject({ storeOutputs: z.boolean().default(false) }).optional(),
+  audit: z
+    .strictObject({
+      storeOutputs: z.boolean().optional(),
+      /** SIEM export: signed NDJSON POSTs of every audit row (at-least-once; receivers dedupe on id). */
+      webhook: z.strictObject({ url: HttpUrl, secret: SecretRefString.optional(), enabled: z.boolean().default(true) }).optional(),
+      /** SIEM export: one OTel log record per audit row over OTLP (standard OTEL_EXPORTER_OTLP_* variables). */
+      otelLogs: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type YamlSettings = z.infer<typeof YamlSettings>;
 

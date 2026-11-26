@@ -95,6 +95,8 @@ export function configWarnings(cfg: NeurouterYaml, lineOf: (path: string) => num
   if (cfg.settings?.tasks) warn('settings.tasks', 'deprecated and ignored (no feature labels inferred tasks)');
   const oidcRef = cfg.auth?.oidc ? parseSecretRef(cfg.auth.oidc.clientSecret) : null;
   if (oidcRef && oidcRef.kind !== 'env') warn('auth.oidc.clientSecret', 'only env:NAME references are supported here; auth.oidc is not applied');
+  const hook = cfg.settings?.audit?.webhook?.secret;
+  if (hook && parseSecretRef(hook)?.kind !== 'env') warn('settings.audit.webhook.secret', 'only env:NAME references are supported here; webhook deliveries are sent unsigned');
   const key = cfg.settings?.evals?.apiKey;
   if (key) {
     const r = parseSecretRef(key);

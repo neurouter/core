@@ -27,6 +27,8 @@ export function registerJobs(scheduler: JobScheduler, s: Services, extra: Array<
       await db.updateTable('eval_task_runs').set({ transcript: null }).where('created_at', '<', cutoff).execute();
     },
   });
+  // SIEM export (§9.7): at-least-once delivery of new audit rows to the enabled sinks
+  scheduler.register({ name: 'audit.sinks', schedule: '*/5 * * * * *', leaseMs: 60_000, run: async () => void (await s.sinkDispatcher.runOnce()) });
   scheduler.register({ name: 'audit.checkpoint', schedule: '15 * * * * *', run: async () => void (await s.auditStore.periodicCheckpoint()) });
   scheduler.register({
     name: 'audit.retention',

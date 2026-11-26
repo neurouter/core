@@ -274,7 +274,7 @@ function settingsView(db: MockDb) {
     retention: { auditDays: st.auditDays, taskDays: st.taskDays },
     telemetry: { otelEnabled: true, metricsEnabled: true, otlpEndpoint: 'http://otel-collector:4318' },
     discovery: { nativeSearchClients: ['claude-code'] },
-    audit: { storeOutputs: st.storeOutputs },
+    audit: { storeOutputs: st.storeOutputs, export: { webhookUrl: null, webhookEnabled: false, webhookSecret: null, otelLogsEnabled: false, sinks: [] } },
     fileManaged: ['telemetry.otlpEndpoint', 'general.publicUrl'],
   };
 }

@@ -6,6 +6,10 @@ import { SqlAuditStore, type AuditStore } from './kernel/audit/store.js';
 import { createArchiveStore, type ArchiveStore } from './kernel/audit/archive/index.js';
 import { auditMacKey } from './kernel/audit/chain.js';
 import { RedactionRulesService } from './kernel/audit/redaction-rules.service.js';
+import { SinkDispatcher } from './kernel/audit/sinks/dispatcher.js';
+import { createOtlpLogProvider, OtelLogsSink, type LogProviderLike } from './kernel/audit/sinks/otel-logs.js';
+import type { AuditSink } from './kernel/audit/sinks/sink.js';
+import { WebhookSink } from './kernel/audit/sinks/webhook.js';
 import type { AuditWriteContext, CommittedAuditRow } from './kernel/audit/writer.js';
 import type { Config } from './kernel/config/load.js';
 import type { CoordinationStore } from './kernel/coordination/types.js';
@@ -77,6 +81,8 @@ export interface ServiceInputs {
   embedder?: Embedder;
   /** Executor override (tests: LocalExecutor or a fake). null = code mode off. */
   executor?: Executor | null;
+  /** OTel logs provider override for the audit sink (tests). */
+  otelLogProvider?: () => Promise<LogProviderLike>;
 }
 
 export function upstreamPolicy(config: Config, allowHttp = false): NetPolicy {
@@ -163,6 +169,31 @@ export function createServices(input: ServiceInputs) {
     }
     return f;
   };
+
+  /* ---------------------------------------------------------------- audit export (SIEM sinks, §9.7) */
+  let otelLogProvider: Promise<LogProviderLike> | null = null;
+  const auditSinks = async (): Promise<AuditSink[]> => {
+    const cfg = await settings.get('auditSinks');
+    const out: AuditSink[] = [];
+    if (cfg.webhook.enabled && cfg.webhook.url) {
+      const ref = cfg.webhook.secretRef;
+      const secret = async (): Promise<string | null> => {
+        if (!ref) return null;
+        if (ref === 'stored') return namedSecrets.get(tenantId, 'settings', 'audit', 'webhook_secret');
+        return ref.startsWith('env:') ? (process.env[ref.slice(4)] ?? null) : null;
+      };
+      out.push(new WebhookSink({ url: cfg.webhook.url, secret, fetch: outboundFetch!, now }));
+    }
+    if (cfg.otelLogs.enabled) {
+      otelLogProvider ??= (input.otelLogProvider ?? createOtlpLogProvider)();
+      out.push(new OtelLogsSink(await otelLogProvider));
+    }
+    return out;
+  };
+  const sinkDispatcher = new SinkDispatcher({ db: dbs.audit.db, store: auditStore, sinks: auditSinks, clock, log: logger });
+  closers.push(async () => {
+    if (otelLogProvider) await (await otelLogProvider).shutdown().catch(() => {});
+  });
 
   /* ---------------------------------------------------------------- search */
   let indexer: SearchIndexer | null = null;
@@ -345,7 +376,7 @@ export function createServices(input: ServiceInputs) {
 
   return {
     config, logger, clock, dbs, coord, version: input.version, tenantId,
-    settings, keyring, metrics, auditStore, audit, redactionRules: redactionRules!, envelope, secretProvider, namedSecrets, jobs, postCommit,
+    settings, keyring, metrics, auditStore, audit, sinkDispatcher, redactionRules: redactionRules!, envelope, secretProvider, namedSecrets, jobs, postCommit,
     outboundFetch, upstreamFetchFor, embedder, vectorIndex, indexer: indexer!, search,
     runtime, bus, limiter, authenticator, tracker, errors, pages, mock, credentials, http, pipeline, ops, scripts, dispatcher,
     executor: () => executor, executorHealth, startExecutor,
