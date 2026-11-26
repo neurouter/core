@@ -59,6 +59,8 @@ export class ServersService {
     private readonly coord: CoordinationStore,
     private readonly builds: BuildsService,
     private readonly audit: AuditRecorder,
+    /** Agent contract written to servers created without one (contract-v2 D4: new servers get v2; existing rows keep v1). */
+    private readonly newServerContract: 1 | 2 = 2,
   ) {}
 
   async bySlug(tenantId: string, slug: string): Promise<ServerRowDb | undefined> {
@@ -87,7 +89,7 @@ export class ServersService {
         description: input.description ?? '',
         kind: format.startsWith('graphql') ? 'graphql' : 'openapi',
         spec_source: toJsonColumn(input.specSource),
-        exposure: toJsonColumn({ mode: 'auto', discovery: 'auto', pinned: [], ...(input.exposure ?? {}) }),
+        exposure: toJsonColumn({ mode: 'auto', discovery: 'auto', pinned: [], contract: this.newServerContract, ...(input.exposure ?? {}) }),
         ops_tools: toJsonColumn({ ...DEFAULT_OPS_TOGGLES, ...(input.opsTools ?? {}) }),
         public_report: input.publicReport ? 1 : 0,
         overlay_path: input.overlayPath ?? null,

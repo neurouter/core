@@ -24,6 +24,11 @@ export const META_CALL_ID = 'dev.neurouter/call-id';
 export const META_GRAPHQL_ERRORS = 'dev.neurouter/graphql-errors';
 export const META_UPSTREAM_HEADERS = 'dev.neurouter/upstream-headers';
 
+/** Contract negotiation (contract-v2 §1): client capability `experimental[META_CONTRACT] = {versions:[2,1]}`, serverInfo `_meta[META_CONTRACT]`. */
+export const META_CONTRACT = 'dev.neurouter/contract';
+/** Contract negotiation header: `X-Neurouter-Contract: 2` (or a list, `2,1`). */
+export const HEADER_CONTRACT = 'x-neurouter-contract';
+
 /** Eval-only request header (honoured only for `purpose = 'eval'` keys). */
 export const HEADER_MOCK_STATE = 'x-neurouter-mock-state';
 /** Narrows the surface to `tools` or `code` (any credential; code needs code mode to be available). */

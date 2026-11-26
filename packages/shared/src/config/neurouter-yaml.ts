@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { DiscoveryMode, EnvironmentKind, ExposureMode, ConfirmMode, Role, SpecFormatHint } from '../domain/index.js';
+import { ContractVersion, DiscoveryMode, EnvironmentKind, ExposureMode, ConfirmMode, OutputSchemaMode, Role, SpecFormatHint } from '../domain/index.js';
 import { OPS_TOOLS } from '../mcp/tool-names.js';
 import { LimitsInput } from './limits.js';
 import { Policy } from './policy.js';
@@ -93,6 +93,10 @@ export const YamlEnvironment = z
     build: z.string().regex(/^[0-9a-f]{6,64}$/, 'build: a build hash prefix (hex)').optional(),
     /** Per-environment discovery override. */
     discovery: DiscoveryMode.optional(),
+    /** Per-environment agent contract (overrides the server's exposure.contract). */
+    contract: ContractVersion.optional(),
+    /** Per-environment outputSchema mode (overrides the server's exposure.outputSchema). */
+    outputSchema: OutputSchemaMode.optional(),
   })
   .superRefine((e, ctx) => {
     if (e.kind === 'prod' && e.writes.confirm === 'none') ctx.addIssue({ code: 'custom', path: ['writes', 'confirm'], message: 'prod environments cannot use confirm: none (use elicit or deny_without_elicitation)' });
@@ -122,6 +126,10 @@ export const YamlExposure = z.strictObject({
   mode: ExposureMode.default('auto'),
   discovery: DiscoveryMode.default('auto'),
   pinned: z.array(z.string().min(1)).default([]),
+  /** Agent contract when the client does not negotiate one; omitted = the server keeps its stored value (new servers: the deployment default). */
+  contract: ContractVersion.optional(),
+  /** `outputSchema` in tools/list: envelope (default) | none | typed. */
+  outputSchema: OutputSchemaMode.optional(),
 });
 
 export const YamlOpsTools = z.strictObject(Object.fromEntries(OPS_TOOLS.map((t) => [t, z.boolean().optional()])) as Record<(typeof OPS_TOOLS)[number], z.ZodOptional<z.ZodBoolean>>);

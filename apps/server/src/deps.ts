@@ -357,11 +357,24 @@ export function createServices(input: ServiceInputs) {
   };
   const scripts = new ScriptRunner({ db, executor: () => executor, pipeline, ops, tracker, audit, pages, metrics, now, log: logger, healthy: () => executorHealth.healthy });
   const argValidator = new ArgValidator();
-  const dispatcher = new Dispatcher({ pipeline, ops, scripts, search, tracker, audit, args: argValidator, now });
+  const dispatcher = new Dispatcher({
+    pipeline,
+    ops,
+    scripts,
+    search,
+    tracker,
+    audit,
+    args: argValidator,
+    now,
+    log: logger,
+    onToolsChanged: () => bus.publish({ kind: 'tools_list_changed' } as never),
+    // contract-2 envelopes that fail their own schema or budgets are bugs: fail loudly in tests, log in production
+    strictEnvelopes: config.env.NODE_ENV === 'test',
+  });
 
   /* ---------------------------------------------------------------- control plane */
   const builds = new BuildsService(db, dbs.main.dialect, clock, coord, { onBuild: () => indexer?.kick() });
-  const servers = new ServersService(db, clock, coord, builds, audit);
+  const servers = new ServersService(db, clock, coord, builds, audit, config.env.NEUROUTER_NEW_SERVER_CONTRACT);
   const fetchSpec = createSpecFetcher(outboundFetch);
   const introspectGraphql = createGraphqlIntrospector(outboundFetch);
   const configSync = new ConfigSync({ db, clock, coord, servers, settings, audit, fetchSpec, tenant: async () => (await tenancy.defaultTenant())?.id ?? null });

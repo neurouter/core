@@ -2,11 +2,11 @@ import type { TenantResolver } from '../../kernel/tenancy/types.js';
 import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createMcpHandler, inputRequired, inputResponse, ProtocolError, Server, type McpHttpHandler, type McpRequestContext, type ServerContext, type ServerEventBus } from '@modelcontextprotocol/server';
-import { HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_TASK_ID } from '@neurouter/shared';
+import { CONTRACT_VERSIONS, HEADER_BUILD, HEADER_CONTRACT, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_CONTRACT, META_TASK_ID, type ContractVersion } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { Keyring } from '../../kernel/secrets/keyring.js';
-import type { RuntimeBundle, RuntimeConfigSource } from '../../kernel/runtime-config.js';
+import { contractSetting, outputSchemaSetting, type RuntimeBundle, type RuntimeConfigSource } from '../../kernel/runtime-config.js';
 import type { McpAuthenticator } from '../auth/authenticate.js';
 import type { MockNamespaceBinder } from '../mock/namespace.js';
 import { originOf, RC_KEY, traceIdOf, type ClientInfo, type Principal, type RunContext, type TrafficOrigin } from '../pipeline/context.js';
@@ -42,8 +42,6 @@ export interface McpRouteDeps {
   /** Pinned-by-usage tools per environment (top-N by 7-day calls, §9.4). */
   usagePinned?: (environmentId: string) => string[];
   nativeSearchClients?: () => string[];
-  /** Per-tool outputSchema in tools/list (default none). */
-  outputSchema?: 'none' | 'typed';
   externalIssuer?: string | null;
   keepAliveMs?: number;
   now: () => number;
@@ -70,6 +68,27 @@ interface RequestCtx {
   legacyClient: { name: string | null; version: string | null; protocolVersion: string | null; capabilities?: Record<string, unknown> | null } | null;
   mockNamespace?: string;
   exposureOverride?: 'tools' | 'code';
+  /** `X-Neurouter-Contract` (contract negotiation) */
+  contractHeader?: string;
+  /** client capabilities of a 2026-07-28 request envelope, seen before the SDK (negotiation in the factory) */
+  envelopeCaps?: Record<string, unknown> | null;
+}
+
+/**
+ * Contract negotiation (contract-v2 §1): the client capability `experimental["dev.neurouter/contract"] =
+ * {"versions":[2,1]}`, else the `X-Neurouter-Contract` header (`2` or `2,1`), picks the highest version both
+ * sides support; neither (or nothing in common) → the environment/server setting.
+ */
+export function negotiateContract(b: Pick<RuntimeBundle, 'server' | 'environment'>, caps: Record<string, unknown> | null | undefined, headerValue: string | undefined): ContractVersion {
+  const exp = caps?.experimental && typeof caps.experimental === 'object' ? (caps.experimental as Record<string, unknown>)[META_CONTRACT] : undefined;
+  const fromCaps = exp && typeof exp === 'object' && Array.isArray((exp as { versions?: unknown }).versions) ? ((exp as { versions: unknown[] }).versions as unknown[]) : null;
+  const fromHeader = headerValue ? headerValue.split(',').map((x) => Number(x.trim())) : null;
+  for (const offered of [fromCaps, fromHeader]) {
+    if (!offered) continue;
+    const common = CONTRACT_VERSIONS.filter((v) => offered.includes(v));
+    if (common.length) return common[0]!;
+  }
+  return contractSetting(b);
 }
 
 function header(req: FastifyRequest, name: string): string | undefined {
@@ -134,6 +153,8 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
     requestId: newId(),
     ...(rc.mockNamespace ? { mockNamespace: rc.mockNamespace } : {}),
     ...(rc.exposureOverride ? { exposureOverride: rc.exposureOverride } : {}),
+    contract: negotiateContract(b, client.caps ?? rc.envelopeCaps, rc.contractHeader),
+    outputSchema: outputSchemaSetting(b),
   };
 }
 
@@ -197,11 +218,14 @@ export function buildServerFactory(d: McpRouteDeps) {
       userAgent: rc.userAgent,
       requestId: newId(),
       ...(rc.exposureOverride ? { exposureOverride: rc.exposureOverride } : {}),
+      contract: negotiateContract(b, rc.legacyClient?.capabilities ?? rc.envelopeCaps, rc.contractHeader),
+      outputSchema: outputSchemaSetting(b),
     };
-    const surfaceOpts = { executorHealthy: d.executorHealthy(), usagePinned: d.usagePinned?.(b.environment.id) ?? [], nativeSearchClients: d.nativeSearchClients?.() ?? [], outputSchema: d.outputSchema ?? 'none' };
+    const surfaceOpts = { executorHealthy: d.executorHealthy(), usagePinned: d.usagePinned?.(b.environment.id) ?? [], nativeSearchClients: d.nativeSearchClients?.() ?? [], typedIssues: d.dispatcher.typedIssues };
     const provisionalSurface = buildSurface(provisional, surfaceOpts);
+    // contract 2 reports the active version in serverInfo._meta (contract-v2 §1); contract 1 keeps the 0.2.x serverInfo
     const server = new Server(
-      { name: `neurouter-${b.server.slug}`, title: `${b.server.name} via Neurouter`, version: d.version },
+      { name: `neurouter-${b.server.slug}`, title: `${b.server.name} via Neurouter`, version: d.version, ...(provisional.contract === 2 ? { _meta: { [META_CONTRACT]: 2 } } : {}) } as never,
       { capabilities: { tools: { listChanged: true } }, instructions: instructions(provisional, provisionalSurface), cacheHints: { 'tools/list': { ttlMs: 60_000, cacheScope: 'private' } } } as never,
     );
     server.setRequestHandler('tools/list', async (_req, c) => {
@@ -229,6 +253,7 @@ export function buildServerFactory(d: McpRouteDeps) {
         const confirmer = makeConfirmer(d, ctx, c as ServerContext);
         const signal = (c as unknown as { mcpReq: { signal?: AbortSignal } }).mcpReq.signal;
         const out = await d.dispatcher.call(ctx, req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, surface, confirmer, signal);
+        // contract 1 only: contract 2 answers unknown tools with an envelope
         if (out.kind === 'unknown') {
           error = 'unknown_tool';
           throw new ProtocolError(-32602, out.message);
@@ -326,6 +351,8 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
         legacyClient: legacyClients.get(auth.credentialKey, sessionId),
         ...(mockNs !== 'env' ? { mockNamespace: mockNs } : {}),
         ...(exp === 'tools' || exp === 'code' ? { exposureOverride: exp } : {}),
+        ...(header(req, HEADER_CONTRACT) ? { contractHeader: header(req, HEADER_CONTRACT)!.slice(0, 20) } : {}),
+        ...(rpc.envelopeCaps ? { envelopeCaps: rpc.envelopeCaps } : {}),
       };
       const abort = new AbortController();
       const releases = rpc.calls.map((id) => inflight.register(auth.credentialKey, id, abort));

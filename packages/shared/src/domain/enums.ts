@@ -32,6 +32,21 @@ export type ExposureMode = z.infer<typeof ExposureMode>;
 
 export const DiscoveryMode = z.enum(['auto', 'full', 'search']);
 export type DiscoveryMode = z.infer<typeof DiscoveryMode>;
+/**
+ * Agent contract version (contract-v2 §1): 1 = the 0.2.x response shapes, 2 = one envelope
+ * `{ok,data,page,truncated,error,state}` for every tool result. Negotiated per session; this is the default.
+ */
+export const ContractVersion = z.union([z.literal(1), z.literal(2)]);
+export type ContractVersion = z.infer<typeof ContractVersion>;
+/** Contract versions this release can serve, highest first. */
+export const CONTRACT_VERSIONS: readonly ContractVersion[] = [2, 1];
+/**
+ * `outputSchema` in tools/list (contract-v2 §2.5, D3): `envelope` = the shared envelope schema with an open
+ * `data` (default), `none`, or `typed` (the shaped upstream schema as `data`, validated before sending).
+ * Contract 1 lists per-tool schemas only for `typed`.
+ */
+export const OutputSchemaMode = z.enum(['envelope', 'none', 'typed']);
+export type OutputSchemaMode = z.infer<typeof OutputSchemaMode>;
 
 /**
  * Write confirmation (backend §9.7), for any environment kind (`none` is invalid on prod):

@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { DiscoveryMode, EnvironmentKind, ExposureMode, HealthStatus, ManagedBy, ServerKind, SpecFormat } from '../domain/enums.js';
+import { ContractVersion, DiscoveryMode, EnvironmentKind, ExposureMode, HealthStatus, ManagedBy, OutputSchemaMode, ServerKind, SpecFormat } from '../domain/enums.js';
 import { OPS_TOOLS } from '../mcp/tool-names.js';
 import { ConfigLocation, CursorQuery, Id, IdParams, IsoDateTime, Items, Page, Slug, queryArray, queryOptional } from './common.js';
 import { endpoint } from './endpoint.js';
@@ -10,7 +10,11 @@ import { BuildRow, SpecRevisionRow, SpecSourceIn } from './specs.js';
 
 /* ------------------------------------------------------------------ servers (§14.4) */
 
-export const ExposureConfig = z.object({ mode: ExposureMode, discovery: DiscoveryMode, pinned: z.array(z.string()) });
+/**
+ * `contract`: agent contract served when the client does not ask for one (absent = 1, servers created
+ * before contract 2; new servers get the deployment default). `outputSchema`: see `OutputSchemaMode`.
+ */
+export const ExposureConfig = z.object({ mode: ExposureMode, discovery: DiscoveryMode, pinned: z.array(z.string()), contract: ContractVersion.optional(), outputSchema: OutputSchemaMode.optional() });
 export type ExposureConfig = z.infer<typeof ExposureConfig>;
 
 /** Record of the 8 MVP ops tools → enabled. */

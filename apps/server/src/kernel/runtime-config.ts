@@ -4,12 +4,14 @@ import {
   clampCodeLimits,
   DEFAULT_OPS_TOGGLES,
   type ConfirmMode,
+  type ContractVersion,
   type DiscoveryMode,
   type EnvironmentKind,
   type ExposureMode,
   type KillSwitchKind,
   type KillSwitchScope,
   type OpsToolToggles,
+  type OutputSchemaMode,
   type ServerKind,
   type ToolDef,
   type UpstreamAuthType,
@@ -26,6 +28,9 @@ export interface ExposureConfig {
   mode: ExposureMode;
   discovery: DiscoveryMode;
   pinned: string[];
+  /** Absent: the server predates contract 2 and serves contract 1 unless the client negotiates. */
+  contract?: ContractVersion;
+  outputSchema?: OutputSchemaMode;
 }
 
 export interface RateLimitSpec {
@@ -105,6 +110,9 @@ export interface EnvironmentRuntime {
   allowHttp: boolean;
   status: 'active' | 'disabled' | 'removed_from_config';
   discoveryOverride: DiscoveryMode | null;
+  /** Per-environment contract / outputSchema (stored in `discovery_override` next to `discovery`). */
+  contractOverride: ContractVersion | null;
+  outputSchemaOverride: OutputSchemaMode | null;
 }
 
 export interface KillSwitch {
@@ -158,7 +166,23 @@ export const KILL_CHANGED = 'kill.changed';
 
 export function parseExposure(v: unknown): ExposureConfig {
   const e = (parseJsonColumn<Partial<ExposureConfig>>(v) ?? {}) as Partial<ExposureConfig>;
-  return { mode: e.mode ?? 'auto', discovery: e.discovery ?? 'auto', pinned: Array.isArray(e.pinned) ? e.pinned : [] };
+  return {
+    mode: e.mode ?? 'auto',
+    discovery: e.discovery ?? 'auto',
+    pinned: Array.isArray(e.pinned) ? e.pinned : [],
+    ...(e.contract === 1 || e.contract === 2 ? { contract: e.contract } : {}),
+    ...(e.outputSchema === 'envelope' || e.outputSchema === 'none' || e.outputSchema === 'typed' ? { outputSchema: e.outputSchema } : {}),
+  };
+}
+
+/** The contract a session gets when the client does not negotiate one (contract-v2 §1): environment, server, else 1. */
+export function contractSetting(b: Pick<RuntimeBundle, 'server' | 'environment'>): ContractVersion {
+  return b.environment.contractOverride ?? b.server.exposure.contract ?? 1;
+}
+
+/** `exposure.outputSchema`: environment override, server setting, else `envelope`. */
+export function outputSchemaSetting(b: Pick<RuntimeBundle, 'server' | 'environment'>): OutputSchemaMode {
+  return b.environment.outputSchemaOverride ?? b.server.exposure.outputSchema ?? 'envelope';
 }
 
 export function parseOpsTools(v: unknown): OpsToolToggles {
@@ -195,7 +219,8 @@ export function environmentRuntime(e: EnvRow): EnvironmentRuntime {
     }
   }
   const hosts = parseJsonColumn<string[]>(e.allowed_hosts) ?? [];
-  const override = parseJsonColumn<DiscoveryMode | { discovery?: DiscoveryMode }>(e.discovery_override);
+  const override = parseJsonColumn<DiscoveryMode | { discovery?: DiscoveryMode; contract?: ContractVersion; outputSchema?: OutputSchemaMode }>(e.discovery_override);
+  const ov = override && typeof override === 'object' ? override : null;
   return {
     id: e.id,
     slug: e.slug,
@@ -212,7 +237,9 @@ export function environmentRuntime(e: EnvRow): EnvironmentRuntime {
     allowedHosts: hosts.length ? hosts : defaultHosts,
     allowHttp: toBool(e.allow_http),
     status: e.status,
-    discoveryOverride: typeof override === 'string' ? override : (override?.discovery ?? null),
+    discoveryOverride: typeof override === 'string' ? override : (ov?.discovery ?? null),
+    contractOverride: ov?.contract === 1 || ov?.contract === 2 ? ov.contract : null,
+    outputSchemaOverride: ov?.outputSchema === 'envelope' || ov?.outputSchema === 'none' || ov?.outputSchema === 'typed' ? ov.outputSchema : null,
   };
 }
 

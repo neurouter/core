@@ -43,6 +43,8 @@ export async function createTestContext(env: Record<string, string> = {}, servic
       NEUROUTER_EXECUTOR_MODE: 'off',
       LOG_LEVEL: 'error',
       NEUROUTER_LOCAL_LINK: 'true',
+      // suites written against agent contract 1 keep it for the servers they create (contract-2 suites pass '2' or negotiate)
+      NEUROUTER_NEW_SERVER_CONTRACT: '1',
       ...env,
     },
     listen: false,

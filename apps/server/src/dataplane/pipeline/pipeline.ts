@@ -28,7 +28,11 @@ import { InvokeError, type HttpInvoker, type MockUpstream, type UpstreamResponse
 import { buildHttpRequest, RequestBuildError, toSpecArgs, applyArgTransforms, hostAllowed } from '../http/request-builder.js';
 import type { RateLimiter } from '../rate-limit/limiter.js';
 import type { ResultPages } from '../shaping/result-pages.js';
-import { scanUntrusted, UNTRUSTED_PREFIX } from '../shaping/sanitize.js';
+import { looksLikeInjection, scanUntrusted, UNTRUSTED_PREFIX } from '../shaping/sanitize.js';
+import { errorDraft, okDraft, type Draft, type ErrorSpec } from '../envelope/draft.js';
+import { clippedView, isListTool, listView, untrustedPaths } from '../envelope/page.js';
+import { nounOf, pathId } from '../envelope/relations.js';
+import { NO_RESULT, v1Result } from '../envelope/v1.js';
 import type { TaskTracker } from '../tasks/tracker.js';
 import type { ArgValidator } from './arg-validate.js';
 import { principalUserId, traceIdOf, type RunContext } from './context.js';
@@ -41,12 +45,8 @@ export interface PolicyStep {
   detail?: string;
 }
 
-export interface McpToolResult {
-  content: Array<{ type: 'text'; text: string }>;
-  structuredContent?: Record<string, unknown>;
-  isError?: boolean;
-  _meta?: Record<string, unknown>;
-}
+import type { McpToolResult } from '../envelope/v1.js';
+export type { McpToolResult };
 
 export interface PlannedChange {
   tool: string;
@@ -87,6 +87,8 @@ export interface ToolOutcome {
   /** MRTR `input_required` result for a pending prod confirmation. */
   inputRequired?: unknown;
   tool?: ToolDef;
+  /** The same outcome in contract-neutral form (rendered as the contract-2 envelope). */
+  draft: Draft;
 }
 
 export interface PipelineDeps {
@@ -231,7 +233,7 @@ export class Pipeline {
       if (tool) this.d.tracker.remember(ctx.taskId, { tool: tool.name, tags: tool.tags, ok: status === 'ok' && !blocked });
     };
 
-    const fail = async (decision: AuditDecision, status: AuditStatus, code: ErrorCode, message: string, detail: Record<string, unknown>, extra: { retryAfterMs?: number; nextTools?: string[]; audit?: Partial<AuditEventInput>; unknown?: boolean; meta?: Record<string, unknown> } = {}): Promise<ToolOutcome> => {
+    const fail = async (decision: AuditDecision, status: AuditStatus, code: ErrorCode, message: string, detail: Record<string, unknown>, extra: { retryAfterMs?: number; nextTools?: string[]; audit?: Partial<AuditEventInput>; unknown?: boolean; meta?: Record<string, unknown>; spec?: Partial<ErrorSpec>; data?: unknown } = {}): Promise<ToolOutcome> => {
       let errorId: string | null = null;
       try {
         errorId = await this.d.errors.record({ tenantId: ctx.tenantId, taskId: ctx.taskId, auditId, toolName: tool?.name ?? name, code, detail: { tool: tool?.name ?? name, environment: ctx.environment.slug, ...detail } });
@@ -240,12 +242,15 @@ export class Pipeline {
       }
       record(decision, status, { errorCode: code, errorMessage: message.slice(0, 1000), errorId, decisionReason: code, ...(extra.audit ?? {}) });
       const r = errorResult(message, errorId, code, { ...(extra.retryAfterMs !== undefined ? { retryAfterMs: extra.retryAfterMs } : {}), ...(extra.nextTools ? { nextTools: extra.nextTools } : {}), meta: { ...metaBase(), ...(extra.meta ?? {}) } });
-      return { ok: false, unknown: extra.unknown ?? false, decision, status, result: r, error: { code, message, errorId }, auditId, ...(tool ? { tool } : {}) };
+      const spec: ErrorSpec = { code, message, errorId, ...(extra.retryAfterMs !== undefined ? { retryAfterMs: extra.retryAfterMs } : {}), tool, name, args: rawArgs, ...(extra.spec ?? {}) };
+      const draft = errorDraft(spec, { meta: metaBase(), ...(extra.data !== undefined ? { data: extra.data } : {}) });
+      return { ok: false, unknown: extra.unknown ?? false, decision, status, result: r, error: { code, message, errorId }, auditId, draft, ...(tool ? { tool } : {}) };
     };
 
     // 0 audit admission (fail closed, not audited)
     if (!this.d.audit.canAccept()) {
-      return { ok: false, unknown: false, decision: 'denied_disabled', status: 'blocked', result: errorResult('Audit unavailable: tool calls are refused until audit logging recovers. Retry shortly.', null, 'audit_unavailable'), error: { code: 'audit_unavailable', message: 'Audit unavailable', errorId: null }, auditId };
+      const message = 'Audit unavailable: tool calls are refused until audit logging recovers. Retry shortly.';
+      return { ok: false, unknown: false, decision: 'denied_disabled', status: 'blocked', result: errorResult(message, null, 'audit_unavailable'), error: { code: 'audit_unavailable', message: 'Audit unavailable', errorId: null }, auditId, draft: errorDraft({ code: 'audit_unavailable', message: `${message} Nothing was called.`, name, args: rawArgs }) };
     }
 
     // 1 resolve (hidden / out-of-profile = unknown; identical responses, §18.3)
@@ -291,7 +296,7 @@ export class Pipeline {
     const check = this.d.args.check(tool.defHash, tool.inputSchema, args);
     if (!check.ok) {
       step('arguments', 'fail', check.errors.slice(0, 3).join('; '));
-      return fail('allowed', 'invalid_args', 'invalid_args', `Invalid arguments for ${tool.name}:\n- ${check.errors.join('\n- ')}`, { errors: check.errors.join('; '), schema: JSON.stringify(tool.inputSchema).slice(0, 1500) });
+      return fail('allowed', 'invalid_args', 'invalid_args', `Invalid arguments for ${tool.name}:\n- ${check.errors.join('\n- ')}`, { errors: check.errors.join('; '), schema: JSON.stringify(tool.inputSchema).slice(0, 1500) }, { spec: { issues: check.issues } });
     }
     step('arguments', 'pass');
 
@@ -327,7 +332,7 @@ export class Pipeline {
       opts.planned?.push(planned);
       const value = { dry_run: true, planned: { tool: planned.tool, method: planned.method, path: planned.path, arguments: planned.arguments } };
       record('dry_run', 'ok', { output: value });
-      return { ok: true, unknown: false, decision: 'dry_run', status: 'ok', value, result: { content: [{ type: 'text', text: compactJson(value) }], structuredContent: value, _meta: { ...metaBase(), [META_DRY_RUN]: true } }, auditId, tool };
+      return { ok: true, unknown: false, decision: 'dry_run', status: 'ok', value, result: v1Result(compactJson(value), value, { ...metaBase(), [META_DRY_RUN]: true }), auditId, tool, draft: okDraft(value, { flags: ['dry_run'], meta: metaBase() }) };
     }
     step('dry_run', 'skip');
 
@@ -346,7 +351,7 @@ export class Pipeline {
         const out = opts.confirmer ? await opts.confirmer.confirm({ tool, args, argsHash, message: msg }) : ({ status: 'unsupported' } as const);
         if (out.status === 'pending') {
           step('confirm', 'skip', 'elicitation sent');
-          return { ok: false, unknown: false, decision: 'allowed', status: 'ok', result: { content: [] }, auditId, inputRequired: out.result, tool };
+          return { ok: false, unknown: false, decision: 'allowed', status: 'ok', result: NO_RESULT, auditId, inputRequired: out.result, tool, draft: errorDraft({ code: 'confirmation_required', message: 'Waiting for the user to confirm.', tool, name, args: rawArgs }) };
         }
         if (out.status === 'unsupported') {
           step('confirm', 'fail', 'unsupported');
@@ -355,9 +360,14 @@ export class Pipeline {
             // elicit: hand back the planned change (not executed) so the user can review and run it elsewhere
             const planned = this.plannedChange(tool, args, true, argsHash);
             const change = { tool: planned.tool, method: planned.method, path: planned.path, arguments: planned.arguments };
-            return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `Not executed: this client cannot ask the user to confirm writes in ${where}. Planned change (nothing was changed): ${planned.method} ${planned.path} ${compactJson(planned.arguments).slice(0, 2000)}. Show it to the user; they can approve it from a client with MCP elicitation support.`, {}, { meta: { [META_PLANNED_CHANGES]: [change] }, audit: { output: { planned: [change] } } });
+            return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `Not executed: this client cannot ask the user to confirm writes in ${where}. Planned change (nothing was changed): ${planned.method} ${planned.path} ${compactJson(planned.arguments).slice(0, 2000)}. Show it to the user; they can approve it from a client with MCP elicitation support.`, {}, {
+              meta: { [META_PLANNED_CHANGES]: [change] },
+              audit: { output: { planned: [change] } },
+              spec: { text: `${tool.name} needs your user's approval in ${where} and this client cannot ask; nothing changed. Show data.plan to the user.` },
+              data: { plan: { tool: change.tool, method: change.method, path: change.path, args: change.arguments } },
+            });
           }
-          return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `This client cannot ask the user to confirm writes in ${where}; ${tool.name} was not called.`, {});
+          return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `This client cannot ask the user to confirm writes in ${where}; ${tool.name} was not called.`, {}, { spec: { text: `This client cannot ask the user to confirm writes in ${where}; ${tool.name} was not called. Nothing changed.` } });
         }
         if (out.status === 'declined') {
           step('confirm', 'fail', 'declined');
@@ -420,7 +430,7 @@ export class Pipeline {
       step('upstream', 'fail', ie.kind);
       if (ie.kind === 'cancelled') {
         record(decision, 'cancelled', { errorCode: 'cancelled' });
-        return { ok: false, unknown: false, decision, status: 'cancelled', result: errorResult('Cancelled', null, 'upstream_error'), auditId, tool };
+        return { ok: false, unknown: false, decision, status: 'cancelled', result: errorResult('Cancelled', null, 'upstream_error'), auditId, tool, draft: errorDraft({ code: 'unavailable', message: 'The call was cancelled.', retry: 'yes', tool, name, args: rawArgs }) };
       }
       if (ie.kind === 'timeout') return fail(decision, 'timeout', 'timeout', `The API did not answer within ${lim.timeoutMs} ms.`, { timeoutMs: lim.timeoutMs });
       if (ie.kind === 'response_too_large') return fail(decision, 'upstream_error', 'response_too_large', `The API response exceeded ${lim.maxResponseBytes} bytes.`, { maxBytes: lim.maxResponseBytes });
@@ -434,7 +444,7 @@ export class Pipeline {
     if (st < 200 || st >= 300 || (tool.binding.type === 'http' && tool.binding.successStatuses.length && !tool.binding.successStatuses.includes(st) && st >= 300)) {
       const excerpt = compactJson(upstream.body).slice(0, 1024);
       const retryAfterMs = upstream.headers['retry-after'] ? Math.max(0, Number(upstream.headers['retry-after']) * 1000) || undefined : undefined;
-      const a = { audit: upstreamMeta };
+      const a = { audit: upstreamMeta, spec: { upstream: { status: st, body: upstream.body } } };
       if (st === 401 || st === 403) return fail(decision, 'tool_error', 'upstream_auth', `The API answered ${st} for ${tool.name}.`, { status: st }, a);
       if (st === 404) return fail(decision, 'tool_error', 'upstream_not_found', `The API answered 404 for ${tool.name}: ${excerpt}`, { status: st }, a);
       if (st === 409) return fail(decision, 'tool_error', 'upstream_conflict', `The API reported a conflict: ${excerpt}`, { detail: excerpt }, a);
@@ -447,7 +457,7 @@ export class Pipeline {
     const meta: Record<string, unknown> = metaBase();
     if (tool.binding.type === 'graphql' && body && typeof body === 'object') {
       const g = body as { data?: Record<string, unknown> | null; errors?: Array<{ message?: string }> };
-      if (g.errors?.length && !g.data) return fail(decision, 'tool_error', 'upstream_validation', `GraphQL errors: ${g.errors.map((e) => e.message).join('; ').slice(0, 800)}`, { detail: g.errors.map((e) => e.message).join('; ').slice(0, 800) }, { audit: upstreamMeta });
+      if (g.errors?.length && !g.data) return fail(decision, 'tool_error', 'upstream_validation', `GraphQL errors: ${g.errors.map((e) => e.message).join('; ').slice(0, 800)}`, { detail: g.errors.map((e) => e.message).join('; ').slice(0, 800) }, { audit: upstreamMeta, spec: { upstream: { status: upstream.status, body: g.errors.map((e) => e.message).join('; ') } } });
       if (g.errors?.length) meta[META_GRAPHQL_ERRORS] = g.errors.map((e) => e.message ?? '');
       let v: unknown = g.data ?? null;
       for (const p of tool.binding.resultPath) v = v && typeof v === 'object' ? (v as Record<string, unknown>)[p] : undefined;
@@ -455,7 +465,7 @@ export class Pipeline {
     }
     let value: unknown = body;
     let text: string;
-    let shaped;
+    let shaped: ReturnType<typeof shapeResponse> | undefined;
     try {
       // scripts get whole (shaped) values: no maxItems/maxBytes on inner calls; the script reduces the data
       // and run_script's result-size limit bounds what it returns. Tool-mode results keep both limits.
@@ -495,7 +505,29 @@ export class Pipeline {
       this.d.log.warn({ err }, 'post-call hook failed');
     }
     void urlTemplate;
-    return { ok: true, unknown: false, decision, status: 'ok', value, result: { content: [{ type: 'text', text }], structuredContent: wrapStructured(value), _meta: meta }, auditId, tool };
+    const draft = this.successDraft(tool, rawArgs, value, shaped?.truncated, (meta[META_RESULT_HANDLE] as string | undefined) ?? null, upstream.headers, decision, metaBase());
+    return { ok: true, unknown: false, decision, status: 'ok', value, result: v1Result(text, wrapStructured(value), meta), auditId, tool, draft };
+  }
+
+  /** Contract-neutral success: `page` on list tools, `truncated` for Neurouter's cuts, flags for instruction-like text, `wrote` after writes. */
+  private successDraft(tool: ToolDef, args: Record<string, unknown>, value: unknown, cut: Parameters<typeof listView>[3], handle: string | null, headers: Record<string, string>, decision: AuditDecision, meta: Record<string, unknown>): Draft {
+    const extra: Omit<Draft, 'ok' | 'data'> = { meta };
+    if (isListTool(tool, value)) {
+      const v = listView(tool, args, value, cut, handle, headers);
+      extra.page = v.page;
+      extra.truncated = v.truncated;
+      if (v.hint) extra.hint = v.hint;
+    } else if (cut) extra.truncated = clippedView(cut, handle);
+    const flagged = untrustedPaths(value, looksLikeInjection);
+    if (flagged.length) {
+      extra.flags = ['instruction_like_text'];
+      extra.flagPaths = flagged;
+    }
+    if (tool.risk.write && decision !== 'dry_run') {
+      const id = pathId(tool, args)?.value ?? (value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).id : undefined);
+      extra.wrote = `${tool.name} → ${nounOf(tool)}${id !== undefined && id !== null && typeof id !== 'object' ? ` ${String(id).slice(0, 60)}` : ''}`;
+    }
+    return okDraft(value, extra);
   }
 
   /**
