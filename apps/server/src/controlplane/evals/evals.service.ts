@@ -352,6 +352,8 @@ export class EvalsService {
     const ac = new AbortController();
     this.cancels.set(runId, ac);
     const db = this.d.db;
+    // per-attempt eval keys still active (revoked on session close; any left are revoked when the run ends)
+    const openKeys = new Set<string>();
     try {
       let run = await this.run(tenantId, runId);
       await db.updateTable('eval_runs').set({ status: 'running', started_at: this.d.clock.now() }).where('id', '=', runId).where('tenant_id', '=', tenantId).execute();
@@ -391,6 +393,7 @@ export class EvalsService {
           const ns: MockNs = { tenantId, environmentId: env.id, name };
           await this.d.ports.resetMock(ns);
           const key = await this.evalKey(tenantId, run.server_id, env.id, ctx.mode === 'code' ? ['tools:read', 'tools:write', 'code:run'] : ['tools:read', 'tools:write'], `eval ${runId.slice(-6)}`);
+          openKeys.add(key.id);
           const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: ctx.mode === 'code' ? 'code' : 'tools' };
           if (isTemp || (pinned && pinned !== run.build_id)) headers[HEADER_BUILD] = run.build_id;
           const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
@@ -401,6 +404,7 @@ export class EvalsService {
             close: async () => {
               await mcp.close().catch(() => {});
               await this.d.keys.revoke(tenantId, key.id, null);
+              openKeys.delete(key.id);
               await this.d.ports.resetMock(ns).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
             },
           };
@@ -463,6 +467,7 @@ export class EvalsService {
       await db.updateTable('eval_runs').where('tenant_id', '=', tenantId).set({ status: ac.signal.aborted ? 'cancelled' : 'failed', error: msg.slice(0, 1000), ended_at: this.d.clock.now() }).where('id', '=', runId).execute();
     } finally {
       this.cancels.delete(runId);
+      for (const id of openKeys) await this.d.keys.revoke(tenantId, id, null).catch((err: unknown) => this.d.log.warn({ err, runId }, 'eval key revoke failed'));
     }
   }
 

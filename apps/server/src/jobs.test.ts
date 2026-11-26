@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { registerJobs } from './jobs.js';
 import type { JobScheduler } from './kernel/jobs/scheduler.js';
@@ -23,6 +24,30 @@ describe('background jobs', () => {
     const rows = await t.s.services.dbs.main.db.selectFrom('environments').select(['slug', 'health']).execute();
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) expect(JSON.parse(r.health)).toMatchObject({ status: 'up' });
+  });
+
+  it('retention.sweep garbage-collects inactive eval keys older than the retention, never user keys', async () => {
+    const svc = t.s.services;
+    const db = svc.dbs.main.db;
+    const srv = (await svc.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!;
+    const env = (await svc.servers.environments(srv.id)).find((e) => e.slug === 'dev')!;
+    const admin = await svc.users.ensureBootstrapAdmin();
+    const mk = async (purpose: 'user' | 'eval', revoke: boolean) => {
+      const { key } = await svc.apiKeys.create({ tenantId: DEFAULT_TENANT_ID, name: `gc ${purpose}`, serverId: srv.id, environmentId: env.id, scopes: ['tools:read'], ownerUserId: admin.id, purpose, expiresInDays: 1 });
+      if (revoke) await svc.apiKeys.revoke(DEFAULT_TENANT_ID, key.id, null);
+      return key.id;
+    };
+    const oldEval = await mk('eval', true);
+    const oldEvalActive = await mk('eval', false);
+    const oldUser = await mk('user', true);
+    const freshEval = await mk('eval', true);
+    const old = svc.clock.now() - 400 * 86_400_000;
+    await db.updateTable('api_keys').set({ created_at: old }).where('id', 'in', [oldEval, oldEvalActive, oldUser]).execute();
+    // the "active" old eval key is past its 1-day expiry
+    await db.updateTable('api_keys').set({ expires_at: old + 86_400_000 }).where('id', '=', oldEvalActive).execute();
+    await jobs.get('retention.sweep')!();
+    const left = (await db.selectFrom('api_keys').select('id').where('id', 'in', [oldEval, oldEvalActive, oldUser, freshEval]).execute()).map((k) => k.id).sort();
+    expect(left).toEqual([oldUser, freshEval].sort());
   });
 
   it('retention.sweep and tasks.close-idle run without errors', async () => {

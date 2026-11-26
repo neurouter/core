@@ -178,7 +178,7 @@ export class ScriptRunner {
     if (!taskId) {
       const p = ctx0.principal;
       taskId = await this.d.tracker.create(
-        { tenantId: ctx0.tenantId, serverId: ctx0.server.id, environmentId: ctx0.environment.id, credentialKey: ctx0.credentialKey, clientName: ctx0.client.name, clientVersion: ctx0.client.version, principalType: p.type, userId: p.type === 'external' ? null : p.userId, apiKeyId: p.type === 'api_key' ? p.apiKeyId : null, oauthClientId: p.type === 'user' ? p.oauthClientId : null, traceId: null },
+        { tenantId: ctx0.tenantId, serverId: ctx0.server.id, environmentId: ctx0.environment.id, credentialKey: ctx0.credentialKey, clientName: ctx0.client.name, clientVersion: ctx0.client.version, principalType: p.type, userId: p.type === 'external' ? null : p.userId, apiKeyId: p.type === 'api_key' ? p.apiKeyId : null, oauthClientId: p.type === 'user' ? p.oauthClientId : null, traceId: null, origin: ctx0.origin },
         'script',
         null,
       );

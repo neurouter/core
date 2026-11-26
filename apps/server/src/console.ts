@@ -50,6 +50,7 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
     environment: { id: bundle.environment.id, slug: bundle.environment.slug, kind: bundle.environment.kind },
     principal: { type: 'user', userId, oauthTokenId: '', oauthClientId: '', scopes: ['tools:read', 'tools:write', 'code:run'], familyId: `console:${userId}`, name: 'console' },
     credentialKey: `console:${userId}`,
+    origin: 'live',
     client: { name: 'neurouter-console', version: s.version, protocolVersion: null, era: 'modern', caps: null },
     bundle,
     taskId: null,

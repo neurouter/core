@@ -31,6 +31,9 @@ export function registerJobs(scheduler: JobScheduler, s: Services, extra: Array<
         await db.deleteFrom('unmet_needs').where('tenant_id', '=', t.id).where('created_at', '<', cutoff).execute();
         await db.deleteFrom('tasks').where('tenant_id', '=', t.id).where('started_at', '<', cutoff).where('status', '=', 'closed').execute();
         await db.updateTable('eval_task_runs').set({ transcript: null }).where('tenant_id', '=', t.id).where('created_at', '<', cutoff).execute();
+        // eval API keys (one per attempt, hidden from the console, revoked when the attempt ends) go with
+        // their tasks; tasks.origin keeps eval tasks identifiable without them
+        await db.deleteFrom('api_keys').where('tenant_id', '=', t.id).where('purpose', '=', 'eval').where('created_at', '<', cutoff).where((eb) => eb.or([eb('revoked_at', 'is not', null), eb('expires_at', '<=', now)])).execute();
       }
     },
   });

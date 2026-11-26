@@ -468,6 +468,7 @@ export interface TasksTable {
   ops_count: Generated<number>;
   hinted: Generated<number>;
   trace_id: string | null;
+  origin: Generated<'live' | 'eval'>;
 }
 
 export interface ScriptRunsTable {
@@ -1008,7 +1009,7 @@ export const MAIN_TABLE_COLUMNS = {
   oauth_consents: ['id', 'tenant_id', 'user_id', 'client_id', 'environment_id', 'scopes', 'redirect_uri', 'created_at', 'revoked_at'],
   oauth_codes: ['code_hash', 'tenant_id', 'client_id', 'user_id', 'server_id', 'environment_id', 'redirect_uri', 'code_challenge', 'scopes', 'resource', 'expires_at', 'consumed_at'],
   oauth_tokens: ['id', 'tenant_id', 'token_hash', 'kind', 'client_id', 'user_id', 'server_id', 'environment_id', 'scopes', 'resource', 'family_id', 'parent_id', 'expires_at', 'revoked_at', 'last_used_at', 'created_at'],
-  tasks: ['tenant_id', 'id', 'server_id', 'environment_id', 'user_id', 'api_key_id', 'oauth_client_id', 'principal_type', 'credential_key', 'client_name', 'client_version', 'goal', 'outcome', 'notes', 'framing', 'inferred_label', 'status', 'started_at', 'last_activity_at', 'ended_at', 'call_count', 'error_count', 'write_count', 'blocked_count', 'script_count', 'decision_count', 'ops_count', 'hinted', 'trace_id'],
+  tasks: ['tenant_id', 'id', 'server_id', 'environment_id', 'user_id', 'api_key_id', 'oauth_client_id', 'principal_type', 'credential_key', 'client_name', 'client_version', 'goal', 'outcome', 'notes', 'framing', 'inferred_label', 'status', 'started_at', 'last_activity_at', 'ended_at', 'call_count', 'error_count', 'write_count', 'blocked_count', 'script_count', 'decision_count', 'ops_count', 'hinted', 'trace_id', 'origin'],
   script_runs: ['tenant_id', 'id', 'task_id', 'server_id', 'environment_id', 'user_id', 'credential_key', 'code', 'code_hash', 'mode', 'status', 'error', 'result_preview', 'result_bytes', 'result_handle', 'planned_changes', 'stats', 'phases', 'stdout', 'audit_id', 'trace_id', 'started_at', 'ended_at'],
   decisions: ['tenant_id', 'id', 'task_id', 'ts', 'choice', 'reason', 'alternatives', 'audit_id'],
   need_groups: ['tenant_id', 'id', 'server_id', 'label', 'intent_norm_hash', 'count', 'distinct_principals', 'first_seen_at', 'last_seen_at', 'status', 'note', 'centroid'],

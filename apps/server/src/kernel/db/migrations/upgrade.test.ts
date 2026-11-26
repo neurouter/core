@@ -1,6 +1,6 @@
 /**
  * Upgrade of an existing v0.1.1 database (migrations 0001–0007, unchanged since the v0.1.1 tag) to the
- * tenancy P0/P0b schema (0008_tenant_scope, 0009_mock_state). Runs on a SQLite file always, on
+ * tenancy P0/P0b schema (0008_tenant_scope, 0009_mock_state) and eval origin (0010_eval_origin). Runs on a SQLite file always, on
  * Postgres when NEUROUTER_TEST_PG_URL is set (CI), and the 0008 data migration on PGlite (PGlite has no
  * pgvector, so the full chain can't run there).
  */
@@ -79,7 +79,7 @@ describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('upgrade a v0
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
-  it('applies exactly 0008 and 0009, keeps data, and the new server boots on it', async () => {
+  it('applies exactly 0008, 0009 and 0010, keeps data, and the new server boots on it', async () => {
     let url: string;
     if (dialect === 'postgres') url = await resetPg(pgUrl, 'nr_upgrade_v011');
     else {
@@ -93,7 +93,7 @@ describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('upgrade a v0
     await dbs.close();
 
     dbs = createDatabases({ databaseUrl: url });
-    expect(await migrateAll(dbs, { embeddingDims: DIMS })).toEqual({ main: ['0008_tenant_scope', '0009_mock_state'], audit: [] });
+    expect(await migrateAll(dbs, { embeddingDims: DIMS })).toEqual({ main: ['0008_tenant_scope', '0009_mock_state', '0010_eval_origin'], audit: [] });
     expect(await migrateAll(dbs, { embeddingDims: DIMS })).toEqual({ main: [], audit: [] });
     await assertUpgraded(dbs);
     await dbs.close();

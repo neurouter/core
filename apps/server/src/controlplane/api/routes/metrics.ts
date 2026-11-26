@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { api, type OverviewKpis } from '@neurouter/shared';
 import { toIso } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
+import { liveIssue, notEvalOnlyGroup } from '../../traces/origin.js';
 import { TracesService } from '../../traces/traces.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
@@ -36,13 +37,13 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
     const toolCalls = rows.filter((r) => r.kind === 'tool_call');
     const blocked = toolCalls.filter((r) => r.decision.startsWith('denied_')).length;
     const errors = toolCalls.filter((r) => r.status !== 'ok' && !r.decision.startsWith('denied_')).length;
-    let tq = db.selectFrom('tasks').select(['outcome', 'status']).where('tenant_id', '=', tenantOf(req)).where('started_at', '>=', from).where('started_at', '<', to);
+    let tq = db.selectFrom('tasks').select(['outcome', 'status']).where('tenant_id', '=', tenantOf(req)).where('origin', '=', 'live').where('started_at', '>=', from).where('started_at', '<', to);
     if (f.serverId) tq = tq.where('server_id', '=', f.serverId);
     if (f.environmentId) tq = tq.where('environment_id', '=', f.environmentId);
     const tasks = await tq.execute();
     const decided = tasks.filter((t) => t.outcome === 'success' || t.outcome === 'partial' || t.outcome === 'failure');
     const openCount = async (table: 'need_groups' | 'issues') => {
-      let qb = db.selectFrom(table).select((eb) => eb.fn.countAll<number>().as('n')).where('tenant_id', '=', tenantOf(req)).where('status', '=', 'open');
+      let qb = db.selectFrom(table).select((eb) => eb.fn.countAll<number>().as('n')).where('tenant_id', '=', tenantOf(req)).where('status', '=', 'open').where(table === 'need_groups' ? notEvalOnlyGroup(db, tenantOf(req)) : liveIssue(db, tenantOf(req)));
       if (f.serverId) qb = qb.where('server_id', '=', f.serverId);
       return Number((await qb.executeTakeFirst())?.n ?? 0);
     };
@@ -85,7 +86,7 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
       const r = await c.views.readiness(s);
       if (r) readiness.push({ ...r, serverId: s.id, serverSlug: s.slug, serverName: s.name });
     }
-    let rq = db.selectFrom('tasks').selectAll().where('tenant_id', '=', tenantOf(req));
+    let rq = db.selectFrom('tasks').selectAll().where('tenant_id', '=', tenantOf(req)).where('origin', '=', 'live');
     if (q.serverId) rq = rq.where('server_id', '=', q.serverId);
     if (q.environmentId) rq = rq.where('environment_id', '=', q.environmentId);
     const recent = await rq.orderBy('started_at', 'desc').limit(5).execute();
@@ -120,7 +121,7 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
       return s[Math.min(n - 1, Math.max(0, Math.floor((t - start) / size)))]!;
     };
     if (q.metric === 'tasks' || q.metric === 'task_success') {
-      let tq = db.selectFrom('tasks').select(['started_at', 'outcome', 'environment_id']).where('tenant_id', '=', tenantOf(req)).where('started_at', '>=', from).where('started_at', '<', to);
+      let tq = db.selectFrom('tasks').select(['started_at', 'outcome', 'environment_id']).where('tenant_id', '=', tenantOf(req)).where('origin', '=', 'live').where('started_at', '>=', from).where('started_at', '<', to);
       if (q.serverId) tq = tq.where('server_id', '=', q.serverId);
       if (q.environmentId) tq = tq.where('environment_id', '=', q.environmentId);
       for (const t of await tq.execute()) {

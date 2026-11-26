@@ -52,7 +52,7 @@ describe('migration 0009_mock_state', () => {
 
     // a later release opens the same file and migrates to latest
     dbs = createDatabases({ databaseUrl: url });
-    expect(await migrateAll(dbs, { embeddingDims: DIMS })).toEqual({ main: ['0008_tenant_scope', '0009_mock_state'], audit: [] });
+    expect(await migrateAll(dbs, { embeddingDims: DIMS })).toEqual({ main: ['0008_tenant_scope', '0009_mock_state', '0010_eval_origin'], audit: [] });
     expect(await dbs.main.db.selectFrom('users').select(['id', 'email', 'role']).execute()).toEqual([{ id: 'u1', email: 'admin@example.com', role: 'admin' }]);
     const ns = { tenantId: '00000000-0000-7000-8000-0000000000a1', environmentId: '00000000-0000-7000-8000-0000000000e1', name: 'env' };
     const store = new DbMockStateStore(dbs.main.db, () => now);

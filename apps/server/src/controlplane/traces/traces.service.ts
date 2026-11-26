@@ -46,11 +46,7 @@ export class TracesService {
 
   async taskRow(t: Task): Promise<TaskRow> {
     const r = await this.refs(t.server_id, t.environment_id);
-    let origin: 'agent' | 'eval' = 'agent';
-    if (t.api_key_id) {
-      const k = await this.db.selectFrom('api_keys').where('tenant_id', '=', t.tenant_id).select('purpose').where('id', '=', t.api_key_id).executeTakeFirst();
-      if (k?.purpose === 'eval') origin = 'eval';
-    }
+    const origin: TaskRow['origin'] = t.origin === 'eval' ? 'eval' : 'agent';
     const p = (await this.principal(t.principal_type, t.user_id, t.api_key_id, t.credential_key)) ?? { type: 'api_key' as const, id: t.credential_key, name: DELETED };
     const label = parseJsonColumn<TaskRow['inferredLabel']>(t.inferred_label);
     return {
@@ -141,6 +137,14 @@ export class TracesService {
       if (n.audit_id) dropOps.add(n.audit_id);
     }
     for (const i of issues) out.push({ id: i.id, kind: 'issue', ts: toIso(i.created_at), tool: i.tool_name, summary: i.problem.slice(0, 500) });
+    // eval traffic records its reports only in the ops audit row: show them as reports, from the audited arguments
+    const byId = new Map(audit.map((a) => [a.id, a]));
+    for (const [k, x] of out.entries()) {
+      if (x.kind !== 'ops' || x.status !== 'ok' || !x.auditId || dropOps.has(x.auditId)) continue;
+      const p = parseJsonColumn<Record<string, unknown>>(byId.get(x.auditId)?.params_redacted) ?? {};
+      if (x.tool === 'neurouter_report_unmet_need' && typeof p.intent === 'string') out[k] = { ...x, kind: 'unmet_need', summary: p.intent.slice(0, 500) };
+      else if (x.tool === 'neurouter_report_issue' && !issues.length && typeof p.problem === 'string') out[k] = { ...x, kind: 'issue', ...(typeof p.tool === 'string' ? { tool: p.tool } : {}), summary: p.problem.slice(0, 500) };
+    }
     const items = out.filter((x) => !(x.kind === 'ops' && x.auditId && dropOps.has(x.auditId)));
     items.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
     return { items, truncated };

@@ -9,13 +9,14 @@ import { AppError } from '../../../kernel/lib/errors.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { parseJsonColumn } from '../../../kernel/lib/json.js';
 import { clampLimit, decodeCursor, toPage } from '../../../kernel/lib/pagination.js';
+import { liveIssue, liveNeed, notEvalOnlyGroup } from '../../traces/origin.js';
 import { TracesService } from '../../traces/traces.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
 
 const DAY = 86_400_000;
 
-/** `inbox.*` (§14.10): unmet-need groups and issues. */
+/** `inbox.*` (§14.10): unmet-need groups and issues. Eval-origin rows never show (`traces/origin.ts`). */
 export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<void> {
   const db = c.dbs.main.db;
   const tr = new TracesService(c);
@@ -23,12 +24,12 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
 
   const groupRow = async (g: Selectable<NeedGroupsTable>): Promise<NeedGroupRow> => {
     const r = await tr.refs(g.server_id, null);
-    const samples = await db.selectFrom('unmet_needs').where('tenant_id', '=', g.tenant_id).select('intent').where('group_id', '=', g.id).orderBy('created_at', 'desc').limit(3).execute();
+    const samples = await db.selectFrom('unmet_needs').where('tenant_id', '=', g.tenant_id).select('intent').where('group_id', '=', g.id).where(liveNeed(db, g.tenant_id)).orderBy('created_at', 'desc').limit(3).execute();
     return { id: g.id, label: g.label, server: r.server!, count: g.count, distinctPrincipals: g.distinct_principals, firstSeenAt: toIso(g.first_seen_at), lastSeenAt: toIso(g.last_seen_at), status: g.status, note: g.note, sampleIntents: samples.map((s) => s.intent) };
   };
-  const recount = async (groupId: string) => {
+  const recount = async (tenantId: string, groupId: string) => {
     // tenant-scope: child-of-scoped (groupId comes from a tenant-scoped need group)
-    const agg = await db.selectFrom('unmet_needs').select([(eb) => eb.fn.countAll<number>().as('n'), (eb) => eb.fn.count<number>('credential_key').distinct().as('p'), (eb) => eb.fn.min('created_at').as('f'), (eb) => eb.fn.max('created_at').as('l')]).where('group_id', '=', groupId).executeTakeFirst();
+    const agg = await db.selectFrom('unmet_needs').select([(eb) => eb.fn.countAll<number>().as('n'), (eb) => eb.fn.count<number>('credential_key').distinct().as('p'), (eb) => eb.fn.min('created_at').as('f'), (eb) => eb.fn.max('created_at').as('l')]).where('group_id', '=', groupId).where(liveNeed(db, tenantId)).executeTakeFirst();
     // tenant-scope: child-of-scoped (groupId comes from a tenant-scoped need group)
     await db.updateTable('need_groups').set({ count: Number(agg?.n ?? 0), distinct_principals: Number(agg?.p ?? 0), ...(agg?.f !== null && agg?.f !== undefined ? { first_seen_at: Number(agg.f), last_seen_at: Number(agg.l) } : {}) }).where('id', '=', groupId).execute();
   };
@@ -53,6 +54,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const count = async (table: 'need_groups' | 'issues', open: boolean) => {
       let qb = db.selectFrom(table).select((eb) => eb.fn.countAll<number>().as('n')).where('tenant_id', '=', tenantOf(req));
       if (sid) qb = qb.where('server_id', '=', sid);
+      qb = qb.where(table === 'need_groups' ? notEvalOnlyGroup(db, tenantOf(req)) : liveIssue(db, tenantOf(req)));
       qb = open ? qb.where('status', '=', 'open') : table === 'need_groups' ? qb.where('first_seen_at', '>=', since) : qb.where('created_at', '>=', since);
       return Number((await qb.executeTakeFirst())?.n ?? 0);
     };
@@ -64,7 +66,8 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const limit = clampLimit(q.limit);
     let nq = db.selectFrom('unmet_needs as n').innerJoin('need_groups as g', 'g.id', 'n.group_id').select(['n.id', 'n.intent', 'n.created_at', 'g.status', 'g.id as gid', 'n.attempted']).where('n.tenant_id', '=', tenantOf(req));
     if (q.serverId) nq = nq.where('n.server_id', '=', q.serverId);
-    let iq = db.selectFrom('issues').selectAll().where('tenant_id', '=', tenantOf(req));
+    nq = nq.where(liveNeed(db, tenantOf(req), 'n'));
+    let iq = db.selectFrom('issues').selectAll().where('tenant_id', '=', tenantOf(req)).where(liveIssue(db, tenantOf(req)));
     if (q.serverId) iq = iq.where('server_id', '=', q.serverId);
     if (q.toolName) iq = iq.where('tool_name', '=', q.toolName);
     const needs = (await nq.orderBy('n.created_at', 'desc').limit(500).execute()).filter((n) => !q.toolName || (parseJsonColumn<string[]>(n.attempted) ?? []).includes(q.toolName));
@@ -85,7 +88,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const limit = clampLimit(q.limit);
     const key = decodeCursor(q.cursor);
     const offset = key ? Number(key[0]) : 0;
-    let qb = db.selectFrom('need_groups').selectAll().where('tenant_id', '=', tenantOf(req));
+    let qb = db.selectFrom('need_groups').selectAll().where('tenant_id', '=', tenantOf(req)).where(notEvalOnlyGroup(db, tenantOf(req)));
     if (q.serverId) qb = qb.where('server_id', '=', q.serverId);
     if (q.status?.length) qb = qb.where('status', 'in', q.status);
     if (q.q) qb = qb.where('label', 'like', `%${q.q}%`);
@@ -99,7 +102,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const g = await groupOr404(req, req.params.groupId);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
-    let qb = db.selectFrom('unmet_needs').where('tenant_id', '=', tenantOf(req)).selectAll().where('group_id', '=', g.id);
+    let qb = db.selectFrom('unmet_needs').where('tenant_id', '=', tenantOf(req)).selectAll().where('group_id', '=', g.id).where(liveNeed(db, tenantOf(req)));
     if (key) qb = qb.where((eb) => eb.or([eb('created_at', '<', Number(key[0])), eb.and([eb('created_at', '=', Number(key[0])), eb('id', '<', String(key[1]))])]));
     const rows = await qb.orderBy('created_at', 'desc').orderBy('id', 'desc').limit(limit + 1).execute();
     const page = toPage(rows, limit, (r) => r, (r) => [r.created_at, r.id]);
@@ -109,7 +112,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
       const keyRow = await db.selectFrom('api_keys').where('tenant_id', '=', tenantOf(req)).select('id').where('id', '=', n.credential_key).executeTakeFirst();
       items.push({ id: n.id, groupId: n.group_id, intent: n.intent, attempted: parseJsonColumn<string[]>(n.attempted) ?? [], taskId: n.task_id, environment: r.environment!, principal: await tr.principal(keyRow ? 'api_key' : n.user_id ? 'user' : 'external', n.user_id, keyRow?.id ?? null, n.credential_key), client: { name: n.client_name, version: null }, createdAt: toIso(n.created_at) });
     }
-    const all = await db.selectFrom('unmet_needs').where('tenant_id', '=', tenantOf(req)).select(['attempted', 'created_at']).where('group_id', '=', g.id).execute();
+    const all = await db.selectFrom('unmet_needs').where('tenant_id', '=', tenantOf(req)).select(['attempted', 'created_at']).where('group_id', '=', g.id).where(liveNeed(db, tenantOf(req))).execute();
     const tools = new Map<string, number>();
     const days = new Map<string, number>();
     const since = c.clock.now() - 30 * DAY;
@@ -142,7 +145,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     if (from.server_id !== into.server_id) throw AppError.validation('Groups of different servers cannot be merged', [{ path: ['intoGroupId'], message: 'other server', code: 'server_mismatch' }]);
     await db.updateTable('unmet_needs').where('tenant_id', '=', tenantOf(req)).set({ group_id: into.id }).where('group_id', '=', from.id).execute();
     await db.deleteFrom('need_groups').where('tenant_id', '=', tenantOf(req)).where('id', '=', from.id).execute();
-    await recount(into.id);
+    await recount(tenantOf(req), into.id);
     inboxChanged();
     return groupRow(await groupOr404(req, into.id));
   });
@@ -154,8 +157,8 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     await db.insertInto('need_groups').values({ id, tenant_id: tenantOf(req), server_id: n.server_id, label: n.intent.slice(0, 200), intent_norm_hash: `split:${sha256Hex(`${n.id}:${id}`)}`, count: 0, distinct_principals: 0, first_seen_at: n.created_at, last_seen_at: n.created_at, status: 'open', note: null, centroid: null }).execute();
     const old = n.group_id;
     await db.updateTable('unmet_needs').where('tenant_id', '=', tenantOf(req)).set({ group_id: id }).where('id', '=', n.id).execute();
-    await recount(id);
-    await recount(old);
+    await recount(tenantOf(req), id);
+    await recount(tenantOf(req), old);
     const left = await db.selectFrom('unmet_needs').where('tenant_id', '=', tenantOf(req)).select('id').where('group_id', '=', old).limit(1).executeTakeFirst();
     if (!left) await db.deleteFrom('need_groups').where('tenant_id', '=', tenantOf(req)).where('id', '=', old).execute();
     inboxChanged();
@@ -166,7 +169,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const q = req.query;
     const limit = clampLimit(q.limit);
     const key = decodeCursor(q.cursor);
-    let qb = db.selectFrom('issues').selectAll().where('tenant_id', '=', tenantOf(req));
+    let qb = db.selectFrom('issues').selectAll().where('tenant_id', '=', tenantOf(req)).where(liveIssue(db, tenantOf(req)));
     if (q.serverId) qb = qb.where('server_id', '=', q.serverId);
     if (q.status?.length) qb = qb.where('status', 'in', q.status);
     if (q.tool) qb = qb.where('tool_name', '=', q.tool);
@@ -202,7 +205,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
 
   route(app, 'inbox.exportNeedMarkdown', api.inbox.exportNeedMarkdown, async (req) => {
     const g = await groupRow(await groupOr404(req, req.params.groupId));
-    const reports = await db.selectFrom('unmet_needs').where('tenant_id', '=', tenantOf(req)).select(['intent', 'created_at', 'attempted']).where('group_id', '=', g.id).orderBy('created_at', 'desc').limit(20).execute();
+    const reports = await db.selectFrom('unmet_needs').where('tenant_id', '=', tenantOf(req)).select(['intent', 'created_at', 'attempted']).where('group_id', '=', g.id).where(liveNeed(db, tenantOf(req))).orderBy('created_at', 'desc').limit(20).execute();
     const md = [
       `## Unmet need: ${g.label}`,
       '',

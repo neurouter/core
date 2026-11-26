@@ -43,10 +43,7 @@ export async function taskRoutes(app: FastifyInstance, c: ApiContext): Promise<v
     if (q.q) qb = qb.where('goal', 'like', `%${q.q}%`);
     if (q.hasErrors !== undefined) qb = q.hasErrors ? qb.where('error_count', '>', 0) : qb.where('error_count', '=', 0);
     if (q.hasWrites !== undefined) qb = q.hasWrites ? qb.where('write_count', '>', 0) : qb.where('write_count', '=', 0);
-    if (q.origin) {
-      const evalKeys = db.selectFrom('api_keys').where('tenant_id', '=', tenantOf(req)).select('id').where('purpose', '=', 'eval');
-      qb = q.origin === 'eval' ? qb.where('api_key_id', 'in', evalKeys) : qb.where((eb) => eb.or([eb('api_key_id', 'is', null), eb('api_key_id', 'not in', evalKeys)]));
-    }
+    if (q.origin) qb = qb.where('origin', '=', q.origin === 'eval' ? 'eval' : 'live');
     if (q.tool) {
       const ids = await c.dbs.audit.db.selectFrom('audit_log').where('tenant_id', '=', tenantOf(req)).select('task_id').distinct().where('tool_name', '=', q.tool).where('ts', '>=', from).where('task_id', 'is not', null).limit(5000).execute();
       const set = ids.map((r) => r.task_id!).filter(Boolean);
