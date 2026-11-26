@@ -8,6 +8,7 @@ import {
   LlmKeyError,
   RoutingLlmClient,
   QUICK_COUNTS,
+  resolveTaskTools,
   runSuite,
   scoreRun,
   selectVerifyTasks,
@@ -179,7 +180,7 @@ export class EvalsService {
 
   private async genTools(buildId: string): Promise<{ tools: ToolDef[]; gen: GenTool[] }> {
     const tools = (await this.d.builds.tools(buildId)).filter((t) => !t.hidden && t.kind !== 'composite');
-    return { tools, gen: tools.map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, write: t.risk.write, pyName: t.pyName, exampleArguments: t.examples[0]?.arguments ?? null })) };
+    return { tools, gen: tools.map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, write: t.risk.write, pyName: t.pyName, exampleArguments: t.examples[0]?.arguments ?? null, key: t.key })) };
   }
 
   /** Generates a draft suite (§15.2); reference calls are executed over MCP on a fresh mock namespace. */
@@ -365,7 +366,9 @@ export class EvalsService {
         await this.generateSuite(tenantId, run.server_id, { ...(opts.quick ? { counts: QUICK_COUNTS } : {}), createdBy: opts.createdBy, intoSuiteId: run.suite_id });
         run = await this.run(tenantId, runId);
       }
-      let tasks = (await this.suiteTasks(tenantId, run.suite_id)).map(taskFromRow).filter((t) => t.enabled);
+      // assertions name tools by stable key (fallback: name, or the pre-overlay name): survive overlay renames
+      const buildTools = await this.d.builds.tools(run.build_id);
+      let tasks = resolveTaskTools((await this.suiteTasks(tenantId, run.suite_id)).map(taskFromRow), buildTools).filter((t) => t.enabled);
       const keys = parseJsonColumn<string[]>(run.task_keys);
       if (keys?.length) tasks = tasks.filter((t) => keys.includes(t.key));
       const models = parseJsonColumn<string[]>(run.models) ?? [];

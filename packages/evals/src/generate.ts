@@ -1,6 +1,7 @@
 import { Assertion, ASSERTION_TYPES, EvalCategory, type ReferenceCall } from '@neurouter/shared';
 import { GENERATOR_MARKER, GENERATOR_PROMPT_VERSION, GENERATOR_SYSTEM, markerMessage } from './prompts.js';
 import { parseJsonText, textOf, type LlmClient } from './llm/types.js';
+import { stampToolKeys } from './tool-identity.js';
 import type { EvalTask, GeneratedTask, GeneratorCategoryInput, GenTool } from './types.js';
 
 export const DEFAULT_COUNTS: Record<EvalCategory, number> = { single: 8, multi: 8, ambiguous: 4, impossible: 4 };
@@ -228,20 +229,19 @@ export async function validateGenerated(
     });
   }
   if (errors.length) return { ok: false, errors };
-  return {
-    ok: true,
-    task: {
-      key: slugKey(g.key || `${category}-${normPrompt(g.prompt).slice(0, 30)}`),
-      category,
-      prompt: g.prompt.trim(),
-      rubric: typeof g.rubric === 'string' ? g.rubric : '',
-      assertions,
-      referenceCalls: refs,
-      seedState: g.seed_state ?? null,
-      tags: Array.isArray(g.tags) ? g.tags.map(String) : [],
-      enabled: true,
-    },
+  const keyed = opts.tools.filter((t): t is GenTool & { key: string } => typeof t.key === 'string');
+  const task: EvalTask = {
+    key: slugKey(g.key || `${category}-${normPrompt(g.prompt).slice(0, 30)}`),
+    category,
+    prompt: g.prompt.trim(),
+    rubric: typeof g.rubric === 'string' ? g.rubric : '',
+    assertions,
+    referenceCalls: refs,
+    seedState: g.seed_state ?? null,
+    tags: Array.isArray(g.tags) ? g.tags.map(String) : [],
+    enabled: true,
   };
+  return { ok: true, task: keyed.length ? stampToolKeys(task, keyed) : task };
 }
 
 function slugKey(k: string): string {

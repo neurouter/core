@@ -205,6 +205,8 @@ export interface GenTool {
   pyName?: string;
   /** Known-good arguments (spec/overlay examples or derived from mock samples). */
   exampleArguments?: Record<string, unknown> | null;
+  /** Stable tool identity (`ToolDef.key`), stamped on generated assertions so renames don't break the suite. */
+  key?: string;
 }
 
 export interface GeneratorCategoryInput {
