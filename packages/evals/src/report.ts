@@ -10,7 +10,8 @@ export interface EvalReport {
   tasks: Array<{ key: string; category: string; prompt: string; cells: Array<{ model: string; mode: string; passes: number; attempts: number; failureCause: string | null }> }>;
   topFailures: Array<{ taskKey: string; model: string; mode: string; cause: string | null; detail: string }>;
   suggestions: Suggestion[];
-  usage: Record<string, { inputTokens: number; outputTokens: number }>;
+  /** Per model: uncached input, output, cached input read and cache writes (part of input); see `attemptTokens`. */
+  usage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }>;
 }
 
 export function buildReport(input: Omit<EvalReport, 'version' | 'tasks' | 'topFailures' | 'usage'> & { results: TaskRunResult[]; prompts: Record<string, { category: string; prompt: string }> }): EvalReport {
@@ -34,9 +35,11 @@ export function buildReport(input: Omit<EvalReport, 'version' | 'tasks' | 'topFa
     .map((r) => ({ taskKey: r.taskKey, model: r.model, mode: r.mode, cause: r.failureCause, detail: r.assertionResults.filter((a) => !a.passed).map((a) => a.detail).join('; ') || r.error || '' }));
   const usage: EvalReport['usage'] = {};
   for (const r of input.results) {
-    const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0 });
+    const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
     u.inputTokens += r.inputTokens;
     u.outputTokens += r.outputTokens;
+    u.cacheReadTokens += r.cacheReadTokens ?? 0;
+    u.cacheWriteTokens += r.cacheWriteTokens ?? 0;
   }
   const { results: _r, prompts: _p, ...rest } = input;
   return { version: 1, ...rest, tasks, topFailures, usage };
@@ -48,8 +51,10 @@ export function renderMarkdown(rep: EvalReport): string {
   lines.push(`## Neurouter agent-readiness: ${rep.server.name} — **${s.headline}/100** (${s.band.replace('_', ' ')})`, '');
   lines.push(`- Recommended mode: **${s.recommendedMode ?? 'n/a'}** — ${s.recommendationText}`);
   lines.push(`- Confidence: ${s.confidence}; models: ${rep.run.models.join(', ')}; modes: ${rep.run.modes.join(', ')}; repeats: ${rep.run.repeats}; environment: ${rep.run.environment}${rep.run.provider === 'stub' ? ' (**stub provider — not a real model**)' : ''}`, '');
-  lines.push('| Model | Mode | Score | Success | Avg tokens | Avg calls | Avg latency | Flaky |', '|---|---|---:|---:|---:|---:|---:|---:|');
-  for (const c of s.cells) lines.push(`| ${c.model} | ${c.mode}${c.best ? ' ★' : ''} | ${c.score} | ${Math.round(c.successRate * 100)}% | ${Math.round(c.avgTokens)} | ${c.avgCalls.toFixed(1)} | ${Math.round(c.avgLatencyMs)} ms | ${c.flakyTasks} |`);
+  lines.push('| Model | Mode | Score | Success | Avg tokens | of which cached | Tokens / multi-step task | Avg calls | Avg latency | Flaky |', '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|');
+  for (const c of s.cells)
+    lines.push(`| ${c.model} | ${c.mode}${c.best ? ' ★' : ''} | ${c.score} | ${Math.round(c.successRate * 100)}% | ${Math.round(c.avgTokens)} | ${Math.round(c.avgCachedTokens ?? 0)} | ${c.avgTokensMulti === null ? '–' : Math.round(c.avgTokensMulti)} | ${c.avgCalls.toFixed(1)} | ${Math.round(c.avgLatencyMs)} ms | ${c.flakyTasks} |`);
+  lines.push('', '_Tokens = uncached input + cached input + output, summed over the turns of an attempt (the same for every provider); "of which cached" is input read from the provider\'s prompt cache._');
   lines.push('', '### Score breakdown', '', '| Component | Weight | Score | Detail |', '|---|---:|---:|---|');
   for (const b of s.breakdown) lines.push(`| ${b.label} | ${b.weight} | ${Math.round(b.score * 100)}% | ${b.detail} |`);
   if (rep.topFailures.length) {
@@ -66,7 +71,7 @@ export function renderMarkdown(rep: EvalReport): string {
 /** Plain-text table for the terminal. */
 export function renderTable(rep: EvalReport): string {
   const s = rep.score;
-  const rows = [['model', 'mode', 'score', 'success', 'tokens', 'calls'], ...s.cells.map((c) => [c.model, c.mode + (c.best ? '*' : ''), String(c.score), `${Math.round(c.successRate * 100)}%`, String(Math.round(c.avgTokens)), c.avgCalls.toFixed(1)])];
+  const rows = [['model', 'mode', 'score', 'success', 'tokens', 'cached', 'tokens/multi', 'calls'], ...s.cells.map((c) => [c.model, c.mode + (c.best ? '*' : ''), String(c.score), `${Math.round(c.successRate * 100)}%`, String(Math.round(c.avgTokens)), String(Math.round(c.avgCachedTokens ?? 0)), c.avgTokensMulti === null ? '-' : String(Math.round(c.avgTokensMulti)), c.avgCalls.toFixed(1)])];
   const w = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
   const table = rows.map((r) => r.map((x, i) => x.padEnd(w[i]!)).join('  ')).join('\n');
   const fails = rep.topFailures.slice(0, 5).map((f) => `  - ${f.taskKey} [${f.mode}] ${f.cause ?? ''}`).join('\n');

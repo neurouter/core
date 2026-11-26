@@ -377,7 +377,7 @@ export class EvalsService {
       const total = tasks.length * models.length * modes.length * run.repeats;
       const existing = new Set((await db.selectFrom('eval_task_runs').where('tenant_id', '=', tenantId).select(['task_id', 'model', 'mode', 'attempt']).where('run_id', '=', runId).execute()).map((r) => `${r.task_id}|${r.model}|${r.mode}|${r.attempt}`));
       const taskIds = new Map((await this.suiteTasks(tenantId, run.suite_id)).map((t) => [t.key, t.id]));
-      const usage: Record<string, { inputTokens: number; outputTokens: number }> = {};
+      const usage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = {};
       const isTemp = (await db.selectFrom('builds').where('tenant_id', '=', tenantId).select('temporary').where('id', '=', run.build_id).executeTakeFirst())?.temporary === 1;
       const pinned = env.build_id;
       const results = await runSuite({
@@ -412,12 +412,15 @@ export class EvalsService {
           };
         },
         onResult: async (r) => {
-          const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0 });
+          const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
           u.inputTokens += r.inputTokens;
           u.outputTokens += r.outputTokens;
+          u.cacheReadTokens += r.cacheReadTokens;
+          u.cacheWriteTokens += r.cacheWriteTokens;
           this.d.metrics?.evalTaskRuns.inc({ model: r.model, mode: r.mode, passed: String(r.passed) });
           this.d.metrics?.llmTokens.inc({ model: r.model, kind: 'input' }, r.inputTokens);
           this.d.metrics?.llmTokens.inc({ model: r.model, kind: 'output' }, r.outputTokens);
+          this.d.metrics?.llmTokens.inc({ model: r.model, kind: 'cache_read' }, r.cacheReadTokens);
           await db
             .insertInto('eval_task_runs')
             .values({
@@ -437,6 +440,8 @@ export class EvalsService {
               scripts: r.scripts,
               input_tokens: r.inputTokens,
               output_tokens: r.outputTokens,
+              cache_read_tokens: r.cacheReadTokens,
+              cache_write_tokens: r.cacheWriteTokens,
               latency_ms: Math.round(r.latencyMs),
               served_by_model: r.servedByModel,
               fallback_used: r.fallbackUsed ? 1 : 0,
@@ -491,7 +496,7 @@ export class EvalsService {
 
   /** Stored attempt results, rebuilt as TaskRunResult (scoring, suggestions, resume). */
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
-    const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
+    const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.cache_read_tokens', 'r.cache_write_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
       const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number }>(r.transcript);
       return {
@@ -511,6 +516,8 @@ export class EvalsService {
         scripts: r.scripts,
         inputTokens: r.input_tokens,
         outputTokens: r.output_tokens,
+        cacheReadTokens: r.cache_read_tokens,
+        cacheWriteTokens: r.cache_write_tokens,
         latencyMs: r.latency_ms,
         servedByModel: r.served_by_model,
         fallbackUsed: r.fallback_used === 1,

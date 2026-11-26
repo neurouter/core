@@ -82,7 +82,12 @@ export type SuiteFile = z.infer<typeof SuiteFile>;
 
 /* ------------------------------------------------------------------ runs */
 
-export const TokenUsage = z.object({ inputTokens: z.number().int(), outputTokens: z.number().int(), cacheReadTokens: z.number().int().optional() });
+/**
+ * Tokens: `inputTokens` = input not read from a provider cache (Anthropic cache writes included),
+ * `cacheReadTokens` = input read from the cache, `cacheWriteTokens` = Anthropic cache writes (part of
+ * inputTokens). Total tokens of an attempt = inputTokens + cacheReadTokens + outputTokens.
+ */
+export const TokenUsage = z.object({ inputTokens: z.number().int(), outputTokens: z.number().int(), cacheReadTokens: z.number().int().optional(), cacheWriteTokens: z.number().int().optional() });
 export type TokenUsage = z.infer<typeof TokenUsage>;
 
 export const EvalRunRow = z.object({
@@ -118,7 +123,12 @@ export const MatrixCell = z.object({
   mode: CallMode,
   successRate: z.number().min(0).max(1),
   score: z.number().int().min(0).max(100),
+  /** Mean tokens per attempt: uncached input + cached input + output. */
   avgTokens: z.number(),
+  /** Mean cached input tokens per attempt (part of avgTokens). */
+  avgCachedTokens: z.number().optional(),
+  /** Mean tokens per multi-step attempt (null without multi-step tasks). */
+  avgTokensMulti: z.number().nullable().optional(),
   avgCalls: z.number(),
   avgLatencyMs: z.number(),
   flakyTasks: z.number().int(),

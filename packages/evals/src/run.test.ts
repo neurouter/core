@@ -36,7 +36,7 @@ describe('runAttempt', () => {
     const cached = (r: ReturnType<typeof llmResponse>, write: number, read: number) => ({ ...r, usage: { ...r.usage, cache_creation_input_tokens: write, cache_read_input_tokens: read } });
     const llm = new ScriptedLlmClient([cached(llmResponse([use('u1', 'list_pets', {})], { input: 3 }), 2000, 0), cached(llmResponse([text('done')], { input: 4 }), 50, 2000)]);
     const r = await runAttempt({ llm, mcp, prompt: 'p', model: 'claude-haiku-5-5', mode: 'tool' });
-    expect(r).toMatchObject({ inputTokens: 3 + 2000 + 4 + 50, cacheReadTokens: 2000 });
+    expect(r).toMatchObject({ inputTokens: 3 + 2000 + 4 + 50, cacheReadTokens: 2000, cacheWriteTokens: 2050 });
   });
 
   it('keeps full transcripts when transcriptMaxChars is null (eval --transcripts), trims to 4,096 by default', async () => {

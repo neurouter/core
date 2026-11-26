@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { greater, preliminaryScore, recommend, scoreCell, scoreRun } from './score.js';
+import { attemptTokens, greater, preliminaryScore, recommend, scoreCell, scoreRun } from './score.js';
+import { buildReport, renderMarkdown } from './report.js';
 import { result, task } from './test/fixtures.js';
 import type { CellScore } from './types.js';
 
@@ -45,7 +46,7 @@ describe('scoreCell', () => {
   });
 });
 
-const cell = (mode: 'tool' | 'code', score: number, multi: number, tokens = 1000): CellScore => ({ model: 'm', mode, score, components: [], successRate: multi, categorySuccess: { multi, single: mode === 'tool' ? 1 : 0.9 }, avgTokens: tokens, avgCalls: 1, avgLatencyMs: 1, avgTokensMulti: tokens, flakyTasks: 0, attempts: 1, excludedFallback: 0, best: false });
+const cell = (mode: 'tool' | 'code', score: number, multi: number, tokens = 1000): CellScore => ({ model: 'm', mode, score, components: [], successRate: multi, categorySuccess: { multi, single: mode === 'tool' ? 1 : 0.9 }, avgTokens: tokens, avgCachedTokens: 0, avgCalls: 1, avgLatencyMs: 1, avgTokensMulti: tokens, flakyTasks: 0, attempts: 1, excludedFallback: 0, best: false });
 
 describe('recommend', () => {
   it('picks the higher cell', () => expect(recommend([cell('tool', 60, 0.5), cell('code', 80, 0.9, 500)]).mode).toBe('code'));
@@ -89,4 +90,25 @@ describe('scoreRun', () => {
     expect(s.confidence).toBe('measured');
   });
   it('preliminary score = lint', () => expect(preliminaryScore({ score: 48.6 })).toEqual({ score: 49, band: 'not_ready', confidence: 'preliminary' }));
+});
+
+describe('tokens (consistent across providers)', () => {
+  it('counts uncached + cached input + output per attempt, and reports cached input separately', () => {
+    const t = [task({ key: 'm1', category: 'multi', referenceCalls: [{ tool: 'a', arguments: {} }, { tool: 'b', arguments: {} }] })];
+    // the same prompt and answer: OpenAI cached most of the tool list (automatic), Anthropic did not (no cache_control)
+    const openai = result({ key: 'o', taskKey: 'm1', category: 'multi', model: 'gpt', inputTokens: 1_000, cacheReadTokens: 9_000, outputTokens: 200 });
+    const anthropic = result({ key: 'a', taskKey: 'm1', category: 'multi', model: 'claude', inputTokens: 10_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 200 });
+    const gemini = result({ key: 'g', taskKey: 'm1', category: 'multi', model: 'gemini', inputTokens: 4_000, cacheReadTokens: 6_000, outputTokens: 200 });
+    const input = { tasks: t, results: [openai, anthropic, gemini], models: ['gpt', 'claude', 'gemini'], modes: ['tool'] as Array<'tool' | 'code'>, lintScore: 80 };
+    const cells = ['gpt', 'claude', 'gemini'].map((m) => scoreCell(input, m, 'tool'));
+    expect(cells.map((c) => c.avgTokensMulti)).toEqual([10_200, 10_200, 10_200]);
+    expect(cells.map((c) => c.avgTokens)).toEqual([10_200, 10_200, 10_200]);
+    expect(cells.map((c) => c.avgCachedTokens)).toEqual([9_000, 0, 6_000]);
+    expect(attemptTokens({ inputTokens: 5, outputTokens: 2 })).toBe(7);
+    const rep = buildReport({ server: { slug: 's', name: 's' }, run: { id: null, models: ['gpt'], modes: ['tool'], repeats: 1, environment: 'mock', buildHash: null, provider: 'openai', startedAt: '', endedAt: '' }, score: scoreRun(input), suggestions: [], results: [openai, anthropic], prompts: {} });
+    expect(rep.usage.gpt).toEqual({ inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 9_000, cacheWriteTokens: 0 });
+    const md = renderMarkdown(rep);
+    expect(md).toContain('of which cached');
+    expect(md).toContain('| 10200 | 9000 | 10200 |');
+  });
 });

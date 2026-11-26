@@ -73,6 +73,7 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     inputTokens: 0,
     outputTokens: 0,
     cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     latencyMs: 0,
     servedByModel: null,
     fallbackUsed: false,
@@ -124,6 +125,7 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     out.inputTokens += (res.usage.input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
     out.outputTokens += res.usage.output_tokens ?? 0;
     out.cacheReadTokens += res.usage.cache_read_input_tokens ?? 0;
+    out.cacheWriteTokens += res.usage.cache_creation_input_tokens ?? 0;
     out.servedByModel = res.model;
     if (fallbackUsed(res)) {
       out.fallbackUsed = true;
@@ -324,6 +326,8 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext): Promise<TaskR
       scripts: run.scripts,
       inputTokens: run.inputTokens,
       outputTokens: run.outputTokens,
+      cacheReadTokens: run.cacheReadTokens,
+      cacheWriteTokens: run.cacheWriteTokens,
       latencyMs: run.latencyMs,
       servedByModel: run.servedByModel,
       fallbackUsed: run.fallbackUsed,

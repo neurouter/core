@@ -67,9 +67,14 @@ export interface AttemptRun {
   toolCallsByAgent: number;
   scripts: number;
   turns: number;
+  /** Input tokens not read from a provider cache (Anthropic cache writes included). */
   inputTokens: number;
+  /** Output tokens (reasoning/thinking included). */
   outputTokens: number;
+  /** Input tokens read from a provider cache (OpenAI cached_tokens, Anthropic cache_read_input_tokens, Gemini total_cached_tokens). */
   cacheReadTokens: number;
+  /** Anthropic cache_creation_input_tokens (already part of inputTokens; reported for cost). */
+  cacheWriteTokens: number;
   latencyMs: number;
   servedByModel: string | null;
   fallbackUsed: boolean;
@@ -125,8 +130,13 @@ export interface TaskRunResult {
   /** Calls counted for efficiency: the agent's non-ops calls minus search_tools (same rule as max_calls, see `workCalls`). */
   toolCalls: number;
   scripts: number;
+  /** Uncached input (see AttemptRun.inputTokens). */
   inputTokens: number;
   outputTokens: number;
+  /** Cached input read (0 on results stored before 0.2.1). */
+  cacheReadTokens: number;
+  /** Cache writes, part of inputTokens (Anthropic). */
+  cacheWriteTokens: number;
   latencyMs: number;
   servedByModel: string | null;
   fallbackUsed: boolean;
@@ -156,10 +166,13 @@ export interface CellScore {
   successRate: number;
   /** success per category (0..1), categories without tasks omitted. */
   categorySuccess: Partial<Record<EvalCategory, number>>;
+  /** Mean tokens per attempt: `attemptTokens` = uncached input + cached input + output (see score.ts). */
   avgTokens: number;
+  /** Mean cached input tokens per attempt (part of avgTokens). */
+  avgCachedTokens: number;
   avgCalls: number;
   avgLatencyMs: number;
-  /** avg tokens on multi tasks (for the recommendation text). */
+  /** "Tokens per multi-step task": mean `attemptTokens` over the multi-step attempts (recommendation text, reports). */
   avgTokensMulti: number | null;
   flakyTasks: number;
   attempts: number;

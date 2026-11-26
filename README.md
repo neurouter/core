@@ -44,6 +44,13 @@ pass `--models gpt-6-luna,claude-sonnet-5-5,gemini-3.5-flash-lite` to compare th
 its provider (`provider:model` forces one). Keys can also be stored, encrypted, in the console
 (Settings › Models).
 
+Token figures in eval reports are comparable across providers: tokens of an attempt = uncached input +
+cached input + output (reasoning included), summed over its turns; "tokens per multi-step task" is the
+mean of that over the multi-step attempts. Cached input (OpenAI `cached_tokens`, Anthropic
+`cache_read_input_tokens`, Gemini `total_cached_tokens`) is also reported on its own, and Anthropic cache
+writes are counted as input. `--transcripts <file>` writes every attempt untrimmed (`--transcript-max-chars`
+to cap each item).
+
 ## Development
 
 | Command | What |
