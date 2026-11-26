@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import { buildApp } from './app.js';
+import { fileEnvDefaults, type FileEnvDefaults } from './controlplane/config-sync/file-env.js';
 import { createServices, initServices, type ServiceInputs, type Services } from './deps.js';
 import { registerJobs } from './jobs.js';
 import { ConfigError, loadConfig, loadDotenv, type Config } from './kernel/config/load.js';
@@ -16,6 +17,20 @@ import { SERVER_VERSION } from './version.js';
 import { routePlugins } from './routes.js';
 
 export { ConfigError };
+
+/** Pre-parses NEUROUTER_CONFIG for its process-level keys; null when there is no usable file (the reconcile reports problems). */
+async function readFileDefaults(source: Record<string, string | undefined>): Promise<FileEnvDefaults | null> {
+  const path = source.NEUROUTER_CONFIG;
+  if (!path || source.NEUROUTER_CONFIG_MODE === 'console') return null;
+  try {
+    const { readFileSync } = await import('node:fs');
+    const { parseConfigYaml } = await import('./controlplane/config-sync/reconcile.js');
+    const p = parseConfigYaml(readFileSync(path, 'utf8'), path);
+    return p.config ? fileEnvDefaults(p.config, source) : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface StartOptions {
   /** Environment source (default `process.env`, with `.env` loaded outside production). */
@@ -45,9 +60,15 @@ export interface RunningServer {
  */
 export async function startServer(opts: StartOptions = {}): Promise<RunningServer> {
   if (opts.loadDotenv !== false && !opts.env) loadDotenv();
-  const config = loadConfig(opts.env ?? process.env);
+  const source = opts.env ?? process.env;
+  // neurouter.yaml keys that configure the process (publicUrl, auth.oidc, evals.apiKey, externalAs):
+  // read before the config is derived; environment variables win (see file-env.ts)
+  const file = await readFileDefaults(source);
+  const config = loadConfig({ ...source, ...(file?.env ?? {}) });
+  config.externalAs = file?.externalAs ?? null;
   const logger = createLogger({ level: config.env.LOG_LEVEL, pretty: config.env.LOG_PRETTY, instanceId: config.instanceId });
   for (const w of config.warnings) logger.warn(w);
+  for (const w of file?.warnings ?? []) logger.warn(`neurouter.yaml: ${w}`);
   const dbs = createDatabases({ databaseUrl: config.databaseUrl, auditDatabaseUrl: config.auditDatabaseUrl, poolMax: config.env.DB_POOL_MAX, auditPoolMax: config.env.AUDIT_DB_POOL_MAX, onWarn: (msg, err) => logger.warn({ err }, msg) });
   logger.info({ dialect: dbs.main.dialect, database: redactDatabaseUrl(config.databaseUrl) }, 'database configured');
   if (config.env.MIGRATE_ON_START) {
@@ -60,18 +81,6 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     const pgc = new PostgresCoordination(dbs.main.db, systemClock, () => new pg.Client({ connectionString: config.databaseUrl, application_name: 'neurouter-listen' }), logger);
     await pgc.start();
     coordination = pgc;
-  }
-  // auth.externalAs comes from neurouter.yaml (pre-parsed so the authenticator can be built with it)
-  if (config.env.NEUROUTER_CONFIG && config.env.NEUROUTER_CONFIG_MODE !== 'console') {
-    try {
-      const { readFileSync } = await import('node:fs');
-      const { parseConfigYaml } = await import('./controlplane/config-sync/reconcile.js');
-      const p = parseConfigYaml(readFileSync(config.env.NEUROUTER_CONFIG, 'utf8'));
-      const ext = p.config?.auth?.externalAs;
-      if (ext) config.externalAs = { issuer: ext.issuer, ...(ext.jwksUri ? { jwksUri: ext.jwksUri } : {}), audience: ext.audience ?? 'auto', requiredScopes: ext.requiredScopes ?? [] };
-    } catch {
-      // reported by the reconcile below
-    }
   }
   const services = createServices({ config, logger, dbs, clock: systemClock, coordination, version: SERVER_VERSION, ...(opts.services ?? {}) });
   await initServices(services);

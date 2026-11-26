@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { generateKeyEnv } from '@neurouter/server';
 import { isAbsolute, resolve } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 
 /** Reads a spec from a file path or an http(s) URL. */
 export async function readSpec(fileOrUrl: string): Promise<Uint8Array> {
@@ -10,6 +11,16 @@ export async function readSpec(fileOrUrl: string): Promise<Uint8Array> {
     return new Uint8Array(await res.arrayBuffer());
   }
   return readFileSync(fileOrUrl);
+}
+
+/** `instance.publicUrl` of a neurouter.yaml (the server applies it when PUBLIC_URL is unset). */
+function filePublicUrl(path: string): string | null {
+  try {
+    const doc = parseYaml(readFileSync(path, 'utf8')) as { instance?: { publicUrl?: unknown } } | null;
+    return typeof doc?.instance?.publicUrl === 'string' ? doc.instance.publicUrl : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Environment for an in-process server rooted at `dataDir` (SQLite `<data>/neurouter.db`). */
@@ -34,7 +45,7 @@ export function serverEnv(opts: { data?: string; port?: string | number; host?: 
   }
   if (opts.port !== undefined) env.PORT = String(opts.port);
   if (opts.host) env.HOST = opts.host;
-  if (!env.PUBLIC_URL && opts.port !== undefined && Number(opts.port) > 0) env.PUBLIC_URL = `http://${opts.host && opts.host !== '0.0.0.0' ? (opts.host === '127.0.0.1' ? 'localhost' : opts.host) : 'localhost'}:${opts.port}`;
+  if (!env.PUBLIC_URL && !(opts.config && filePublicUrl(opts.config)) && opts.port !== undefined && Number(opts.port) > 0) env.PUBLIC_URL = `http://${opts.host && opts.host !== '0.0.0.0' ? (opts.host === '127.0.0.1' ? 'localhost' : opts.host) : 'localhost'}:${opts.port}`;
   if (opts.config) env.NEUROUTER_CONFIG = isAbsolute(opts.config) ? opts.config : resolve(opts.config);
   if (!opts.embeddings && env.EMBEDDINGS_ENABLED === undefined) env.EMBEDDINGS_ENABLED = 'false';
   env.NODE_ENV ??= 'development';

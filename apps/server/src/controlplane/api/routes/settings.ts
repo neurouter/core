@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { stringify } from 'yaml';
 import { createLlmClient } from '@neurouter/evals';
-import { api, DEFAULT_CODE_LIMITS, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
+import { api, DEFAULT_CODE_LIMITS, parseSecretRef, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
 import type { CommittedAuditRow } from '../../../kernel/audit/writer.js';
 import { pingDatabase } from '../../../kernel/db/index.js';
 import { toIso, toIsoOrNull } from '../../../kernel/lib/clock.js';
@@ -46,7 +46,8 @@ function fileManagedSettings(c: ApiContext): string[] {
     if (st?.evals?.generatorModel) out.push('models.generatorModel');
     if (st?.evals?.effort) out.push('models.effort');
     if (st?.evals?.fallbacks) out.push('models.fallbacks');
-    if (st?.evals?.apiKey) out.push('models.anthropicKey', 'models.apiKeys');
+    // applied at boot only for env:NAME references (file-env.ts); other references are ignored with a warning
+    if (st?.evals?.apiKey && parseSecretRef(st.evals.apiKey)?.kind === 'env') out.push('models.anthropicKey', 'models.apiKeys');
     if (st?.discovery) out.push('discovery.nativeSearchClients');
     if (st?.audit) out.push('audit.storeOutputs');
     return out;

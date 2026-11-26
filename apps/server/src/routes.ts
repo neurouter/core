@@ -1,3 +1,4 @@
+import { SETTINGS_CHANNEL } from './kernel/settings/settings.service.js';
 import type { FastifyInstance } from 'fastify';
 import type { Services } from './deps.js';
 import { mcpRoutes } from './dataplane/mcp/route.js';
@@ -18,7 +19,10 @@ export function routePlugins(s: Services, extra: Array<(app: FastifyInstance) =>
     return usageCache.get(environmentId)?.tools ?? [];
   };
   let nativeClients: string[] = [];
-  void s.settings.get('nativeSearchClients').then((v) => (nativeClients = v)).catch(() => {});
+  const loadNativeClients = () => void s.settings.get('nativeSearchClients').then((v) => (nativeClients = v)).catch(() => {});
+  loadNativeClients();
+  // console edits and neurouter.yaml reloads change it at runtime
+  s.coord.subscribe(SETTINGS_CHANNEL, () => loadNativeClients());
   return [
     async (app) => {
       await mcpRoutes(app, {

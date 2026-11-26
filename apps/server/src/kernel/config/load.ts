@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { fileURLToPath } from 'node:url';
+import type { Scope } from '@neurouter/shared';
 import { Env, parseMasterKeys } from './env.js';
 import { dialectOf, type Dialect } from '../db/url.js';
 
@@ -14,7 +15,7 @@ export interface Config {
   resourceUri: (serverSlug: string, envSlug: string) => string;
   localLink: boolean;
   /** External AS passthrough (§13.4), from neurouter.yaml `auth.externalAs`; set after config load. */
-  externalAs: { issuer: string; jwksUri?: string; audience: string; requiredScopes: string[] } | null;
+  externalAs: { issuer: string; jwksUri?: string; audience: string; requiredScopes: string[]; scopeMap?: Record<string, Scope> } | null;
   configMode: 'file' | 'hybrid' | 'console';
   instanceId: string;
   dialect: Dialect;

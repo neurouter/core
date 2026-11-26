@@ -14,6 +14,7 @@ import { CONFIG_CHANGED, type UpstreamAuthDescriptor } from '../../kernel/runtim
 import type { SettingsService } from '../../kernel/settings/settings.service.js';
 import type { ServersService } from '../servers/servers.service.js';
 import type { SpecFetcher } from '../servers/fetch-spec.js';
+import { configWarnings } from './file-env.js';
 
 export interface ParsedConfig {
   ok: boolean;
@@ -50,6 +51,7 @@ export function parseConfigYaml(text: string, file = 'neurouter.yaml'): ParsedCo
     }
     return { ok: false, config: null, diagnostics, lines, hash };
   }
+  diagnostics.push(...configWarnings(parsed.data, (p) => lines.get(p) ?? 1, file));
   return { ok: true, config: parsed.data, diagnostics, lines, hash };
 }
 
@@ -278,6 +280,12 @@ export class ConfigSync {
     if (!st) return;
     if (st.codeMode?.enabled !== undefined) await this.d.settings.set('codeModeEnabled', st.codeMode.enabled);
     if (st.evals?.model) await this.d.settings.set('evalModel', st.evals.model);
+    if (st.evals?.judgeModel) await this.d.settings.set('judgeModel', st.evals.judgeModel);
+    if (st.evals?.generatorModel) await this.d.settings.set('generatorModel', st.evals.generatorModel);
+    if (st.evals?.fallbacks) await this.d.settings.set('evalFallbacks', st.evals.fallbacks);
+    if (st.discovery) await this.d.settings.set('nativeSearchClients', st.discovery.nativeSearchClients);
+    if (st.audit) await this.d.settings.set('auditStoreFullOutput', st.audit.storeOutputs);
+    // settings.tasks: deprecated, ignored (warned by parseConfigYaml); evals.apiKey is read at boot (file-env.ts)
     if (st.evals?.effort) await this.d.settings.set('evalEffort', st.evals.effort);
     if (st.evals?.repeats) await this.d.settings.set('evalRepeats', st.evals.repeats);
     if (st.retentionDays) await this.d.settings.set('retentionDays', st.retentionDays);

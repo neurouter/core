@@ -53,4 +53,11 @@ describe('external AS passthrough (§13.4)', () => {
     const out = await verifier.verify(await sign({ scope: 'mcp:write' }), RES);
     expect(out).toMatchObject({ ok: false, error: 'insufficient_scope' });
   });
+
+  it('a scopeMap (neurouter.yaml auth.externalAs.scopeMap, resolved at boot) maps the AS\'s own scope names', async () => {
+    const mapped = new ExternalJwtVerifier({ issuer: ISS, audience: 'auto', requiredScopes: [], scopeMap: { 'mcp:tools': 'tools:read', 'orders.read': 'tools:read', 'orders.write': 'tools:write' } }, { keySource: (verifier as unknown as { opts: { keySource: never } }).opts.keySource });
+    const out = await mapped.verify(await sign({ scope: 'orders.read orders.write' }), RES);
+    expect(out.ok && out.principal.scopes.sort()).toEqual(['tools:read', 'tools:write']);
+    expect((await mapped.verify(await sign({ scope: 'orders.write' }), RES)).ok).toBe(false); // still needs a read scope
+  });
 });
