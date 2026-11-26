@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateSuite } from './generate.js';
+import { generateSuite, normalizeAssertion } from './generate.js';
 import { ScriptedLlmClient, llmResponse } from './llm/fake.js';
 import { LlmKeyError } from './llm/types.js';
 import type { GenTool } from './types.js';
@@ -55,5 +55,17 @@ describe('generateSuite', () => {
   it('propagates key errors', async () => {
     const llm = new ScriptedLlmClient([new LlmKeyError()]);
     await expect(generateSuite({ llm, model: 'm', server: { name: 'P', slug: 'p' }, tools, samples: {}, counts: { single: 1, multi: 0, ambiguous: 0, impossible: 0 } })).rejects.toBeInstanceOf(LlmKeyError);
+  });
+});
+
+describe('normalizeAssertion', () => {
+  it('rewrites the keyed form models produce into the typed DSL', () => {
+    expect(normalizeAssertion({ called: { tool: 'meta_get_zen', args: {}, minTimes: 1 } })).toEqual({ type: 'called', tool: 'meta_get_zen', args: {}, minTimes: 1 });
+    expect(normalizeAssertion({ max_calls: 1 })).toEqual({ type: 'max_calls', n: 1 });
+    expect(normalizeAssertion({ no_writes: true })).toEqual({ type: 'no_writes' });
+    expect(normalizeAssertion({ framing: 'Answer with the Zen of GitHub.' })).toEqual({ type: 'framing' });
+    expect(normalizeAssertion({ answer_contains: 'octocat' })).toEqual({ type: 'answer_contains', anyOf: ['octocat'] });
+    expect(normalizeAssertion({ type: 'no_writes' })).toEqual({ type: 'no_writes' });
+    expect(normalizeAssertion({ bogus: 1 })).toEqual({ bogus: 1 });
   });
 });

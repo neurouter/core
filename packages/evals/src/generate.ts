@@ -1,4 +1,4 @@
-import { Assertion, EvalCategory, type ReferenceCall } from '@neurouter/shared';
+import { Assertion, ASSERTION_TYPES, EvalCategory, type ReferenceCall } from '@neurouter/shared';
 import { GENERATOR_MARKER, GENERATOR_PROMPT_VERSION, GENERATOR_SYSTEM, markerMessage } from './prompts.js';
 import { parseJsonText, textOf, type LlmClient } from './llm/types.js';
 import type { EvalTask, GeneratedTask, GeneratorCategoryInput, GenTool } from './types.js';
@@ -152,6 +152,25 @@ export function normPrompt(p: string): string {
   return p.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+/**
+ * Models often write the DSL keyed by type (`{"called":{"tool":"x"}}`, `{"max_calls":1}`, `{"no_writes":true}`,
+ * `{"framing":"…"}`) instead of `{"type":"called",…}`; rewrite that form before validation.
+ */
+export function normalizeAssertion(a: unknown): unknown {
+  if (!a || typeof a !== 'object' || Array.isArray(a) || 'type' in a) return a;
+  const entries = Object.entries(a as Record<string, unknown>);
+  if (entries.length !== 1) return a;
+  const [type, v] = entries[0]!;
+  if (!(ASSERTION_TYPES as readonly string[]).includes(type)) return a;
+  if (v && typeof v === 'object' && !Array.isArray(v)) return { type, ...(v as Record<string, unknown>) };
+  if (type === 'max_calls' && typeof v === 'number') return { type, n: v };
+  if (type === 'answer_matches' && typeof v === 'string') return { type, regex: v };
+  if (type === 'judge' && typeof v === 'string') return { type, criterion: v };
+  if (type === 'answer_contains' && (typeof v === 'string' || Array.isArray(v))) return { type, anyOf: Array.isArray(v) ? v : [v] };
+  if (type === 'called' || type === 'not_called') return typeof v === 'string' ? { type, tool: v } : a;
+  return { type };
+}
+
 /** Deterministic validation (§15.2 step 4). */
 export async function validateGenerated(
   g: GeneratedTask,
@@ -164,7 +183,7 @@ export async function validateGenerated(
   if (typeof g.prompt !== 'string' || !g.prompt.trim()) errors.push('empty prompt');
   const assertions: Assertion[] = [];
   for (const a of Array.isArray(g.assertions) ? g.assertions : []) {
-    const p = Assertion.safeParse(a);
+    const p = Assertion.safeParse(normalizeAssertion(a));
     if (p.success) assertions.push(p.data);
     else errors.push(`invalid assertion ${JSON.stringify(a).slice(0, 120)}`);
   }
