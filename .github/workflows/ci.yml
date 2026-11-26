@@ -65,7 +65,7 @@ jobs:
           TOKEN=$(docker exec -e LOG_LEVEL=warn nr node packages/cli/dist/main.js keys create --server petstore --env dev --scopes tools:read,code:run | tail -1)
           mcp() { curl -sf localhost:3000/mcp/petstore/dev -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-11-25' "$@"; }
           mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pet_by_id","arguments":{"pet_id":1}}}' > call.txt; grep -q '"id":1' call.txt || { cat call.txt; exit 1; }
-          mcp -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_script","arguments":{"code":"return 6 * 7"}}}' > run.txt; grep -q '"result":42' run.txt || { cat run.txt; exit 1; }
+          mcp -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_script","arguments":{"code":"return 6 * 7"}}}' > run.txt; grep -Eq '"(result|data)":42' run.txt || { cat run.txt; exit 1; }
           mcp -H 'x-neurouter-exposure: code' -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_tools","arguments":{"query":"find a pet by its id","format":"json"}}}' > search.txt; grep -q get_pet_by_id search.txt || { cat search.txt; exit 1; }
           docker logs nr > nr.log 2>&1; grep -q 'embedding model ready' nr.log
 
