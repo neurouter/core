@@ -44,11 +44,11 @@ export async function taskRoutes(app: FastifyInstance, c: ApiContext): Promise<v
     if (q.hasErrors !== undefined) qb = q.hasErrors ? qb.where('error_count', '>', 0) : qb.where('error_count', '=', 0);
     if (q.hasWrites !== undefined) qb = q.hasWrites ? qb.where('write_count', '>', 0) : qb.where('write_count', '=', 0);
     if (q.origin) {
-      const evalKeys = db.selectFrom('api_keys').select('id').where('purpose', '=', 'eval');
+      const evalKeys = db.selectFrom('api_keys').where('tenant_id', '=', tenantOf(req)).select('id').where('purpose', '=', 'eval');
       qb = q.origin === 'eval' ? qb.where('api_key_id', 'in', evalKeys) : qb.where((eb) => eb.or([eb('api_key_id', 'is', null), eb('api_key_id', 'not in', evalKeys)]));
     }
     if (q.tool) {
-      const ids = await c.dbs.audit.db.selectFrom('audit_log').select('task_id').distinct().where('tool_name', '=', q.tool).where('ts', '>=', from).where('task_id', 'is not', null).limit(5000).execute();
+      const ids = await c.dbs.audit.db.selectFrom('audit_log').where('tenant_id', '=', tenantOf(req)).select('task_id').distinct().where('tool_name', '=', q.tool).where('ts', '>=', from).where('task_id', 'is not', null).limit(5000).execute();
       const set = ids.map((r) => r.task_id!).filter(Boolean);
       qb = qb.where('id', 'in', set.length ? set : ['-']);
     }
@@ -68,9 +68,9 @@ export async function taskRoutes(app: FastifyInstance, c: ApiContext): Promise<v
     const t = await taskOr404(req, req.params.id);
     const tl = await tr.timeline(t.id);
     const [needs, issues, evalRun] = await Promise.all([
-      db.selectFrom('unmet_needs').select(['id', 'group_id', 'intent', 'created_at']).where('task_id', '=', t.id).execute(),
-      db.selectFrom('issues').select(['id', 'tool_name', 'problem', 'status', 'created_at']).where('task_id', '=', t.id).execute(),
-      db.selectFrom('eval_task_runs').select('run_id').where('task_id_neurouter', '=', t.id).executeTakeFirst(),
+      db.selectFrom('unmet_needs').where('tenant_id', '=', tenantOf(req)).select(['id', 'group_id', 'intent', 'created_at']).where('task_id', '=', t.id).execute(),
+      db.selectFrom('issues').where('tenant_id', '=', tenantOf(req)).select(['id', 'tool_name', 'problem', 'status', 'created_at']).where('task_id', '=', t.id).execute(),
+      db.selectFrom('eval_task_runs').where('tenant_id', '=', tenantOf(req)).select('run_id').where('task_id_neurouter', '=', t.id).executeTakeFirst(),
     ]);
     return {
       ...(await tr.taskRow(t)),
@@ -105,9 +105,9 @@ export async function taskRoutes(app: FastifyInstance, c: ApiContext): Promise<v
     const r = await db.selectFrom('script_runs').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!r) throw AppError.notFound('Script run');
     await c.auditStore.flush().catch(() => {});
-    const inner = (await c.dbs.audit.db.selectFrom('audit_log').selectAll().where('script_run_id', '=', r.id).where('kind', '=', 'tool_call').orderBy('seq').limit(500).execute()) as AuditLogTable[];
+    const inner = (await c.dbs.audit.db.selectFrom('audit_log').where('tenant_id', '=', tenantOf(req)).selectAll().where('script_run_id', '=', r.id).where('kind', '=', 'tool_call').orderBy('seq').limit(500).execute()) as AuditLogTable[];
     const refs = await tr.refs(r.server_id, r.environment_id);
-    const recipe = await db.selectFrom('script_runs').select((eb) => eb.fn.countAll<number>().as('n')).where('code_hash', '=', r.code_hash).executeTakeFirst();
+    const recipe = await db.selectFrom('script_runs').where('tenant_id', '=', tenantOf(req)).select((eb) => eb.fn.countAll<number>().as('n')).where('code_hash', '=', r.code_hash).executeTakeFirst();
     const err = parseJsonColumn<Record<string, unknown>>(r.error);
     const stats = parseJsonColumn<Record<string, number>>(r.stats);
     const planned = parseJsonColumn<Array<Record<string, unknown>>>(r.planned_changes) ?? [];

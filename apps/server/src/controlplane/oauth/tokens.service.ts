@@ -127,12 +127,13 @@ export class OAuthTokensService {
   async refresh(client: ClientRow, p: { refreshToken?: string | undefined; resource?: string | undefined; scope?: string | undefined }): Promise<TokenResponse> {
     if (!p.refreshToken) throw new OAuthError('invalid_request', 'refresh_token is required');
     const now = this.clock.now();
+    // tenant-scope: by-secret-hash
     const t = await this.db.selectFrom('oauth_tokens').selectAll().where('token_hash', '=', this.hash(p.refreshToken)).where('kind', '=', 'refresh').executeTakeFirst();
     if (!t) throw new OAuthError('invalid_grant', 'Unknown refresh token');
     if (t.client_id !== client.id) throw new OAuthError('invalid_grant', 'Refresh token was issued to another client');
     if (await isClientBlocked(this.db, t.tenant_id, client.id)) throw new OAuthError('invalid_grant', 'This client is blocked in this organization');
     if (t.revoked_at !== null) {
-      const rotated = await this.db.selectFrom('oauth_tokens').select('id').where('parent_id', '=', t.id).limit(1).executeTakeFirst();
+      const rotated = await this.db.selectFrom('oauth_tokens').where('tenant_id', '=', t.tenant_id).select('id').where('parent_id', '=', t.id).limit(1).executeTakeFirst();
       if (rotated) await this.revokeFamily(t.family_id, t.tenant_id, 'rotated refresh token reused');
       throw new OAuthError('invalid_grant', 'Refresh token is no longer valid');
     }
@@ -143,13 +144,13 @@ export class OAuthTokensService {
       const had = t.scopes.split(/\s+/);
       if (asked.some((s) => !had.includes(s))) throw new OAuthError('invalid_scope', 'A refresh cannot widen the scope');
     }
-    const consent = await this.db.selectFrom('oauth_consents').select('id').where('user_id', '=', t.user_id).where('client_id', '=', t.client_id).where('environment_id', '=', t.environment_id).where('revoked_at', 'is', null).executeTakeFirst();
+    const consent = await this.db.selectFrom('oauth_consents').where('tenant_id', '=', t.tenant_id).select('id').where('user_id', '=', t.user_id).where('client_id', '=', t.client_id).where('environment_id', '=', t.environment_id).where('revoked_at', 'is', null).executeTakeFirst();
     const user = await this.db.selectFrom('users').select('status').where('id', '=', t.user_id).executeTakeFirst();
     if (!consent || user?.status !== 'active') {
       await this.revokeFamily(t.family_id, t.tenant_id, 'consent or user no longer active');
       throw new OAuthError('invalid_grant', 'The authorization was revoked');
     }
-    const res = await this.db.updateTable('oauth_tokens').set({ revoked_at: now, last_used_at: now }).where('id', '=', t.id).where('revoked_at', 'is', null).executeTakeFirst();
+    const res = await this.db.updateTable('oauth_tokens').where('tenant_id', '=', t.tenant_id).set({ revoked_at: now, last_used_at: now }).where('id', '=', t.id).where('revoked_at', 'is', null).executeTakeFirst();
     if (!Number(res.numUpdatedRows)) {
       await this.revokeFamily(t.family_id, t.tenant_id, 'concurrent refresh token reuse');
       throw new OAuthError('invalid_grant', 'Refresh token is no longer valid');
@@ -161,19 +162,21 @@ export class OAuthTokensService {
   /** RFC 7009: refresh token → whole family; access token → that token. Unknown tokens are ignored. */
   async revoke(client: ClientRow, token: string | undefined): Promise<void> {
     if (!token) throw new OAuthError('invalid_request', 'token is required');
+    // tenant-scope: by-secret-hash
     const t = await this.db.selectFrom('oauth_tokens').selectAll().where('token_hash', '=', this.hash(token)).executeTakeFirst();
     if (!t || t.client_id !== client.id) return;
     if (t.kind === 'refresh') {
       await this.revokeFamily(t.family_id, t.tenant_id, 'revoked by client');
       return;
     }
-    await this.db.updateTable('oauth_tokens').set({ revoked_at: this.clock.now() }).where('id', '=', t.id).where('revoked_at', 'is', null).execute();
+    await this.db.updateTable('oauth_tokens').where('tenant_id', '=', t.tenant_id).set({ revoked_at: this.clock.now() }).where('id', '=', t.id).where('revoked_at', 'is', null).execute();
     await this.coord.publish(AUTH_REVOKED_CHANNEL, { oauthTokenId: t.id });
   }
 
   /* ---------------------------------------------------------------- grants (console §14.8) */
 
-  async grants(q: { environmentId?: string | undefined; userId?: string | undefined } = {}): Promise<OAuthGrantRow[]> {
+  /** Grants of one tenant. */
+  async grants(tenantId: string, q: { environmentId?: string | undefined; userId?: string | undefined } = {}): Promise<OAuthGrantRow[]> {
     let qb = this.db
       .selectFrom('oauth_consents as c')
       .innerJoin('oauth_clients as cl', 'cl.id', 'c.client_id')
@@ -181,11 +184,12 @@ export class OAuthTokensService {
       .innerJoin('environments as e', 'e.id', 'c.environment_id')
       .innerJoin('servers as s', 's.id', 'e.server_id')
       .select(['c.id', 'c.client_id', 'c.user_id', 'c.environment_id', 'c.scopes', 'c.created_at', 'cl.client_name', 'cl.client_id as public_client_id', 'u.email', 'e.slug as env_slug', 'e.kind as env_kind', 's.id as server_id', 's.slug as server_slug'])
+      .where('c.tenant_id', '=', tenantId)
       .where('c.revoked_at', 'is', null);
     if (q.environmentId) qb = qb.where('c.environment_id', '=', q.environmentId);
     if (q.userId) qb = qb.where('c.user_id', '=', q.userId);
     const rows = await qb.orderBy('c.created_at', 'desc').execute();
-    const used = rows.length ? await this.db.selectFrom('oauth_tokens').select(['client_id', 'user_id', 'environment_id', (eb) => eb.fn.max('last_used_at').as('last')]).groupBy(['client_id', 'user_id', 'environment_id']).execute() : [];
+    const used = rows.length ? await this.db.selectFrom('oauth_tokens').select(['client_id', 'user_id', 'environment_id', (eb) => eb.fn.max('last_used_at').as('last')]).where('tenant_id', '=', tenantId).groupBy(['client_id', 'user_id', 'environment_id']).execute() : [];
     return rows.map((r) => {
       const last = used.find((u) => u.client_id === r.client_id && u.user_id === r.user_id && u.environment_id === r.environment_id)?.last;
       return {
@@ -216,7 +220,9 @@ export class OAuthTokensService {
   /** Housekeeping: expired codes, authorization requests, long-dead tokens. */
   async cleanup(now = this.clock.now()): Promise<{ codes: number; requests: number; tokens: number }> {
     const codes = await this.db.deleteFrom('oauth_codes').where('expires_at', '<', now - 3_600_000).executeTakeFirst();
+    // tenant-scope: system-job (expired rows of every tenant)
     const requests = await this.db.deleteFrom('oauth_authz_requests').where('expires_at', '<', now).executeTakeFirst();
+    // tenant-scope: system-job (expired rows of every tenant)
     const tokens = await this.db.deleteFrom('oauth_tokens').where('expires_at', '<', now - 86_400_000).executeTakeFirst();
     return { codes: Number(codes.numDeletedRows), requests: Number(requests.numDeletedRows), tokens: Number(tokens.numDeletedRows) };
   }

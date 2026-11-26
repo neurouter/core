@@ -22,12 +22,12 @@ export class OverlayDrafts {
 
   async published(s: ServerRowDb): Promise<{ yaml: string; rev: number | null }> {
     if (!s.published_overlay_revision_id) return { yaml: EMPTY, rev: null };
-    const r = await this.c.dbs.main.db.selectFrom('overlay_revisions').select(['yaml', 'rev']).where('id', '=', s.published_overlay_revision_id).executeTakeFirst();
+    const r = await this.c.dbs.main.db.selectFrom('overlay_revisions').where('tenant_id', '=', s.tenant_id).select(['yaml', 'rev']).where('id', '=', s.published_overlay_revision_id).executeTakeFirst();
     return r ? { yaml: r.yaml || EMPTY, rev: r.rev } : { yaml: EMPTY, rev: null };
   }
 
   async current(s: ServerRowDb) {
-    const d = await this.c.dbs.main.db.selectFrom('overlay_drafts').selectAll().where('server_id', '=', s.id).executeTakeFirst();
+    const d = await this.c.dbs.main.db.selectFrom('overlay_drafts').where('tenant_id', '=', s.tenant_id).selectAll().where('server_id', '=', s.id).executeTakeFirst();
     const pub = await this.published(s);
     if (d) return { yaml: d.yaml, basedOnRev: d.based_on_rev, updatedAt: d.updated_at, updatedBy: d.updated_by, pub };
     return { yaml: pub.yaml, basedOnRev: pub.rev, updatedAt: null as number | null, updatedBy: null as string | null, pub };
@@ -80,8 +80,11 @@ export class OverlayDrafts {
 
 async function publishResult(c: ApiContext, revisionId: string, buildId: string, pinTo: string[] | undefined) {
   const db = c.dbs.main.db;
+  // tenant-scope: child-of-scoped (revision and build just published for a tenant-scoped server)
   const rev = await db.selectFrom('overlay_revisions').selectAll().where('id', '=', revisionId).executeTakeFirstOrThrow();
+  // tenant-scope: child-of-scoped (revision and build just published for a tenant-scoped server)
   const b = await db.selectFrom('builds').selectAll().where('id', '=', buildId).executeTakeFirstOrThrow();
+  // tenant-scope: child-of-scoped (revision and build just published for a tenant-scoped server)
   const pinned = await db.selectFrom('environments').select(['id', 'slug']).where('build_id', '=', buildId).execute();
   void pinTo;
   return { revision: await c.views.overlayRow(rev), build: await c.views.buildRow(b), pinnedEnvironments: pinned };
@@ -124,7 +127,7 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
 
   route(app, 'overlays.discardDraft', api.overlays.discardDraft, async (req) => {
     const s = await serverOr404(c, req, req.params.id);
-    await db.deleteFrom('overlay_drafts').where('server_id', '=', s.id).execute();
+    await db.deleteFrom('overlay_drafts').where('tenant_id', '=', tenantOf(req)).where('server_id', '=', s.id).execute();
   });
 
   route(app, 'overlays.publish', api.overlays.publish, async (req) => {
@@ -134,11 +137,11 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
     const cur = await drafts.current(s);
     drafts.checkIfMatch(req, drafts.etag(cur.yaml, cur.basedOnRev));
     if (req.body.pinTo) {
-      const own = await db.selectFrom('environments').select('id').where('server_id', '=', s.id).where('id', 'in', req.body.pinTo.length ? req.body.pinTo : ['-']).execute();
+      const own = await db.selectFrom('environments').where('tenant_id', '=', tenantOf(req)).select('id').where('server_id', '=', s.id).where('id', 'in', req.body.pinTo.length ? req.body.pinTo : ['-']).execute();
       if (own.length !== req.body.pinTo.length) throw AppError.validation('pinTo contains environments of another server', [{ path: ['pinTo'], message: 'unknown environment', code: 'environment_mismatch' }]);
     }
     const out = await c.servers.publishOverlay(tenantOf(req), s.id, cur.yaml, { message: req.body.message, source: 'console', createdBy: u.id, basedOnRev: cur.basedOnRev, ...(req.body.pinTo ? { pinTo: req.body.pinTo } : {}) });
-    await db.deleteFrom('overlay_drafts').where('server_id', '=', s.id).execute();
+    await db.deleteFrom('overlay_drafts').where('tenant_id', '=', tenantOf(req)).where('server_id', '=', s.id).execute();
     return publishResult(c, out.revisionId, out.build.build.id, req.body.pinTo);
   });
 
@@ -146,7 +149,7 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
     const s = await serverOr404(c, req, req.params.id);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
-    let qb = db.selectFrom('overlay_revisions').selectAll().where('server_id', '=', s.id);
+    let qb = db.selectFrom('overlay_revisions').where('tenant_id', '=', tenantOf(req)).selectAll().where('server_id', '=', s.id);
     if (key) qb = qb.where('rev', '<', Number(key[0]));
     const rows = await qb.orderBy('rev', 'desc').limit(limit + 1).execute();
     const page = toPage(rows, limit, (r) => r, (r) => [r.rev]);
@@ -162,7 +165,7 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
   const yamlAt = async (s: ServerRowDb, ref: 'draft' | number): Promise<string> => {
     if (ref === 'draft') return (await drafts.current(s)).yaml;
     if (ref === 0) return EMPTY;
-    const r = await db.selectFrom('overlay_revisions').select('yaml').where('server_id', '=', s.id).where('rev', '=', ref).executeTakeFirst();
+    const r = await db.selectFrom('overlay_revisions').where('tenant_id', '=', s.tenant_id).select('yaml').where('server_id', '=', s.id).where('rev', '=', ref).executeTakeFirst();
     if (!r) throw AppError.notFound(`Overlay revision ${ref}`);
     return r.yaml;
   };
@@ -193,7 +196,7 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
     const yaml = await yamlAt(s, req.body.toRev);
     const cur = await drafts.published(s);
     const out = await c.servers.publishOverlay(tenantOf(req), s.id, yaml, { message: req.body.message ?? `Revert to v${req.body.toRev}`, source: 'revert', createdBy: u.id, basedOnRev: cur.rev });
-    await db.deleteFrom('overlay_drafts').where('server_id', '=', s.id).execute();
+    await db.deleteFrom('overlay_drafts').where('tenant_id', '=', tenantOf(req)).where('server_id', '=', s.id).execute();
     return publishResult(c, out.revisionId, out.build.build.id, undefined);
   });
 

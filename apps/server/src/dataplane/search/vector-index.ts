@@ -63,11 +63,13 @@ abstract class BaseVectorIndex implements VectorIndex {
   }
 
   async hashes(modelId: string): Promise<Map<string, string>> {
+    // tenant-scope: system-job (index maintenance across tenants)
     const rows = await this.db.selectFrom('tool_embeddings').select(['tool_id', 'text_hash']).where('model_id', '=', modelId).execute();
     return new Map(rows.map((r) => [r.tool_id, r.text_hash]));
   }
 
   async clear(): Promise<void> {
+    // tenant-scope: system-job (index maintenance across tenants)
     await this.db.deleteFrom('tool_embeddings').execute();
   }
 

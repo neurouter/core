@@ -371,10 +371,10 @@ export class EvalsService {
       const fallbacks = await this.d.settings.get('evalFallbacks', tenantId);
       const judgeModel = (await this.d.settings.get('judgeModel', tenantId)) ?? models[0]!;
       const total = tasks.length * models.length * modes.length * run.repeats;
-      const existing = new Set((await db.selectFrom('eval_task_runs').select(['task_id', 'model', 'mode', 'attempt']).where('run_id', '=', runId).execute()).map((r) => `${r.task_id}|${r.model}|${r.mode}|${r.attempt}`));
+      const existing = new Set((await db.selectFrom('eval_task_runs').where('tenant_id', '=', tenantId).select(['task_id', 'model', 'mode', 'attempt']).where('run_id', '=', runId).execute()).map((r) => `${r.task_id}|${r.model}|${r.mode}|${r.attempt}`));
       const taskIds = new Map((await this.suiteTasks(tenantId, run.suite_id)).map((t) => [t.key, t.id]));
       const usage: Record<string, { inputTokens: number; outputTokens: number }> = {};
-      const isTemp = (await db.selectFrom('builds').select('temporary').where('id', '=', run.build_id).executeTakeFirst())?.temporary === 1;
+      const isTemp = (await db.selectFrom('builds').where('tenant_id', '=', tenantId).select('temporary').where('id', '=', run.build_id).executeTakeFirst())?.temporary === 1;
       const pinned = env.build_id;
       const results = await runSuite({
         llm,
@@ -441,16 +441,16 @@ export class EvalsService {
             .execute();
         },
         onProgress: (done) => {
-          void db.updateTable('eval_runs').set({ progress: toJsonColumn({ done, total }) }).where('id', '=', runId).execute().catch(() => {});
+          void db.updateTable('eval_runs').where('tenant_id', '=', tenantId).set({ progress: toJsonColumn({ done, total }) }).where('id', '=', runId).execute().catch(() => {});
           this.d.onProgress?.(tenantId, runId, done, total);
         },
       });
       if (ac.signal.aborted) return;
       const all = await this.taskResults(tenantId, runId);
-      const lint = (await db.selectFrom('builds').select('lint_score').where('id', '=', run.build_id).executeTakeFirst())?.lint_score ?? 0;
+      const lint = (await db.selectFrom('builds').where('tenant_id', '=', tenantId).select('lint_score').where('id', '=', run.build_id).executeTakeFirst())?.lint_score ?? 0;
       const score = scoreRun({ tasks, results: all, models, modes, lintScore: lint });
       await db
-        .updateTable('eval_runs')
+        .updateTable('eval_runs').where('tenant_id', '=', tenantId)
         .set({ status: 'succeeded', score: toJsonColumn(score), headline: score.headline, recommended_mode: score.recommendedMode, confidence: score.confidence, usage: toJsonColumn(usage), progress: toJsonColumn({ done: total, total }), ended_at: this.d.clock.now() })
         .where('id', '=', runId)
         .execute();
@@ -460,7 +460,7 @@ export class EvalsService {
     } catch (err) {
       const msg = err instanceof AppError ? err.message : (err as Error).message;
       this.d.log.warn({ err, runId }, 'eval run failed');
-      await db.updateTable('eval_runs').set({ status: ac.signal.aborted ? 'cancelled' : 'failed', error: msg.slice(0, 1000), ended_at: this.d.clock.now() }).where('id', '=', runId).execute();
+      await db.updateTable('eval_runs').where('tenant_id', '=', tenantId).set({ status: ac.signal.aborted ? 'cancelled' : 'failed', error: msg.slice(0, 1000), ended_at: this.d.clock.now() }).where('id', '=', runId).execute();
     } finally {
       this.cancels.delete(runId);
     }
@@ -484,7 +484,7 @@ export class EvalsService {
 
   /** Stored attempt results, rebuilt as TaskRunResult (scoring, suggestions, resume). */
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
-    const rows = await this.d.db.selectFrom('eval_task_runs as r').innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
+    const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
       const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number }>(r.transcript);
       return {
@@ -536,7 +536,7 @@ export class EvalsService {
     const tools = await this.d.builds.tools(run.build_id);
     const st: SuggestTool[] = tools.map((t) => ({ name: t.name, key: t.key, title: t.title, description: t.description, inputSchema: t.inputSchema, hidden: t.hidden, tags: t.tags, write: t.risk.write, pyName: t.pyName, sourceRef: 'method' in t.sourceRef ? { ...(t.sourceRef.method ? { method: t.sourceRef.method } : {}), ...(t.sourceRef.path ? { path: t.sourceRef.path } : {}), ...(t.sourceRef.operationId ? { operationId: t.sourceRef.operationId } : {}) } : null }));
     const base = await this.publishedYaml(tenantId, run.server_id);
-    const lint = parseJsonColumn<{ rules: Array<{ rule: string; weight: number; score: number; passed: boolean; detail: string }> }>((await this.d.db.selectFrom('builds').select('lint').where('id', '=', run.build_id).executeTakeFirst())?.lint);
+    const lint = parseJsonColumn<{ rules: Array<{ rule: string; weight: number; score: number; passed: boolean; detail: string }> }>((await this.d.db.selectFrom('builds').where('tenant_id', '=', tenantId).select('lint').where('id', '=', run.build_id).executeTakeFirst())?.lint);
     const llm: LlmClient | null = await this.llm(tenantId).catch(() => null);
     const out = await suggest({
       results,
@@ -572,7 +572,7 @@ export class EvalsService {
         .values({ id: newId(), tenant_id: tenantId, run_id: runId, server_id: run.server_id, cause: sgg.cause, kind: sgg.kind, tools: toJsonColumn(sgg.tools), affected_task_ids: toJsonColumn(sgg.affectedTaskKeys.map((k) => taskIds.get(k) ?? k)), overlay_patch: JSON.stringify({ yaml: sgg.overlayPatch, ops: sgg.overlayOps }), spec_patch: sgg.specPatch, rationale: sgg.rationale, predicted_delta: sgg.predictedDelta, status: 'proposed', created_at: now, updated_at: now })
         .execute();
     }
-    return this.d.db.selectFrom('suggestions').selectAll().where('run_id', '=', runId).execute();
+    return this.d.db.selectFrom('suggestions').where('tenant_id', '=', tenantId).selectAll().where('run_id', '=', runId).execute();
   }
 
   async suggestion(tenantId: string, id: string): Promise<SuggestionRowDb> {
@@ -606,12 +606,12 @@ export class EvalsService {
     const passing = [...new Set(results.filter((r) => r.passed).map((r) => r.taskKey))].filter((k) => !affected.includes(k));
     const keys = selectVerifyTasks(affected, passing, 0.2, 7);
     const vr = await this.createRun(tenantId, { serverId: sg.server_id, suiteId: run.suite_id, environmentId: run.environment_id, models: parseJsonColumn<string[]>(run.models), modes: parseJsonColumn(run.modes), repeats: run.repeats, buildId: temp.build.id, taskKeys: keys, trigger: 'suggestion_verify', baseRunId: run.id, createdBy });
-    await this.d.db.updateTable('suggestions').set({ status: 'verifying', verify_run_id: vr.id, updated_at: this.d.clock.now() }).where('id', '=', id).execute();
+    await this.d.db.updateTable('suggestions').where('tenant_id', '=', tenantId).set({ status: 'verifying', verify_run_id: vr.id, updated_at: this.d.clock.now() }).where('id', '=', id).execute();
     return this.suggestion(tenantId, id);
   }
 
   private async finishVerify(tenantId: string, verifyRunId: string): Promise<void> {
-    const sg = await this.d.db.selectFrom('suggestions').selectAll().where('verify_run_id', '=', verifyRunId).executeTakeFirst();
+    const sg = await this.d.db.selectFrom('suggestions').where('tenant_id', '=', tenantId).selectAll().where('verify_run_id', '=', verifyRunId).executeTakeFirst();
     if (!sg) return;
     const vr = await this.run(tenantId, verifyRunId);
     const base = await this.run(tenantId, sg.run_id);
@@ -621,34 +621,34 @@ export class EvalsService {
     const rate = (rs: TaskRunResult[]) => (rs.length ? rs.filter((r) => r.passed).length / rs.length : 0);
     const suiteSize = (await this.suiteTasks(tenantId, base.suite_id)).filter((t) => t.enabled === 1).length || 1;
     const delta = Math.round(100 * 0.45 * (rate(after) - rate(before)) * (keys.length / suiteSize));
-    await this.d.db.updateTable('suggestions').set({ status: 'verified', verified_delta: delta, updated_at: this.d.clock.now() }).where('id', '=', sg.id).execute();
+    await this.d.db.updateTable('suggestions').where('tenant_id', '=', tenantId).set({ status: 'verified', verified_delta: delta, updated_at: this.d.clock.now() }).where('id', '=', sg.id).execute();
   }
 
   /** Apply (§14.11): write the patch into the overlay draft, or publish it as a new revision. */
   async apply(tenantId: string, id: string, mode: 'draft' | 'publish', message: string | null, by: string | null): Promise<{ suggestion: SuggestionRowDb; draftYaml?: string; revisionId?: string }> {
     const sg = await this.suggestion(tenantId, id);
     const ops = EvalsService.patchOf(sg).ops;
-    const draft = await this.d.db.selectFrom('overlay_drafts').selectAll().where('server_id', '=', sg.server_id).executeTakeFirst();
+    const draft = await this.d.db.selectFrom('overlay_drafts').where('tenant_id', '=', tenantId).selectAll().where('server_id', '=', sg.server_id).executeTakeFirst();
     const baseYaml = draft?.yaml ?? (await this.publishedYaml(tenantId, sg.server_id));
     const yaml = applyOverlayPatch(baseYaml, ops as never).yaml;
     const now = this.d.clock.now();
     if (mode === 'publish') {
       const r = await this.d.servers.publishOverlay(tenantId, sg.server_id, yaml, { message: message ?? `Apply suggestion ${sg.kind} (${JSON.parse(sg.tools).join(', ')})`, source: 'suggestion', createdBy: by, basedOnRev: null });
-      if (draft) await this.d.db.deleteFrom('overlay_drafts').where('server_id', '=', sg.server_id).execute();
-      await this.d.db.updateTable('suggestions').set({ status: 'applied', updated_at: now }).where('id', '=', id).execute();
+      if (draft) await this.d.db.deleteFrom('overlay_drafts').where('tenant_id', '=', tenantId).where('server_id', '=', sg.server_id).execute();
+      await this.d.db.updateTable('suggestions').where('tenant_id', '=', tenantId).set({ status: 'applied', updated_at: now }).where('id', '=', id).execute();
       return { suggestion: await this.suggestion(tenantId, id), revisionId: r.revisionId };
     }
-    const cur = await this.d.db.selectFrom('servers').select('published_overlay_revision_id').where('id', '=', sg.server_id).executeTakeFirst();
-    const basedOn = cur?.published_overlay_revision_id ? ((await this.d.db.selectFrom('overlay_revisions').select('rev').where('id', '=', cur.published_overlay_revision_id).executeTakeFirst())?.rev ?? null) : null;
-    if (draft) await this.d.db.updateTable('overlay_drafts').set({ yaml, change_count: draft.change_count + ops.length, updated_by: by, updated_at: now }).where('server_id', '=', sg.server_id).execute();
+    const cur = await this.d.db.selectFrom('servers').where('tenant_id', '=', tenantId).select('published_overlay_revision_id').where('id', '=', sg.server_id).executeTakeFirst();
+    const basedOn = cur?.published_overlay_revision_id ? ((await this.d.db.selectFrom('overlay_revisions').where('tenant_id', '=', tenantId).select('rev').where('id', '=', cur.published_overlay_revision_id).executeTakeFirst())?.rev ?? null) : null;
+    if (draft) await this.d.db.updateTable('overlay_drafts').where('tenant_id', '=', tenantId).set({ yaml, change_count: draft.change_count + ops.length, updated_by: by, updated_at: now }).where('server_id', '=', sg.server_id).execute();
     else await this.d.db.insertInto('overlay_drafts').values({ server_id: sg.server_id, tenant_id: tenantId, yaml, based_on_rev: basedOn, change_count: ops.length, changes: toJsonColumn([]), updated_by: by, updated_at: now }).execute();
-    await this.d.db.updateTable('suggestions').set({ status: 'applied', updated_at: now }).where('id', '=', id).execute();
+    await this.d.db.updateTable('suggestions').where('tenant_id', '=', tenantId).set({ status: 'applied', updated_at: now }).where('id', '=', id).execute();
     return { suggestion: await this.suggestion(tenantId, id), draftYaml: yaml };
   }
 
   async dismiss(tenantId: string, id: string): Promise<SuggestionRowDb> {
     await this.suggestion(tenantId, id);
-    await this.d.db.updateTable('suggestions').set({ status: 'dismissed', updated_at: this.d.clock.now() }).where('id', '=', id).execute();
+    await this.d.db.updateTable('suggestions').where('tenant_id', '=', tenantId).set({ status: 'dismissed', updated_at: this.d.clock.now() }).where('id', '=', id).execute();
     return this.suggestion(tenantId, id);
   }
 }

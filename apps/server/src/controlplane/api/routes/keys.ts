@@ -17,8 +17,8 @@ export async function keyRoutes(app: FastifyInstance, c: ApiContext): Promise<vo
   const db = c.dbs.main.db;
   const row = async (k: ApiKeyRowDb, anonymous: boolean): Promise<ApiKeyRow> => {
     const [s, e, o] = await Promise.all([
-      db.selectFrom('servers').select(['id', 'slug', 'name']).where('id', '=', k.server_id).executeTakeFirst(),
-      db.selectFrom('environments').select(['id', 'slug', 'name', 'kind']).where('id', '=', k.environment_id).executeTakeFirst(),
+      db.selectFrom('servers').where('tenant_id', '=', k.tenant_id).select(['id', 'slug', 'name']).where('id', '=', k.server_id).executeTakeFirst(),
+      db.selectFrom('environments').where('tenant_id', '=', k.tenant_id).select(['id', 'slug', 'name', 'kind']).where('id', '=', k.environment_id).executeTakeFirst(),
       db.selectFrom('users').select(['id', 'name', 'email']).where('id', '=', k.owner_user_id).executeTakeFirst(),
     ]);
     return {
@@ -61,9 +61,9 @@ export async function keyRoutes(app: FastifyInstance, c: ApiContext): Promise<vo
     const u = requireUser(req);
     const b = req.body;
     const out = await c.apiKeys.create({ tenantId: tenantOf(req), name: b.name, serverId: b.serverId, environmentId: b.environmentId, scopes: b.scopes, ...(b.profile ? { profile: b.profile } : {}), ...(b.expiresInDays !== undefined ? { expiresInDays: b.expiresInDays } : {}), ...(b.rateLimit ? { rateLimit: b.rateLimit } : {}), ownerUserId: u.id });
-    const s = await db.selectFrom('servers').selectAll().where('id', '=', b.serverId).executeTakeFirstOrThrow();
-    const e = await db.selectFrom('environments').selectAll().where('id', '=', b.environmentId).executeTakeFirstOrThrow();
-    const build = e.build_id ? await db.selectFrom('builds').select('visible_count').where('id', '=', e.build_id).executeTakeFirst() : null;
+    const s = await db.selectFrom('servers').where('tenant_id', '=', tenantOf(req)).selectAll().where('id', '=', b.serverId).executeTakeFirstOrThrow();
+    const e = await db.selectFrom('environments').where('tenant_id', '=', tenantOf(req)).selectAll().where('id', '=', b.environmentId).executeTakeFirstOrThrow();
+    const build = e.build_id ? await db.selectFrom('builds').where('tenant_id', '=', tenantOf(req)).select('visible_count').where('id', '=', e.build_id).executeTakeFirst() : null;
     reply.status(201);
     return { key: await row(out.key, false), token: out.token, connect: connectConfig(c, s, e, build?.visible_count ?? 0, c.ports.executorStatus().ok && e.code_mode === 1 && b.scopes.includes('code:run')), warnings: out.warnings };
   });

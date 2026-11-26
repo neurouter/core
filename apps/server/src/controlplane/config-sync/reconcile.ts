@@ -196,7 +196,7 @@ export class ConfigSync {
           for (const d of created.build.result.diagnostics.filter((x) => x.severity === 'error')) out.diagnostics.push({ ...d, message: `${s.slug}: ${d.message}` });
         } else {
           await this.d.db
-            .updateTable('servers')
+            .updateTable('servers').where('tenant_id', '=', tenantId)
             .set({ name: s.name ?? s.slug, description: s.description ?? '', spec_source: toJsonColumn(specSource), exposure: toJsonColumn(exposure), ops_tools: toJsonColumn({ ...this.d.servers.opsTools(server), ...(s.opsTools ?? {}) }), public_report: s.publicReport ? 1 : 0, overlay_path: s.overlay ?? null, status: 'active', managed_by: 'file', config_path: path, config_line: line, updated_at: this.d.clock.now() })
             .where('id', '=', server.id)
             .execute();

@@ -136,6 +136,7 @@ export class McpAuthenticator {
     if (now - last < 60_000) return;
     this.lastTouched.set(id, now);
     if (this.lastTouched.size > 50_000) this.lastTouched.clear();
+    // tenant-scope: child-of-scoped (the credential just authenticated for this endpoint)
     const work = p.type === 'api_key' ? this.db.updateTable('api_keys').set({ last_used_at: now, last_used_ip: ip }).where('id', '=', id).execute() : this.db.updateTable('oauth_tokens').set({ last_used_at: now }).where('id', '=', id).execute();
     void work.catch(() => {});
   }

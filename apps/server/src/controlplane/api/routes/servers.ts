@@ -252,7 +252,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     if (b.opsTools) set.ops_tools = toJsonColumn({ ...parseOpsTools(s.ops_tools), ...b.opsTools });
     if (b.publicReport !== undefined) set.public_report = b.publicReport ? 1 : 0;
     if (b.status !== undefined) set.status = b.status;
-    await db.updateTable('servers').set(set).where('id', '=', s.id).execute();
+    await db.updateTable('servers').where('tenant_id', '=', tenantOf(req)).set(set).where('id', '=', s.id).execute();
     await c.coord.publish(CONFIG_CHANGED, { serverId: s.id });
     return v.serverDetail(await serverOr404(c, req, s.id));
   });
@@ -261,10 +261,10 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     const s = await serverOr404(c, req, req.params.id);
     assertConsoleManaged(c.config, s, 'This server');
     if (req.query.confirm !== s.slug) throw AppError.validation('Type the server slug to confirm', [{ path: ['confirm'], message: `must equal ${s.slug}`, code: 'confirm_mismatch' }]);
-    const builds = await db.selectFrom('builds').select('id').where('server_id', '=', s.id).execute();
+    const builds = await db.selectFrom('builds').where('tenant_id', '=', tenantOf(req)).select('id').where('server_id', '=', s.id).execute();
     for (const b of builds) await unindexBuildTools(db, c.dbs.main.dialect, b.id);
-    await db.deleteFrom('api_keys').where('server_id', '=', s.id).execute();
-    await db.deleteFrom('servers').where('id', '=', s.id).execute();
+    await db.deleteFrom('api_keys').where('tenant_id', '=', tenantOf(req)).where('server_id', '=', s.id).execute();
+    await db.deleteFrom('servers').where('tenant_id', '=', tenantOf(req)).where('id', '=', s.id).execute();
     await c.coord.publish(CONFIG_CHANGED, { serverId: s.id });
   });
 
@@ -283,7 +283,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     const s = await serverOr404(c, req, serverId);
     const toggles = parseOpsTools(s.ops_tools);
     const since = c.clock.now() - 7 * 86_400_000;
-    const counts = await c.dbs.audit.db.selectFrom('audit_log').select(['tool_name', (eb) => eb.fn.countAll<number>().as('n')]).where('server_id', '=', s.id).where('kind', '=', 'ops_call').where('ts', '>=', since).groupBy('tool_name').execute();
+    const counts = await c.dbs.audit.db.selectFrom('audit_log').where('tenant_id', '=', tenantOf(req)).select(['tool_name', (eb) => eb.fn.countAll<number>().as('n')]).where('server_id', '=', s.id).where('kind', '=', 'ops_call').where('ts', '>=', since).groupBy('tool_name').execute();
     const byName = new Map(counts.map((r) => [r.tool_name, Number(r.n)]));
     const items = [...OPS_TOOLS, 'read_result' as const].map((op) => ({
       name: `neurouter_${op}`,
@@ -301,7 +301,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   route(app, 'opsTools.set', api.opsTools.set, async (req) => {
     const s = await serverOr404(c, req, req.params.id);
     assertConsoleManaged(c.config, s, 'This server');
-    await db.updateTable('servers').set({ ops_tools: toJsonColumn({ ...parseOpsTools(s.ops_tools), ...req.body }), updated_at: c.clock.now() }).where('id', '=', s.id).execute();
+    await db.updateTable('servers').where('tenant_id', '=', tenantOf(req)).set({ ops_tools: toJsonColumn({ ...parseOpsTools(s.ops_tools), ...req.body }), updated_at: c.clock.now() }).where('id', '=', s.id).execute();
     await c.coord.publish(CONFIG_CHANGED, { serverId: s.id });
     return opsRows(req, s.id);
   });
@@ -311,7 +311,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     const s = await serverOr404(c, req, req.params.id);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
-    let qb = db.selectFrom('spec_revisions').selectAll().where('server_id', '=', s.id);
+    let qb = db.selectFrom('spec_revisions').where('tenant_id', '=', tenantOf(req)).selectAll().where('server_id', '=', s.id);
     if (key) qb = qb.where('rev', '<', Number(key[0]));
     const rows = await qb.orderBy('rev', 'desc').limit(limit + 1).execute();
     const page = toPage(rows, limit, (r) => r, (r) => [r.rev]);
@@ -325,7 +325,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     if (s.managed_by === 'file' && c.config.configMode !== 'console') assertConsoleManaged(c.config, s, 'This server\'s spec');
     let input: { bytes: Uint8Array; sourceUrl: string | null; contentType: string | null };
     if ('previewId' in req.body) {
-      const p = await db.selectFrom('spec_previews').selectAll().where('id', '=', req.body.previewId).executeTakeFirst();
+      const p = await db.selectFrom('spec_previews').where('tenant_id', '=', tenantOf(req)).selectAll().where('id', '=', req.body.previewId).executeTakeFirst();
       if (!p || !p.content || p.expires_at <= c.clock.now()) throw AppError.notFound('Spec preview');
       input = { bytes: p.content, sourceUrl: p.source_url, contentType: null };
     } else if (req.body.source) input = await specBytes(c, req.body.source);
@@ -336,7 +336,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     assertCompiles(r);
     const out = await c.servers.reimport(tenantOf(req), s.id, input, u.id);
     const jobId = await c.jobs.start(tenantOf(req), 'spec_reimport', { serverId: s.id }, u.id, async () => {
-      const rev = await db.selectFrom('spec_revisions').selectAll().where('id', '=', out.revisionId).executeTakeFirstOrThrow();
+      const rev = await db.selectFrom('spec_revisions').where('tenant_id', '=', tenantOf(req)).selectAll().where('id', '=', out.revisionId).executeTakeFirstOrThrow();
       const fresh = await serverOr404(c, req, s.id);
       const b = await v.buildById(out.build?.build.id ?? fresh.latest_build_id);
       return { revision: await v.specRow(rev), build: b ? await v.buildRow(b) : null, summary: out.summary, unchanged: out.unchanged };
@@ -360,6 +360,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   });
 
   const toolsOfRevision = async (revId: string): Promise<ToolDef[]> => {
+    // tenant-scope: child-of-scoped (spec revision of a tenant-scoped server)
     const b = await db.selectFrom('builds').select('id').where('spec_revision_id', '=', revId).where('status', '=', 'ok').orderBy('created_at', 'desc').limit(1).executeTakeFirst();
     return b ? (await v.buildTools(b.id)).map((t) => t.def) : [];
   };
@@ -432,7 +433,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
       const r = await compileBytes(p.content!, st.slug ?? 'preview', st.format, st.graphql, st.overlayYaml || undefined);
       st.result = previewFrom(r, st.result.suggestedSlug, c.clock.now() - t0, st.result.diff);
     }
-    await db.updateTable('spec_previews').set({ state: toJsonColumn(st), status: st.result.status }).where('id', '=', p.id).execute();
+    await db.updateTable('spec_previews').where('tenant_id', '=', tenantOf(req)).set({ state: toJsonColumn(st), status: st.result.status }).where('id', '=', p.id).execute();
     return previewOut(p.id, p.expires_at, st);
   });
 
@@ -445,7 +446,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     const s = await serverOr404(c, req, req.params.id);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
-    let qb = db.selectFrom('builds').selectAll().where('server_id', '=', s.id).where('temporary', '=', 0);
+    let qb = db.selectFrom('builds').where('tenant_id', '=', tenantOf(req)).selectAll().where('server_id', '=', s.id).where('temporary', '=', 0);
     if (key) qb = qb.where((eb) => eb.or([eb('created_at', '<', Number(key[0])), eb.and([eb('created_at', '=', Number(key[0])), eb('id', '<', String(key[1]))])]));
     const rows = await qb.orderBy('created_at', 'desc').orderBy('id', 'desc').limit(limit + 1).execute();
     const page = toPage(rows, limit, (r) => r, (r) => [r.created_at, r.id]);

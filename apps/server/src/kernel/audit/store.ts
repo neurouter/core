@@ -174,11 +174,13 @@ export class SqlAuditStore implements AuditStore {
   async seqRange(from?: number, to?: number): Promise<{ fromSeq?: number; toSeq?: number } | null> {
     const out: { fromSeq?: number; toSeq?: number } = {};
     if (from !== undefined) {
+      // tenant-scope: system-job (seq range for verifying the instance-wide chain)
       const r = await this.db.selectFrom('audit_log').select('seq').where('ts', '>=', from).orderBy('seq', 'asc').limit(1).executeTakeFirst();
       if (!r) return null;
       out.fromSeq = Number(r.seq);
     }
     if (to !== undefined) {
+      // tenant-scope: system-job (seq range for verifying the instance-wide chain)
       const r = await this.db.selectFrom('audit_log').select('seq').where('ts', '<', to).orderBy('seq', 'desc').limit(1).executeTakeFirst();
       if (!r) return null;
       out.toSeq = Number(r.seq);
@@ -199,8 +201,8 @@ export class SqlAuditStore implements AuditStore {
   }
 
   async readAfter(seq: number, limit: number, tenantId?: string): Promise<{ rows: AuditRow[]; checkpoints: AuditCheckpoint[] }> {
+    // tenant-scope: system-job (SIEM delivery is per tenant when `tenantId` is given; without it, the instance-wide chain export)
     let qb = this.db.selectFrom('audit_log').selectAll().where('seq', '>', seq);
-    // tenant-scope: system-job (SIEM delivery is per tenant when `tenantId` is given; the chain export without it is instance-level)
     if (tenantId !== undefined) qb = qb.where('tenant_id', '=', tenantId);
     const rows = (await qb.orderBy('seq', 'asc').limit(limit).execute()) as AuditRow[];
     if (!rows.length) return { rows, checkpoints: [] };
@@ -210,6 +212,7 @@ export class SqlAuditStore implements AuditStore {
   }
 
   async headSeq(): Promise<number> {
+    // tenant-scope: system-job (head of the instance-wide chain)
     const r = await this.db.selectFrom('audit_log').select('seq').orderBy('seq', 'desc').limit(1).executeTakeFirst();
     return r ? Number(r.seq) : 0;
   }

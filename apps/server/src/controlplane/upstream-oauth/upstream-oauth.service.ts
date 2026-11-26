@@ -116,8 +116,10 @@ export class UpstreamOAuthService {
     };
     if (!q.state) return fail('/connect', 'invalid_state');
     const hash = hmacSha256(this.d.pepper, q.state);
+    // tenant-scope: by-secret-hash
     const row = await this.d.db.selectFrom('upstream_oauth_states').selectAll().where('state_hash', '=', hash).executeTakeFirst();
     if (!row) return fail('/connect', 'invalid_state');
+    // tenant-scope: by-secret-hash
     await this.d.db.deleteFrom('upstream_oauth_states').where('state_hash', '=', hash).execute();
     const back = row.redirect_after;
     if (!viewer || viewer.id !== row.user_id) return fail(back, 'session_mismatch', row.environment_id);
@@ -230,6 +232,7 @@ export class UpstreamOAuthService {
   }
 
   async cleanupStates(now = this.d.clock.now()): Promise<number> {
+    // tenant-scope: system-job (expired states of every tenant)
     const res = await this.d.db.deleteFrom('upstream_oauth_states').where('expires_at', '<', now).executeTakeFirst();
     return Number(res.numDeletedRows);
   }

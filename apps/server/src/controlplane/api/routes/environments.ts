@@ -21,7 +21,7 @@ export async function environmentRoutes(app: FastifyInstance, c: ApiContext): Pr
   };
   const writeToolsOf = async (e: EnvRow): Promise<string[]> => {
     if (!e.build_id) return [];
-    return (await db.selectFrom('tools').select('name').where('build_id', '=', e.build_id).where('write', '=', 1).where('hidden', '=', 0).execute()).map((t) => t.name);
+    return (await db.selectFrom('tools').where('tenant_id', '=', e.tenant_id).select('name').where('build_id', '=', e.build_id).where('write', '=', 1).where('hidden', '=', 0).execute()).map((t) => t.name);
   };
 
   route(app, 'environments.list', api.environments.list, async (req) => {
@@ -108,7 +108,7 @@ export async function environmentRoutes(app: FastifyInstance, c: ApiContext): Pr
     const s = await serverOr404(c, req, req.params.id);
     const list = await c.servers.environments(s.id);
     const buildId = s.latest_build_id;
-    const tools = buildId ? await db.selectFrom('tools').select(['name', 'title', 'def']).where('build_id', '=', buildId).where('write', '=', 1).where('hidden', '=', 0).orderBy('name').execute() : [];
+    const tools = buildId ? await db.selectFrom('tools').where('tenant_id', '=', tenantOf(req)).select(['name', 'title', 'def']).where('build_id', '=', buildId).where('write', '=', 1).where('hidden', '=', 0).orderBy('name').execute() : [];
     const rts = list.map((e) => ({ e, rt: environmentRuntime(e) }));
     return {
       environments: rts.map(({ e, rt }) => ({ id: e.id, slug: e.slug, kind: e.kind, writesEnabled: rt.writes.enabled, confirm: rt.writes.confirm, managedBy: e.managed_by })),

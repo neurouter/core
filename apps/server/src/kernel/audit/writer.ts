@@ -71,6 +71,7 @@ type Db = Kysely<AuditDB> | Transaction<AuditDB>;
 
 /** Last chained (seq, hash): the newest row, else the newest checkpoint (all rows pruned), else genesis. */
 export async function chainHead(db: Db, installId: string): Promise<{ seq: number; hash: string }> {
+  // tenant-scope: system-job (chain head of the instance-wide hash chain)
   const last = await db.selectFrom('audit_log').select(['seq', 'hash']).orderBy('seq', 'desc').limit(1).executeTakeFirst();
   if (last) return { seq: Number(last.seq), hash: last.hash };
   const cp = await db.selectFrom('audit_checkpoints').select(['seq', 'hash']).orderBy('seq', 'desc').limit(1).executeTakeFirst();

@@ -247,8 +247,11 @@ export class OAuthClientsService {
     const ids = rows.map((r) => r.id);
     const now = this.clock.now();
     const [users, used, envs] = await Promise.all([
+      // tenant-scope: global-table (platform-level client view, not served to tenants)
       this.db.selectFrom('oauth_consents').select(['client_id', sql<number>`count(distinct user_id)`.as('n')]).where('client_id', 'in', ids).where('revoked_at', 'is', null).groupBy('client_id').execute(),
+      // tenant-scope: global-table (platform-level client view, not served to tenants)
       this.db.selectFrom('oauth_tokens').select(['client_id', sql<number>`max(last_used_at)`.as('last')]).where('client_id', 'in', ids).groupBy('client_id').execute(),
+      // tenant-scope: global-table (platform-level client view, not served to tenants)
       this.db
         .selectFrom('oauth_tokens as t')
         .innerJoin('environments as e', 'e.id', 't.environment_id')
@@ -281,6 +284,7 @@ export class OAuthClientsService {
     const now = this.clock.now();
     await this.db.updateTable('oauth_clients').set({ status, updated_at: now }).where('id', '=', id).execute();
     if (status === 'blocked') {
+      // tenant-scope: global-table (platform block revokes the client everywhere)
       await this.db.updateTable('oauth_tokens').set({ revoked_at: now }).where('client_id', '=', id).where('revoked_at', 'is', null).execute();
       await this.coord.publish(AUTH_REVOKED_CHANNEL, { oauthClientId: id });
     }

@@ -25,7 +25,7 @@ export async function publicRoutes(app: FastifyInstance, c: ApiContext): Promise
     if (!c.config.env.NEUROUTER_PUBLIC_REPORTS) throw AppError.notFound('Report');
     const s = await db.selectFrom('servers').selectAll().where('tenant_id', '=', tenantOf(req)).where('slug', '=', slug).executeTakeFirst();
     if (!s || s.public_report !== 1 || s.status !== 'active') throw AppError.notFound('Report');
-    const run = await db.selectFrom('eval_runs').selectAll().where('server_id', '=', s.id).where('status', '=', 'succeeded').where('trigger', '!=', 'suggestion_verify').where('headline', 'is not', null).orderBy('created_at', 'desc').limit(1).executeTakeFirst();
+    const run = await db.selectFrom('eval_runs').where('tenant_id', '=', tenantOf(req)).selectAll().where('server_id', '=', s.id).where('status', '=', 'succeeded').where('trigger', '!=', 'suggestion_verify').where('headline', 'is not', null).orderBy('created_at', 'desc').limit(1).executeTakeFirst();
     if (!run) throw AppError.notFound('Report');
     return { s, run };
   };
@@ -35,8 +35,8 @@ export async function publicRoutes(app: FastifyInstance, c: ApiContext): Promise
     const score = parseJsonColumn<{ modeScores?: { tool?: number; code?: number }; cells?: Array<{ model: string; mode: 'tool' | 'code'; score: number }> }>(run.score) ?? {};
     const models = parseJsonColumn<string[]>(run.models) ?? [];
     const cells = score.cells ?? [];
-    const spec = s.current_spec_revision_id ? await db.selectFrom('spec_revisions').select('title').where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
-    const build = await db.selectFrom('builds').select('visible_count').where('id', '=', run.build_id).executeTakeFirst();
+    const spec = s.current_spec_revision_id ? await db.selectFrom('spec_revisions').where('tenant_id', '=', tenantOf(req)).select('title').where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
+    const build = await db.selectFrom('builds').where('tenant_id', '=', tenantOf(req)).select('visible_count').where('id', '=', run.build_id).executeTakeFirst();
     const names = models.length ? models : [...new Set(cells.map((x) => x.model))];
     const cell = (m: string, mode: 'tool' | 'code') => {
       const x = cells.find((y) => y.model === m && y.mode === mode);

@@ -161,7 +161,7 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
     if (!t) throw AppError.notFound('Tool');
     const { from, to } = range(req.query, c.clock.now());
     const rows = await calls(req, from, to, { serverId: t.server_id, environmentId: req.query.environmentId, tool: t.name });
-    const envs = await db.selectFrom('environments').select(['id', 'slug']).where('server_id', '=', t.server_id).execute();
+    const envs = await db.selectFrom('environments').where('tenant_id', '=', tenantOf(req)).select(['id', 'slug']).where('server_id', '=', t.server_id).execute();
     const envSlug = new Map(envs.map((e) => [e.id, e.slug]));
     const byStatus: Record<string, number> = {};
     const byEnvironment: Record<string, number> = {};

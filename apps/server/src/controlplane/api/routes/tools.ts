@@ -60,7 +60,7 @@ export async function toolRoutes(app: FastifyInstance, c: ApiContext): Promise<v
     const usage = await usage7d(c, tenantOf(req), s.id);
     const limit = clampLimit(q.limit);
     const key = decodeCursor(q.cursor);
-    let qb = db.selectFrom('tools').select(['id', 'seq', 'def']).where('build_id', '=', buildId);
+    let qb = db.selectFrom('tools').where('tenant_id', '=', tenantOf(req)).select(['id', 'seq', 'def']).where('build_id', '=', buildId);
     if (q.visibility === 'visible' || q.visibility === undefined) qb = qb.where('hidden', '=', 0);
     else if (q.visibility === 'hidden') qb = qb.where('hidden', '=', 1);
     if (q.kind) qb = qb.where('write', '=', q.kind === 'write' ? 1 : 0);
@@ -146,7 +146,7 @@ export async function toolRoutes(app: FastifyInstance, c: ApiContext): Promise<v
   route(app, 'tools.diff', api.tools.diff, async (req) => {
     const r = await toolOr404(req, req.params.id);
     const s = await serverOr404(c, req, r.server_id);
-    const other = await db.selectFrom('tools').select(['def', 'build_id']).where('build_id', '=', req.query.against).where('key', '=', r.t.key).executeTakeFirst();
+    const other = await db.selectFrom('tools').where('tenant_id', '=', tenantOf(req)).select(['def', 'build_id']).where('build_id', '=', req.query.against).where('key', '=', r.t.key).executeTakeFirst();
     const before = other ? await agentView(c, tenantOf(req), s.slug, s.id, other.build_id, parseJsonColumn<ToolDef>(other.def)!) : null;
     const after = await agentView(c, tenantOf(req), s.slug, s.id, r.build_id, r.t);
     const changed: string[] = [];
@@ -163,7 +163,7 @@ export async function toolRoutes(app: FastifyInstance, c: ApiContext): Promise<v
     const builds = servers.map((s) => s.latest_build_id).filter((x): x is string => Boolean(x));
     if (!builds.length) return { items: [] };
     const q = req.query.q;
-    const rows = await db.selectFrom('tools').select(['id', 'name', 'title', 'server_id']).where('build_id', 'in', builds).where('hidden', '=', 0).where((eb) => eb.or([eb('name', 'like', `%${q}%`), eb('title', 'like', `%${q}%`)])).orderBy('name').limit(limit).execute();
+    const rows = await db.selectFrom('tools').where('tenant_id', '=', tenantOf(req)).select(['id', 'name', 'title', 'server_id']).where('build_id', 'in', builds).where('hidden', '=', 0).where((eb) => eb.or([eb('name', 'like', `%${q}%`), eb('title', 'like', `%${q}%`)])).orderBy('name').limit(limit).execute();
     const byId = new Map(servers.map((s) => [s.id, s]));
     return { items: rows.map((r) => ({ id: r.id, name: r.name, title: r.title, server: { id: r.server_id, slug: byId.get(r.server_id)?.slug ?? '', name: byId.get(r.server_id)?.name ?? '' } })) };
   });

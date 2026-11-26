@@ -120,7 +120,9 @@ export class SearchIndexer {
   /** Counts for /api/system/info and readiness of hybrid search. */
   async coverage(): Promise<{ tools: number; embedded: number }> {
     const [t, e] = await Promise.all([
+      // tenant-scope: system-job (index coverage across tenants)
       this.d.db.selectFrom('tools').select((eb) => eb.fn.countAll<number>().as('n')).where('hidden', '=', 0).executeTakeFirst(),
+      // tenant-scope: system-job (index coverage across tenants)
       this.d.db.selectFrom('tool_embeddings').select((eb) => eb.fn.countAll<number>().as('n')).where('model_id', '=', this.d.embedder.modelId).executeTakeFirst(),
     ]);
     return { tools: Number(t?.n ?? 0), embedded: Number(e?.n ?? 0) };

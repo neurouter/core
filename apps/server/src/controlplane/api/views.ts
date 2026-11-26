@@ -64,12 +64,14 @@ export class Views {
   }
 
   async overlayRow(r: OverlayRev): Promise<OverlayRevisionRowApi> {
-    const prev = r.rev > 1 ? await this.db.selectFrom('overlay_revisions').select('id').where('server_id', '=', r.server_id).where('rev', '=', r.rev - 1).executeTakeFirst() : null;
+    const prev = r.rev > 1 ? await this.db.selectFrom('overlay_revisions').where('tenant_id', '=', r.tenant_id).select('id').where('server_id', '=', r.server_id).where('rev', '=', r.rev - 1).executeTakeFirst() : null;
     let toolChanges = 0;
-    const b = await this.db.selectFrom('builds').select('id').where('overlay_revision_id', '=', r.id).orderBy('created_at', 'desc').limit(1).executeTakeFirst();
+    const b = await this.db.selectFrom('builds').where('tenant_id', '=', r.tenant_id).select('id').where('overlay_revision_id', '=', r.id).orderBy('created_at', 'desc').limit(1).executeTakeFirst();
     if (b) {
-      const pb = prev ? await this.db.selectFrom('builds').select('id').where('overlay_revision_id', '=', prev.id).orderBy('created_at', 'desc').limit(1).executeTakeFirst() : null;
+      const pb = prev ? await this.db.selectFrom('builds').where('tenant_id', '=', r.tenant_id).select('id').where('overlay_revision_id', '=', prev.id).orderBy('created_at', 'desc').limit(1).executeTakeFirst() : null;
+      // tenant-scope: child-of-scoped (build of a tenant-scoped revision)
       const cur = await this.db.selectFrom('tools').select(['name', 'def_hash', 'key']).where('build_id', '=', b.id).execute();
+      // tenant-scope: child-of-scoped (build of a tenant-scoped revision)
       const before = pb ? new Map((await this.db.selectFrom('tools').select(['key', 'def_hash']).where('build_id', '=', pb.id).execute()).map((t) => [t.key, t.def_hash])) : null;
       if (before) toolChanges = cur.filter((t) => before.get(t.key) !== t.def_hash).length;
       else toolChanges = cur.length;
@@ -78,10 +80,10 @@ export class Views {
   }
 
   async buildRow(b: Build): Promise<BuildRowApi> {
-    const spec = await this.db.selectFrom('spec_revisions').select('rev').where('id', '=', b.spec_revision_id).executeTakeFirst();
-    const ov = b.overlay_revision_id ? await this.db.selectFrom('overlay_revisions').select('rev').where('id', '=', b.overlay_revision_id).executeTakeFirst() : null;
+    const spec = await this.db.selectFrom('spec_revisions').where('tenant_id', '=', b.tenant_id).select('rev').where('id', '=', b.spec_revision_id).executeTakeFirst();
+    const ov = b.overlay_revision_id ? await this.db.selectFrom('overlay_revisions').where('tenant_id', '=', b.tenant_id).select('rev').where('id', '=', b.overlay_revision_id).executeTakeFirst() : null;
     const diags = parseJsonColumn<Diagnostic[]>(b.diagnostics) ?? [];
-    const envs = await this.db.selectFrom('environments').select('slug').where('build_id', '=', b.id).execute();
+    const envs = await this.db.selectFrom('environments').where('tenant_id', '=', b.tenant_id).select('slug').where('build_id', '=', b.id).execute();
     return {
       id: b.id,
       hash: b.hash,
@@ -107,10 +109,12 @@ export class Views {
 
   async buildById(id: string | null): Promise<Build | null> {
     if (!id) return null;
+    // tenant-scope: child-of-scoped (build ids of tenant-scoped servers and environments)
     return (await this.db.selectFrom('builds').selectAll().where('id', '=', id).executeTakeFirst()) ?? null;
   }
 
   async buildTools(buildId: string): Promise<Array<{ id: string; def: ToolDef }>> {
+    // tenant-scope: child-of-scoped (build ids of tenant-scoped servers and environments)
     const rows = await this.db.selectFrom('tools').select(['id', 'def']).where('build_id', '=', buildId).orderBy('seq').execute();
     return rows.map((r) => ({ id: r.id, def: parseJsonColumn<ToolDef>(r.def)! }));
   }
@@ -121,7 +125,7 @@ export class Views {
 
   /** Readiness (§15.6): measured = latest succeeded eval run's score; else preliminary = lint score. */
   async readiness(s: Srv): Promise<ReadinessSummary | null> {
-    const run = await this.db.selectFrom('eval_runs').select(['id', 'score', 'headline', 'recommended_mode', 'confidence', 'ended_at']).where('server_id', '=', s.id).where('status', '=', 'succeeded').where('trigger', '!=', 'suggestion_verify').orderBy('created_at', 'desc').limit(1).executeTakeFirst();
+    const run = await this.db.selectFrom('eval_runs').where('tenant_id', '=', s.tenant_id).select(['id', 'score', 'headline', 'recommended_mode', 'confidence', 'ended_at']).where('server_id', '=', s.id).where('status', '=', 'succeeded').where('trigger', '!=', 'suggestion_verify').orderBy('created_at', 'desc').limit(1).executeTakeFirst();
     if (run && run.headline !== null) {
       const sc = parseJsonColumn<Record<string, unknown>>(run.score) ?? {};
       const breakdown = Array.isArray(sc.breakdown) ? (sc.breakdown as ReadinessSummary['breakdown']) : [];
@@ -152,9 +156,9 @@ export class Views {
   }
 
   async serverRow(s: Srv): Promise<ServerRowApi> {
-    const envs = await this.db.selectFrom('environments').selectAll().where('server_id', '=', s.id).orderBy('created_at').execute();
+    const envs = await this.db.selectFrom('environments').where('tenant_id', '=', s.tenant_id).selectAll().where('server_id', '=', s.id).orderBy('created_at').execute();
     const b = await this.buildById(s.latest_build_id);
-    const spec = s.current_spec_revision_id ? await this.db.selectFrom('spec_revisions').select(['format', 'created_at']).where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
+    const spec = s.current_spec_revision_id ? await this.db.selectFrom('spec_revisions').where('tenant_id', '=', s.tenant_id).select(['format', 'created_at']).where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
     return {
       id: s.id,
       slug: s.slug,
@@ -176,9 +180,9 @@ export class Views {
   async serverDetail(s: Srv): Promise<ServerDetail> {
     const row = await this.serverRow(s);
     const src = parseJsonColumn<{ url?: string; path?: string; upload?: boolean; graphqlEndpoint?: string }>(s.spec_source) ?? {};
-    const spec = s.current_spec_revision_id ? await this.db.selectFrom('spec_revisions').selectAll().where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
-    const ov = s.published_overlay_revision_id ? await this.db.selectFrom('overlay_revisions').selectAll().where('id', '=', s.published_overlay_revision_id).executeTakeFirst() : null;
-    const draft = await this.db.selectFrom('overlay_drafts').select(['change_count', 'updated_at']).where('server_id', '=', s.id).executeTakeFirst();
+    const spec = s.current_spec_revision_id ? await this.db.selectFrom('spec_revisions').where('tenant_id', '=', s.tenant_id).selectAll().where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
+    const ov = s.published_overlay_revision_id ? await this.db.selectFrom('overlay_revisions').where('tenant_id', '=', s.tenant_id).selectAll().where('id', '=', s.published_overlay_revision_id).executeTakeFirst() : null;
+    const draft = await this.db.selectFrom('overlay_drafts').where('tenant_id', '=', s.tenant_id).select(['change_count', 'updated_at']).where('server_id', '=', s.id).executeTakeFirst();
     const b = await this.buildById(s.latest_build_id);
     const fileManaged = s.managed_by === 'file' ? ['name', 'description', 'exposure', 'opsTools', 'publicReport', 'spec', ...(s.overlay_path ? ['overlay'] : [])] : [];
     return {
@@ -246,9 +250,9 @@ export class Views {
 
   async envDetail(e: Env, opts: { anonymous?: boolean; userId?: string; connected?: boolean } = {}): Promise<EnvironmentDetail> {
     const rt = environmentRuntime(e);
-    const server = await this.db.selectFrom('servers').select(['slug']).where('id', '=', e.server_id).executeTakeFirstOrThrow();
+    const server = await this.db.selectFrom('servers').where('tenant_id', '=', e.tenant_id).select(['slug']).where('id', '=', e.server_id).executeTakeFirstOrThrow();
     const b = await this.buildById(e.build_id);
-    const tools = b ? await this.db.selectFrom('tools').select(['name']).where('build_id', '=', b.id).where('write', '=', 1).where('hidden', '=', 0).execute() : [];
+    const tools = b ? await this.db.selectFrom('tools').where('tenant_id', '=', e.tenant_id).select(['name']).where('build_id', '=', b.id).where('write', '=', 1).where('hidden', '=', 0).execute() : [];
     const writeNames = tools.map((t) => t.name);
     const enabledToolNames = rt.writes.enabled ? (rt.writes.tools === null ? writeNames : writeNames.filter((n) => rt.writes.tools!.includes(n))) : [];
     const auth = await this.authOut(e, Boolean(opts.anonymous), Boolean(opts.connected));

@@ -148,6 +148,7 @@ export class TaskTracker {
     if (!taskId) return;
     const t = this.now();
     const work = async () => {
+      // tenant-scope: child-of-scoped (task id from a tenant-scoped resolve)
       const row = await this.db.selectFrom('tasks').selectAll().where('id', '=', taskId).executeTakeFirst();
       if (!row) return;
       const set: Record<string, number> = { last_activity_at: t };
@@ -160,15 +161,17 @@ export class TaskTracker {
 
   async bumpNow(taskId: string | null, fields: Partial<Record<CounterField, number>>): Promise<void> {
     if (!taskId) return;
+    // tenant-scope: child-of-scoped (task id from a tenant-scoped resolve)
     const row = await this.db.selectFrom('tasks').selectAll().where('id', '=', taskId).executeTakeFirst();
     if (!row) return;
     const set: Record<string, number> = { last_activity_at: this.now() };
     for (const [k, v] of Object.entries(fields)) set[k] = Number(row[k as CounterField] ?? 0) + (v ?? 0);
-    await this.db.updateTable('tasks').set(set).where('id', '=', taskId).execute();
+    await this.db.updateTable('tasks').where('tenant_id', '=', row.tenant_id).set(set).where('id', '=', taskId).execute();
   }
 
   /** Returns true the first time it is called for a task (one-time begin_task tip on inferred tasks). */
   async takeHint(taskId: string): Promise<boolean> {
+    // tenant-scope: child-of-scoped (task id from a tenant-scoped resolve)
     const res = await this.db.updateTable('tasks').set({ hinted: 1 }).where('id', '=', taskId).where('hinted', '=', 0).executeTakeFirst();
     return Number(res.numUpdatedRows) > 0;
   }
@@ -189,6 +192,7 @@ export class TaskTracker {
   /** Job `tasks.close-idle`: explicit → abandoned, inferred/script → unknown. */
   async closeIdle(): Promise<number> {
     const cutoff = this.now() - TASK_IDLE_MS;
+    // tenant-scope: system-job (idle tasks of every tenant)
     const rows = await this.db.selectFrom('tasks').select(['id', 'framing']).where('status', '=', 'open').where('last_activity_at', '<=', cutoff).limit(1000).execute();
     for (const r of rows) await this.close(r.id, r.framing === 'explicit' ? 'abandoned' : 'unknown', null);
     return rows.length;

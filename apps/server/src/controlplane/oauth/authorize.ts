@@ -136,6 +136,7 @@ export class AuthorizationService {
   }
 
   private async request(requestId: string, viewer: ConsoleSessionUser) {
+    // tenant-scope: tenant-from-row (request bound to the signed-in user; its tenant drives the checks)
     const r = await this.db.selectFrom('oauth_authz_requests').selectAll().where('id', '=', requestId).executeTakeFirst();
     if (!r) throw new OAuthError('invalid_request', 'Unknown authorization request; start again from your MCP client', 404);
     if (r.user_id !== viewer.id) throw new OAuthError('access_denied', 'This authorization request belongs to another user', 403);
