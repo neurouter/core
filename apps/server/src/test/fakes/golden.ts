@@ -32,12 +32,15 @@ export class Golden {
 
 const VOLATILE_NUMBERS = ['seconds', 'wallMs', 'duration_ms', 'durationMs', 'latencyMs', 'suspensions', 'retry_after_ms', 'retryAfterMs', 'dev.neurouter/retry-after-ms'];
 
-/** Replaces values that differ between runs (uuids, error ids, handles, task handles, confirm tokens, timings). */
+/** Replaces values that differ between runs (uuids, error ids, handles, task handles, page cursors, confirm tokens, timings). */
 export function normalize(value: unknown): unknown {
   let s = JSON.stringify(value);
   s = s.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>');
   s = s.replace(/err_[A-Za-z0-9]{16}/g, 'err_<id>');
   s = s.replace(/rh_[A-Za-z0-9]{22}/g, 'rh_<id>');
+  // contract-2 page cursors (signed, expiring): their content is covered by the paging tests
+  s = s.replace(/(?<![A-Za-z0-9_-])c_[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{16}(?![A-Za-z0-9_-])/g, 'c_<cursor>');
+  s = s.replace(/(?<![A-Za-z0-9_-])ct_[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{16}(?![A-Za-z0-9_-])/g, 'ct_<token>');
   s = s.replace(/\bt_[A-Za-z0-9]{8}\b/g, 't_<id>');
   s = s.replace(/nrk_[A-Za-z0-9_]+/g, 'nrk_<key>');
   for (const k of VOLATILE_NUMBERS) s = s.replace(new RegExp(`(\\\\*"${k.replace(/[/.]/g, '\\$&')}\\\\*":)[\\d.]+`, 'g'), '$10');

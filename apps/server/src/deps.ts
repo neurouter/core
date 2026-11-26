@@ -23,6 +23,8 @@ import { DbRuntimeConfigSource } from './kernel/runtime-config.js';
 import { BuiltinSecretProvider } from './kernel/secrets/builtin.provider.js';
 import { EnvelopeService } from './kernel/secrets/envelope.service.js';
 import { EnvKeyring } from './kernel/secrets/keyring.js';
+import { CursorCodec } from './dataplane/paging/cursor.js';
+import { ConfirmTokens } from './dataplane/pipeline/confirm-token.js';
 import { NamedSecrets } from './kernel/secrets/named-secrets.js';
 import { SETTING_DEFAULTS, SettingsService } from './kernel/settings/settings.service.js';
 import { EnvRefGate } from './kernel/secrets/env-refs.js';
@@ -314,6 +316,7 @@ export function createServices(input: ServiceInputs) {
     now,
   });
   const http = new HttpInvoker(upstreamFetchFor, now);
+  const confirms = new ConfirmTokens(db, keyring, now);
   const pipeline = new Pipeline({
     audit,
     tracker,
@@ -329,6 +332,8 @@ export function createServices(input: ServiceInputs) {
     publicUrl: config.publicUrl,
     version: input.version,
     log: logger,
+    cursors: CursorCodec.fromKeyring(keyring, now),
+    confirms,
     onSuccess: (ctx, tool, args) => void recordTrafficExample(db, ctx.bundle.server.id, ctx.tenantId, tool.name, args, ctx.bundle.build.hash).catch(() => {}),
   });
   const ops = new OpsTools({
@@ -364,7 +369,7 @@ export function createServices(input: ServiceInputs) {
     else logger.error({ err: r.error, mode }, 'code-mode executor failed to start; code mode is unavailable');
     await executorHealth.check();
   };
-  const scripts = new ScriptRunner({ db, executor: () => executor, pipeline, ops, tracker, audit, pages, metrics, now, log: logger, healthy: () => executorHealth.healthy });
+  const scripts = new ScriptRunner({ db, executor: () => executor, pipeline, ops, tracker, audit, pages, metrics, now, log: logger, healthy: () => executorHealth.healthy, confirms });
   const argValidator = new ArgValidator();
   const dispatcher = new Dispatcher({
     pipeline,

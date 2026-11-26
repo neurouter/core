@@ -1,4 +1,4 @@
-import { CALL_TOOL, META_CALL_ID, META_NEXT_TOOLS, META_TASK_ID, META_TOOL_NAMES, OPS_TOOLS, opsMcpName, READ_RESULT, RUN_SCRIPT, scriptBuiltinsLine, SEARCH_TOOLS, type OpsTool, type ToolDef } from '@neurouter/shared';
+import { CALL_TOOL, META_CALL_ID, META_NEXT_TOOLS, META_TASK_ID, META_TOOL_NAMES, OPS_TOOLS, opsMcpName, READ_RESULT, REPORT, RUN_SCRIPT, scriptBuiltinsLine, SEARCH_TOOLS, type OpsTool, type ToolDef } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { RunContext } from '../pipeline/context.js';
@@ -9,15 +9,15 @@ import { applyArgTransforms } from '../http/request-builder.js';
 import type { Confirmer, McpToolResult, Pipeline } from '../pipeline/pipeline.js';
 import type { ToolSearchService } from '../search/search.service.js';
 import type { ScriptRunner } from '../code/run-script.js';
-import { opFor, opsDefinition, type OpsTools } from '../ops/ops.js';
+import { opFor, opsDefinition, reportEnabled, type OpsOp, type OpsTools } from '../ops/ops.js';
 import type { TaskTracker } from '../tasks/tracker.js';
 import { errorDraft, okDraft, type Draft } from '../envelope/draft.js';
 import { EnvelopeRenderer, TypedSchemaIssues } from '../envelope/render.js';
 import { closestNames, exampleArgs } from '../envelope/relations.js';
-import { StateTracker } from '../envelope/state.js';
+import { TaskStateSource } from '../envelope/state.js';
 import { BUDGET } from '../envelope/types.js';
 import { v1Result, withExtraText } from '../envelope/v1.js';
-import { V2_OPS, visibleTools, type Surface } from './surface.js';
+import { agentInputSchema, visibleTools, type Surface } from './surface.js';
 
 export interface DispatchDeps {
   pipeline: Pipeline;
@@ -90,7 +90,8 @@ export class Dispatcher {
   constructor(private readonly d: DispatchDeps) {
     this.typedIssues = d.typedIssues ?? new TypedSchemaIssues();
     this.renderer = new EnvelopeRenderer({
-      state: new StateTracker(),
+      // the state block is counted in the task row (works across instances); calls without a task use memory
+      state: new TaskStateSource(d.tracker),
       typed: this.typedIssues,
       closest: (ctx, name) => this.closest(ctx, name),
       onSchemaMismatch: (ctx, tool, errors) => {
@@ -114,10 +115,24 @@ export class Dispatcher {
       // contract 2: unknown tools are an envelope (`unknown_tool` + closest + next), never a JSON-RPC error
       const reply = out.kind === 'unknown' ? { draft: errorDraft({ code: 'unknown_tool', message: out.message, name, args }), tool: null, as: undefined } : out;
       const target = reply.as ?? { name, args };
-      return { kind: 'result', result: await this.renderer.render(ctx, { name: target.name, args: target.args, tool: reply.tool ?? null, draft: reply.draft }, ctx.outputSchema ?? 'envelope') };
+      const result = await this.renderer.render(ctx, { name: target.name, args: target.args, tool: reply.tool ?? null, draft: reply.draft }, ctx.outputSchema ?? 'envelope');
+      this.labelTask(ctx, target.name, target.args, reply.tool ?? null, result);
+      return { kind: 'result', result };
     }
     if (out.kind === 'unknown') return out;
     return { kind: 'result', result: out.tip ? await this.tip(ctx, name, out.result) : out.result };
+  }
+
+  /**
+   * Contract 2 (D1): without begin_task, an inferred task is labelled from its first calls: the first search
+   * query (`Find: …`), else the first API tool's title. Only while the task has neither goal nor label.
+   */
+  private labelTask(ctx: RunContext, name: string, args: Record<string, unknown>, tool: ToolDef | null, result: McpToolResult): void {
+    if (!ctx.taskId || ctx.framing === 'explicit') return;
+    const call = ((result.structuredContent as { state?: { call?: number } } | undefined)?.state?.call ?? 99) as number;
+    if (call > 3) return;
+    const goal = name === SEARCH_TOOLS && typeof args.query === 'string' ? `Find: ${args.query}` : tool && tool.kind !== 'composite' ? tool.title || tool.name : null;
+    if (goal) void this.d.tracker.labelOnce(ctx.taskId, ctx.tenantId, goal).catch(() => {});
   }
 
   /** v1: first call in an inferred task gets a one-time begin_task tip (§11.3). */
@@ -185,6 +200,9 @@ export class Dispatcher {
   private async composite(ctx: RunContext, name: string, args: Record<string, unknown>, confirmer: Confirmer | null, signal?: AbortSignal): Promise<Routed | null> {
     const t = resolveVisibleTool(ctx, name);
     if (!t || t.binding.type !== 'composite') return null;
+    // contract 2 (D5): a composite with destructive calls takes the confirm token like run_script
+    const confirm = ctx.contract === 2 && typeof args.confirm === 'string' && !('confirm' in ((t.inputSchema.properties as object | undefined) ?? {})) ? args.confirm : undefined;
+    if (confirm !== undefined) args = Object.fromEntries(Object.entries(args).filter(([k]) => k !== 'confirm'));
     const check = this.d.args.check(t.defHash, t.inputSchema, applyArgTransforms(t, args));
     if (!check.ok) {
       const message = `Invalid arguments for ${t.name}:\n- ${check.errors.join('\n- ')}`;
@@ -192,7 +210,7 @@ export class Dispatcher {
     }
     const inputs = applyArgTransforms(t, args);
     for (const [k, v] of Object.entries((t.inputSchema.properties ?? {}) as Record<string, { default?: unknown }>)) if (inputs[k] === undefined && v?.default !== undefined) inputs[k] = v.default;
-    const r = await this.d.scripts.run({ ...ctx, mode: 'code' }, { code: t.binding.script, mode: 'execute', inputs }, confirmer, signal, { allowWithoutScope: true, callAs: { name: t.name, args } });
+    const r = await this.d.scripts.run({ ...ctx, mode: 'code' }, { code: t.binding.script, mode: 'execute', inputs, ...(confirm ? { confirm } : {}) }, confirmer, signal, { allowWithoutScope: true, callAs: { name: t.name, args } });
     if (r.inputRequired) return { kind: 'input_required', result: r.inputRequired };
     return { kind: 'reply', result: r.result, draft: r.draft, tool: t };
   }
@@ -282,7 +300,7 @@ export class Dispatcher {
     if (tools.length) return okDraft(data, { page: { count: tools.length, total: has_more ? null : tools.length, has_more, next_cursor: null }, meta });
     const names = visibleTools(ctx).map((t) => t.name);
     const near = closestNames(query.replace(/\s+/g, '_'), names, 3);
-    const report = ctx.bundle.server.opsTools.report_unmet_need ? ` If the API cannot do it, call neurouter_report_unmet_need({"intent":"…"}).` : '';
+    const report = reportEnabled(ctx) && ctx.bundle.server.opsTools.report_unmet_need ? ` If the API cannot do it: neurouter_report({"kind":"unmet_need","text":"…"}).` : '';
     const hint = `No tool matches.${near.length ? ` Closest: ${near.join(', ')}.` : ' Try other words.'}${report}`;
     return okDraft(data, { page: { count: 0, total: 0, has_more: false, next_cursor: null, scope: { query, limit } }, hint: hint.length <= BUDGET.hintChars ? hint : hint.slice(0, BUDGET.hintChars), meta });
   }
@@ -315,8 +333,8 @@ export class Dispatcher {
         readOnly: t.risk.readOnly,
         write: t.risk.write,
         destructive: t.risk.destructive,
-        ...(includeSchemas && format === 'json' ? { inputSchema: t.inputSchema } : {}),
-        ...(format === 'json' ? { args: argSignature(t.inputSchema) } : {}),
+        ...(includeSchemas && format === 'json' ? { inputSchema: v2 ? agentInputSchema(t) : t.inputSchema } : {}),
+        ...(format === 'json' ? { args: argSignature(v2 ? agentInputSchema(t) : t.inputSchema) } : {}),
         ...(format === 'python' ? { pySignature: t.pySignature, pyName: t.pyName } : {}),
         score: r.score,
         tool: t,
@@ -326,8 +344,8 @@ export class Dispatcher {
     const q = query.toLowerCase();
     const words = q.match(/[a-z0-9]+/g) ?? [];
     // read_result is always available (truncated tool results point at it), so it is searchable too (contract 1)
-    const searchable = v2 ? OPS_TOOLS.filter((o) => ctx.bundle.server.opsTools[o] && (V2_OPS as readonly string[]).includes(o)) : [...OPS_TOOLS.filter((o) => ctx.bundle.server.opsTools[o as OpsTool]), READ_RESULT];
-    for (const op of searchable as Array<OpsTool | typeof READ_RESULT>) {
+    const searchable: OpsOp[] = v2 ? (reportEnabled(ctx) ? [REPORT] : []) : [...OPS_TOOLS.filter((o) => ctx.bundle.server.opsTools[o as OpsTool]), READ_RESULT];
+    for (const op of searchable) {
       const d = opsDefinition(op);
       const hay = `${d.name} ${d.title} ${d.description}`.toLowerCase();
       const matched = words.filter((w) => hay.includes(w)).length;

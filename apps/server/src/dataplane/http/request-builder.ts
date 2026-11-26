@@ -78,7 +78,7 @@ export function hostAllowed(url: URL, allowedHosts: readonly string[]): boolean 
 export function buildHttpRequest(
   tool: ToolDef,
   specArgs: Record<string, unknown>,
-  env: { baseUrl: string; headers: Record<string, string>; allowedHosts: readonly string[]; credentials: { headers: Record<string, string>; query: Record<string, string> } },
+  env: { baseUrl: string; headers: Record<string, string>; allowedHosts: readonly string[]; credentials: { headers: Record<string, string>; query: Record<string, string> }; extraQuery?: Record<string, string | string[]> },
   version: string,
 ): BuiltRequest {
   const b = tool.binding;
@@ -112,6 +112,8 @@ export function buildHttpRequest(
     else if (p.in === 'header') headers[p.name.toLowerCase()] = PRIMITIVE(v);
     else if (p.in === 'cookie') headers.cookie = `${headers.cookie ? `${headers.cookie}; ` : ''}${p.name}=${encodeURIComponent(PRIMITIVE(v))}`;
   }
+  // contract 2: query parameters of an upstream `Link: rel=next` URL that no argument maps to
+  for (const [k, v] of Object.entries(env.extraQuery ?? {})) if (!qs.has(k)) for (const x of Array.isArray(v) ? v : [v]) qs.append(k, x);
   for (const [k, v] of Object.entries(env.credentials.query)) qs.set(k, v);
   for (const [k, v] of Object.entries(env.credentials.headers)) headers[k.toLowerCase()] = v;
   const q = qs.toString();

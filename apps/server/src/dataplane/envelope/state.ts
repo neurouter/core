@@ -22,6 +22,8 @@ interface TaskState {
 }
 
 export interface StateInput {
+  /** the task's tenant (the database step is tenant-scoped) */
+  tenantId?: string;
   /** task id (inferred or explicit); null falls back to the request */
   taskId: string | null;
   requestId: string;
@@ -43,12 +45,58 @@ export interface StateInput {
   now: number;
 }
 
+/** Where the state block's counters live: the task row (P3) or memory (no task row; unit tests). */
+export interface StateSource {
+  next(i: StateInput): State | Promise<State>;
+}
+
+/** The counters behind one state block. */
+export interface StepCounts {
+  calls: number;
+  streak: number;
+  /** show the full form (first call, env/writes changed) */
+  changed: boolean;
+}
+
+/** The state block from its counters: full form on the first call, on changes and on writes; short form otherwise. */
+export function stateOf(i: StateInput, c: StepCounts): State {
+  const full = c.changed || i.write;
+  const flags = [...(full ? (i.fullFlags ?? []) : []), ...(i.flags ?? [])];
+  const state: State = {
+    ...(full ? { env: i.env, writes: i.writes } : {}),
+    task: taskHandle(i.taskId ?? i.requestId),
+    call: c.calls,
+    ...(c.streak >= 2 ? { streak: c.streak } : {}),
+    ...(i.left && Object.keys(i.left).length ? { left: i.left } : {}),
+    ...(i.wrote ? { wrote: i.wrote } : {}),
+    ...(i.scriptCalls !== undefined ? { script_calls: i.scriptCalls } : {}),
+    ...(flags.length ? { flags: [...new Set(flags)] } : {}),
+    ...(i.flagPaths?.length ? { flag_paths: i.flagPaths.slice(0, 3) } : {}),
+  };
+  return fitState(state);
+}
+
 /**
- * The per-task state block (contract-v2 §2.4): call counter and identical-result streaks per task. In memory
- * per instance (bounded LRU); a task served by several instances counts per instance (P3 moves task state
- * to the task tracker).
+ * Contract 2, P3: the state block counted in the task row (`TaskTracker.step`), so every instance serving a task
+ * shows the same call number and streak. Calls without a task row fall back to the in-memory tracker.
  */
-export class StateTracker {
+export class TaskStateSource implements StateSource {
+  constructor(
+    private readonly tracker: { step(taskId: string, tenantId: string, i: { callKey: string; resultKey: string; env: string; writes: string }): Promise<StepCounts | null> },
+    private readonly fallback: StateTracker = new StateTracker(),
+  ) {}
+
+  async next(i: StateInput): Promise<State> {
+    if (!i.taskId || !i.tenantId) return this.fallback.next(i);
+    const c = await this.tracker.step(i.taskId, i.tenantId, { callKey: i.callKey, resultKey: i.resultKey, env: i.env, writes: i.writes }).catch(() => null);
+    return c ? stateOf(i, c) : this.fallback.next(i);
+  }
+}
+
+/**
+ * The per-task state block in memory (bounded LRU): the fallback for calls without a task row, and unit tests.
+ */
+export class StateTracker implements StateSource {
   private readonly tasks = new Map<string, TaskState>();
 
   constructor(private readonly max = 10_000) {}
@@ -69,20 +117,7 @@ export class StateTracker {
     this.tasks.delete(key);
     this.tasks.set(key, cur);
     if (this.tasks.size > this.max) this.tasks.delete(this.tasks.keys().next().value!);
-    const full = !prev || prev.env !== i.env || prev.writes !== i.writes || i.write;
-    const flags = [...(full ? (i.fullFlags ?? []) : []), ...(i.flags ?? [])];
-    const state: State = {
-      ...(full ? { env: i.env, writes: i.writes } : {}),
-      task: taskHandle(i.taskId ?? i.requestId),
-      call: cur.calls,
-      ...(cur.streak >= 2 ? { streak: cur.streak } : {}),
-      ...(i.left && Object.keys(i.left).length ? { left: i.left } : {}),
-      ...(i.wrote ? { wrote: i.wrote } : {}),
-      ...(i.scriptCalls !== undefined ? { script_calls: i.scriptCalls } : {}),
-      ...(flags.length ? { flags: [...new Set(flags)] } : {}),
-      ...(i.flagPaths?.length ? { flag_paths: i.flagPaths.slice(0, 3) } : {}),
-    };
-    return fitState(state);
+    return stateOf(i, { calls: cur.calls, streak: cur.streak, changed: !prev || prev.env !== i.env || prev.writes !== i.writes });
   }
 }
 

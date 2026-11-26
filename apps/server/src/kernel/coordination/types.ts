@@ -13,7 +13,8 @@ export interface WaitForOptions {
 
 /** Token-bucket store; implemented in Phase 1 step 4 (§13). */
 export interface RateLimitStore {
-  take(key: string, opts: { capacity: number; refillPerMs: number; cost?: number }): Promise<{ allowed: boolean; retryAfterMs: number }>;
+  /** `remaining`: tokens left after this take (approximate across replicas), when the store knows it */
+  take(key: string, opts: { capacity: number; refillPerMs: number; cost?: number }): Promise<{ allowed: boolean; retryAfterMs: number; remaining?: number }>;
 }
 
 /** Cross-replica coordination (backend §12.1). Memory for SQLite/dev, Postgres in prod. */

@@ -10,6 +10,15 @@ export const OPS_TOOLS = ['begin_task', 'end_task', 'log_decision', 'report_unme
 export type OpsTool = (typeof OPS_TOOLS)[number];
 /** Always available (not toggleable): paging through truncated results. */
 export const READ_RESULT = 'read_result';
+/**
+ * Contract 2 (D2): `neurouter_report(kind)` merges the report tools (`unmet_need`, `tool_problem`, `decision`) and the
+ * task exit (`done`, `blocked`). Not a toggle of its own: each kind follows the toggle of the v1 tool it replaces.
+ */
+export const REPORT = 'report';
+export const REPORT_KINDS = ['done', 'blocked', 'unmet_need', 'tool_problem', 'decision'] as const;
+export type ReportKind = (typeof REPORT_KINDS)[number];
+/** The v1 ops toggle each report kind follows. */
+export const REPORT_KIND_TOGGLE = { done: 'end_task', blocked: 'end_task', unmet_need: 'report_unmet_need', tool_problem: 'report_issue', decision: 'log_decision' } as const;
 export type OpsToolToggles = Record<OpsTool, boolean>;
 export const DEFAULT_OPS_TOGGLES: OpsToolToggles = Object.fromEntries(OPS_TOOLS.map((t) => [t, true])) as OpsToolToggles;
 

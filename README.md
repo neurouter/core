@@ -65,12 +65,25 @@ Tool results follow one of two contracts, chosen per session:
 
 - **Contract 2** (default for servers created from this release on): every `tools/call` result is one envelope,
   `{"ok","data","page","truncated","error","state"}` (plus an optional `hint`), as the only text item and as
-  `structuredContent`. `data` is the API's payload unchanged; `page` says `count`/`total`/`has_more` on list tools;
-  `truncated` names what Neurouter cut and the exact call that returns it; `error` has a code, a short message,
+  `structuredContent`. `data` is the API's payload unchanged; `page` says `count`/`total`/`has_more` on list tools,
+  with `next_cursor`: pass it as `cursor` to the same tool with the same other arguments for the next page, whatever
+  the upstream's paging style (cursor tokens, page/per_page, offset/limit, `starting_after`, `Link` headers) and
+  for the rest of a list Neurouter cut. Cursors are signed, bound to the tool, arguments and credential, and last
+  1 hour. Every tool takes `fields` (dot paths, per item on lists; the overlay `include` is the default set) and
+  list tools take `limit` (the upstream page size); names the upstream already uses get an `nr_` prefix.
+  `truncated` names the object fields Neurouter clipped and the `fields` call that returns them; `error` has a code, a short message,
   every invalid field with its allowed values, `retry` and `next` (the exact call to make next); `state` carries the
   environment, write mode, task and call counter (and identical-result streaks). Unknown tools answer with an
   envelope (`unknown_tool` + closest names), not a JSON-RPC error. In `run_script`, tool functions return plain data
-  and raise `LookupError`/`ValueError`/`PermissionError`/… whose message is the error object.
+  and raise `LookupError`/`ValueError`/`PermissionError`/… whose message is the error object;
+  `ops.pages(fn="ns.list_x", args={…}, max_items=500)` returns the items of every page.
+  There is no task framing: Neurouter infers tasks per credential, client and MCP session (10-minute idle gap),
+  counts `state.call`/`streak` in the task row (the same on every instance), and shows `state.left` when a
+  rate limit is down to 20%. One ops tool is listed, `neurouter_report(kind: done|blocked|unmet_need|tool_problem|
+  decision, text)`; the v1 names still answer. Write tools take `dry_run: true` (the plan: target, effect,
+  `reversible`). Outside prod a destructive call first answers `confirmation_required` with the plan and the same
+  call carrying `confirm: "ct_…"` (5 minutes, single use, bound to the arguments and the credential); scripts with
+  destructive calls do the same per plan. In prod your user approves through elicitation; tokens are not accepted.
 - **Contract 1**: the 0.2.x shapes. Servers created before contract 2 keep it until switched.
 
 A client picks a version with the capability `experimental["dev.neurouter/contract"] = {"versions":[2,1]}` or the

@@ -1,4 +1,7 @@
 import { opsMcpName, READ_RESULT, type ToolDef } from '@neurouter/shared';
+import type { CursorPayload } from '../paging/cursor.js';
+import { clippedFields } from '../paging/fields.js';
+import type { NextSignals } from '../paging/plan.js';
 import { effectiveArgs, isPagingArg, requiredOf } from './relations.js';
 import { BUDGET, type Page, type Truncated } from './types.js';
 
@@ -48,73 +51,87 @@ export function isListTool(t: ToolDef, value: unknown): boolean {
   return listIn(value) !== null;
 }
 
-const TOTAL_KEYS = ['total_count', 'totalCount', 'total', 'total_results', 'totalResults', 'count_total'];
-const NEXT_KEYS = /^(next_?cursor|next_?page_?token|next_?token|next_?page|next|has_?more)$/i;
-
-function upstreamTotal(v: unknown): number | null {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
-  for (const k of TOTAL_KEYS) {
-    const x = (v as Record<string, unknown>)[k];
-    if (typeof x === 'number' && Number.isInteger(x) && x >= 0) return x;
-  }
-  return null;
-}
-
-function upstreamNext(v: unknown, headers: Record<string, string>): boolean {
-  if (/rel="?next"?/i.test(headers.link ?? '')) return true;
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
-  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-    if (!NEXT_KEYS.test(k)) continue;
-    if (k.toLowerCase().replace('_', '') === 'hasmore') return x === true;
-    if ((typeof x === 'string' && x.trim()) || (typeof x === 'number' && x > 0)) return true;
-  }
-  return false;
-}
-
 export interface ListView {
   page: Page;
   truncated: Truncated | null;
   hint?: string;
 }
 
+/** What the pipeline knows about paging for one list response (contract-v2 §2.1). */
+export interface ListPaging {
+  /** encodes a next position as `page.next_cursor` (null when cursors are unavailable) */
+  encode: (p: CursorPayload) => string | null;
+  /** the upstream's next-page signals (null when the items came from a stored result) */
+  signals: NextSignals | null;
+  /** the stored full value behind a Neurouter cut */
+  handle: string | null;
+  /** serving a stored result: items already served before this response, its total and the upstream page after it */
+  stored?: { offset: number; length: number; total: number | null; then: Exclude<CursorPayload, { k: 'r' }> | null };
+  /** the arguments Neurouter adds (left out of `scope` and widening hints) */
+  own: string[];
+}
+
 /**
- * `page` for a list tool's success. `has_more` is always explicit: Neurouter cut the list, the upstream
- * total exceeds the items, or (without a total) the upstream signals a next page (cursor field, `Link: rel=next`). An empty
- * page is final. `next_cursor` stays null until P2's cursor codec; Neurouter's own cuts are fetched with
- * `truncated.next` (the stored result page) meanwhile.
+ * `page` for a list tool's success. `has_more` is always explicit: Neurouter cut the list, or the upstream signals a
+ * next page (Link, cursor token, has_more, total, a full page). `next_cursor` is the signed cursor for the same tool
+ * with the same other arguments: the rest of a Neurouter cut (stored result, 1 h), then the upstream's next page.
+ * `total` is the upstream total, or the item count when this is the whole list. An empty page is final.
  */
-export function listView(t: ToolDef, args: Record<string, unknown>, value: unknown, cut: ShapeCut | undefined, handle: string | null, headers: Record<string, string>): ListView {
+export function listView(t: ToolDef, args: Record<string, unknown>, value: unknown, cut: ShapeCut | undefined, paging: ListPaging): ListView {
   const items = listIn(value) ?? [];
   const count = items.length;
   const neurouterCut = cut?.totalItems !== undefined && cut.returnedItems !== undefined && cut.totalItems > cut.returnedItems;
-  const upTotal = upstreamTotal(value);
-  const total = neurouterCut ? cut!.totalItems! : upTotal;
-  // the upstream total decides when there is one; otherwise a next-page signal (cursor field, Link rel=next)
-  const has_more = count > 0 && (neurouterCut || (upTotal !== null ? upTotal > count : upstreamNext(value, headers)));
-  const page: Page = { count, total, has_more, next_cursor: null };
-  if (count === 0 || neurouterCut) page.scope = effectiveArgs(t, args);
-  let truncated: Truncated | null = null;
-  if (neurouterCut && handle) {
-    truncated = { items_omitted: cut!.totalItems! - cut!.returnedItems!, omitted_bytes: Math.max(0, cut!.totalBytes - cut!.returnedBytes), next: { tool: opsMcpName(READ_RESULT), args: { handle, offset: cut!.returnedItems! } } };
+  const returned = neurouterCut ? cut!.returnedItems! : count;
+  const sig = paging.signals;
+  let has_more: boolean;
+  let next: CursorPayload | null = null;
+  let total: number | null;
+  if (paging.stored) {
+    const st = paging.stored;
+    const served = st.offset + returned;
+    has_more = count > 0 && (served < st.length || st.then !== null);
+    next = served < st.length ? { k: 'r', h: paging.handle ?? '', n: served, t: st.total, then: st.then } : st.then;
+    total = st.total;
+  } else {
+    const upMore = sig?.more ?? false;
+    has_more = count > 0 && (neurouterCut || upMore);
+    const upNext = upMore ? (sig?.next ?? null) : null;
+    total = sig?.total ?? (!upMore && (sig?.first ?? true) ? (neurouterCut ? cut!.totalItems! : count) : null);
+    if (neurouterCut && paging.handle) next = { k: 'r', h: paging.handle, n: returned, t: total, then: upNext };
+    else if (upMore) next = upNext;
   }
-  const hint = count === 0 ? widenHint(t, args) : undefined;
-  return { page, truncated, ...(hint ? { hint } : {}) };
+  const next_cursor = has_more && next ? paging.encode(next) : null;
+  const page: Page = { count, total, has_more, next_cursor };
+  const own = new Set(paging.own);
+  const visibleArgs = Object.fromEntries(Object.entries(args).filter(([k]) => !own.has(k)));
+  if (count === 0 || neurouterCut) page.scope = effectiveArgs(t, visibleArgs);
+  const hint = count === 0 ? widenHint(t, visibleArgs, args) : undefined;
+  return { page, truncated: null, ...(hint ? { hint } : {}) };
 }
 
-/** `truncated` for an object Neurouter clipped to its byte budget (fields named; the whole value behind `next`). */
-export function clippedView(cut: ShapeCut, handle: string | null): Truncated | null {
-  if (!cut.fields?.length || !handle) return null;
-  return { fields: cut.fields.slice(0, 20), omitted_bytes: Math.max(0, cut.totalBytes - cut.returnedBytes), next: { tool: opsMcpName(READ_RESULT), args: { handle } } };
+/**
+ * `truncated` for an object Neurouter clipped to its byte budget: the clipped paths, and the same call with `fields`
+ * naming them (a projection that small is not clipped). Only when that would repeat this very call (one value over
+ * the 64 KB tool-mode cap) does `next` fall back to the stored value (`neurouter_read_result`, unlisted).
+ */
+export function clippedView(cut: ShapeCut, t: ToolDef, args: Record<string, unknown>, fieldsArg: string, handle: string | null): Truncated | null {
+  if (!cut.fields?.length) return null;
+  const fields = clippedFields(cut.fields).slice(0, 20);
+  const omitted_bytes = Math.max(0, cut.totalBytes - cut.returnedBytes);
+  const current = Array.isArray(args[fieldsArg]) ? (args[fieldsArg] as string[]) : null;
+  const same = current !== null && fields.every((f) => current.includes(f));
+  if (same) return handle ? { fields: cut.fields.slice(0, 20), omitted_bytes, next: { tool: opsMcpName(READ_RESULT), args: { handle } } } : null;
+  return { fields: cut.fields.slice(0, 20), omitted_bytes, next: { tool: t.name, args: { ...args, [fieldsArg]: fields } } };
 }
 
 /** `0 matches. Widen: list_orders({"status":"refunded"})`: the same call without its most specific filter. */
-export function widenHint(t: ToolDef, args: Record<string, unknown>): string | undefined {
+export function widenHint(t: ToolDef, args: Record<string, unknown>, all: Record<string, unknown> = args): string | undefined {
   const req = new Set(requiredOf(t));
   const filters = Object.keys(args).filter((k) => !req.has(k) && !isPagingArg(k) && args[k] !== undefined);
   if (!filters.length) {
-    const position = Object.keys(args).filter((k) => isPagingArg(k) && !/limit|per_page|page_size/i.test(k));
+    const position = Object.keys(all).filter((k) => (isPagingArg(k) || k === 'nr_cursor') && !/limit|per_page|page_size/i.test(k));
     if (!position.length) return '0 items.';
-    const first = Object.fromEntries(Object.entries(args).filter(([k]) => !position.includes(k)));
+    const first = Object.fromEntries(Object.entries(all).filter(([k]) => !position.includes(k)));
     const hint = `No items at this ${position.join('/')}. First page: ${t.name}(${JSON.stringify(first)})`;
     return hint.length <= BUDGET.hintChars ? hint : `No items at this ${position.join('/')}; drop it for the first page.`;
   }

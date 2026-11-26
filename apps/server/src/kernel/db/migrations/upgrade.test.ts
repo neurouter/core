@@ -93,7 +93,7 @@ describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('upgrade a v0
     await dbs.close();
 
     dbs = createDatabases({ databaseUrl: url });
-    expect(await migrateAll(dbs, { embeddingDims: DIMS })).toEqual({ main: ['0008_tenant_scope', '0009_mock_state', '0010_eval_origin', '0011_eval_cache_tokens'], audit: [] });
+    expect(await migrateAll(dbs, { embeddingDims: DIMS })).toEqual({ main: ['0008_tenant_scope', '0009_mock_state', '0010_eval_origin', '0011_eval_cache_tokens', '0012_task_state'], audit: [] });
     expect(await migrateAll(dbs, { embeddingDims: DIMS })).toEqual({ main: [], audit: [] });
     await assertUpgraded(dbs);
     await dbs.close();

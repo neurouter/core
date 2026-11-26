@@ -341,7 +341,7 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
           if (typeof ps.maximum === 'number') base.paging.maxLimit = ps.maximum;
         } else if (n === 'page') base.paging.page = p.name;
         else if (n === 'offset') base.paging.offset = p.name;
-        else if (['cursor', 'page_token', 'after'].includes(n)) base.paging.cursor = p.name;
+        else if (['cursor', 'page_token', 'pagetoken', 'after'].includes(n)) base.paging.cursor = p.name;
         else if (n === 'starting_after') base.paging.startingAfter = p.name;
         else if (n === 'ending_before') base.paging.endingBefore = p.name;
         else if (n === 'sort' || n === 'sort_by' || n === 'order_by') (base.sort ??= {}).param = p.name;

@@ -20,6 +20,13 @@ export class ResultPages {
     return handle;
   }
 
+  /** The whole stored value (contract-2 `r` cursors page through it), or null when unknown, expired or another credential's. */
+  async load(tenantId: string, credentialKey: string, handle: string): Promise<unknown> {
+    const r = await this.db.selectFrom('result_pages').selectAll().where('handle', '=', handle).where('tenant_id', '=', tenantId).executeTakeFirst();
+    if (!r || r.credential_key !== credentialKey || r.expires_at <= this.now()) return null;
+    return JSON.parse(gunzipSync(r.content).toString('utf8')) as unknown;
+  }
+
   /** Reads a page: arrays are paged by item; anything else is paged by characters of its JSON. */
   async read(tenantId: string, credentialKey: string, handle: string, offset: number, limit: number): Promise<{ items?: unknown[]; text?: string; offset: number; total: number; next_offset: number | null } | null> {
     const r = await this.db.selectFrom('result_pages').selectAll().where('handle', '=', handle).where('tenant_id', '=', tenantId).executeTakeFirst();

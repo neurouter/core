@@ -27,7 +27,8 @@ describe('contract v2 goldens (acme, mock)', () => {
 
   it('records the v2 surface and envelopes', async () => {
     const all = ['tools:read', 'tools:write', 'code:run'] as const;
-    const mock = rawMcp(`${s.url}/mcp/acme/mock`, await keyFor(s, 'acme', 'mock', [...all]), { headers: V2 });
+    const mockKey = await keyFor(s, 'acme', 'mock', [...all]);
+    const mock = rawMcp(`${s.url}/mcp/acme/mock`, mockKey, { headers: V2 });
     const init = await mock.initialize();
     golden.check('initialize', init.result);
     expect((init.result as { instructions: string }).instructions).toMatch(/^Neurouter contract 2\./);
@@ -45,7 +46,14 @@ describe('contract v2 goldens (acme, mock)', () => {
     const order = await call('get_order', 'get_order', { order_id: 'order_1' });
     expect(order.state).toMatchObject({ env: 'mock', writes: 'on', call: 1 });
     expect((await call('get_order_again', 'get_order', { order_id: 'order_1' })).state).toMatchObject({ streak: 2 });
-    expect((await call('list_orders', 'list_orders', { limit: 2 })).page).toMatchObject({ count: 2, total: 20, has_more: true });
+    const lo = await call('list_orders', 'list_orders', { limit: 2 });
+    expect(lo.page).toMatchObject({ count: 2, total: 20, has_more: true });
+    expect(lo.page.next_cursor).toMatch(/^c_/);
+    const lo2 = await call('list_orders_page2', 'list_orders', { limit: 2, cursor: lo.page.next_cursor });
+    expect(lo2.data.items.map((o: { id: string }) => o.id)).toEqual(['order_3', 'order_4']);
+    await call('list_orders_fields', 'list_orders', { limit: 2, fields: ['id', 'status', 'total'] });
+    const mism = await call('list_orders_cursor_mismatch', 'list_orders', { limit: 3, cursor: lo.page.next_cursor });
+    expect(mism.error).toMatchObject({ code: 'invalid_args', next: [{ tool: 'list_orders', args: { limit: 3 } }] });
     await call('get_customer', 'get_customer', { customer_id: 'customer_1' });
     await call('list_customers', 'list_customers', { limit: 3 });
     // empty lists (scope + widening hint)
@@ -57,10 +65,13 @@ describe('contract v2 goldens (acme, mock)', () => {
     // truncated list and clipped object
     const cut = await call('list_products_truncated', 'list_products', {});
     expect(cut.page).toMatchObject({ count: 3, total: 20, has_more: true });
-    expect(cut.truncated).toMatchObject({ items_omitted: 17, next: { tool: 'neurouter_read_result', args: { offset: 3 } } });
+    expect(cut.truncated).toBeNull();
+    const cut2 = await call('list_products_page2', 'list_products', { cursor: cut.page.next_cursor });
+    expect(cut2.page).toMatchObject({ count: 3, total: 20, has_more: true });
     const created = await call('create_customer', 'create_customer', { name: `Ada ${'Lovelace '.repeat(30)}`.trim(), email: 'ada@example.com' });
     const clipped = await call('get_customer_clipped', 'get_customer', { customer_id: created.data.id });
-    expect(clipped.truncated).toMatchObject({ fields: ['name'], next: { tool: 'neurouter_read_result' } });
+    expect(clipped.truncated).toMatchObject({ fields: ['name'], next: { tool: 'get_customer', args: { customer_id: created.data.id, fields: ['name'] } } });
+    await call('get_customer_fields', 'get_customer', clipped.truncated.next.args);
     // errors: unknown ids (parent list as next), validation (every failure + a corrected call), unknown tool
     const nf = await call('get_order_not_found', 'get_order', { order_id: 'ord_doesnotexist' });
     expect(nf.error).toMatchObject({ code: 'not_found', retry: 'after_fix', next: [{ tool: 'list_orders', args: { limit: 20 } }], upstream: { status: 404 } });
@@ -84,7 +95,11 @@ describe('contract v2 goldens (acme, mock)', () => {
     await call('search_python', 'search_tools', { query: 'find orders of a customer', limit: 3 }, { 'x-neurouter-exposure': 'code' });
     await call('search_empty', 'search_tools', { query: 'zzqx frobnicate warp drive' });
     await call('search_invalid', 'search_tools', { query: '' });
-    // ops: listed report tools, then the unlisted v1 names
+    // ops: neurouter_report (listed), then the unlisted v1 names
+    await call('report_kind_unmet_need', 'neurouter_report', { kind: 'unmet_need', text: 'export orders as CSV', attempted: ['search_tools'] });
+    await call('report_kind_tool_problem', 'neurouter_report', { kind: 'tool_problem', text: 'total is wrong', tool: 'get_order' });
+    await call('report_kind_decision', 'neurouter_report', { kind: 'decision', text: 'used list_orders', reason: 'no search tool' });
+    await call('report_kind_invalid', 'neurouter_report', { kind: 'nope', text: 'x' });
     await call('report_unmet_need', 'neurouter_report_unmet_need', { intent: 'export orders as CSV', attempted: ['search_tools'] });
     await call('report_issue', 'neurouter_report_issue', { tool: 'get_order', problem: 'wrong total' });
     await call('log_decision', 'neurouter_log_decision', { choice: 'used list_orders', reason: 'no search tool' });
@@ -94,7 +109,11 @@ describe('contract v2 goldens (acme, mock)', () => {
     await call('get_examples', 'neurouter_get_examples', { tool: 'get_order' });
     await call('explain_error', 'neurouter_explain_error', { error_id: nf.error.error_id });
     await call('explain_error_unknown', 'neurouter_explain_error', { error_id: 'err_doesnotexist0000' });
-    const page2 = await call('read_result', 'neurouter_read_result', { ...cut.truncated.next.args, limit: 5 });
+    // read_result stays answered (unlisted) for handles from contract-1 answers (one release)
+    const v1 = rawMcp(`${s.url}/mcp/acme/mock`, mockKey);
+    await v1.initialize();
+    const handle = ((await v1.call('list_products', {})).result as { _meta: Record<string, string> })._meta['dev.neurouter/result-handle'];
+    const page2 = await call('read_result', 'neurouter_read_result', { handle, offset: 3, limit: 5 });
     expect(page2.page).toMatchObject({ count: 5, total: 20, has_more: true });
     await call('read_result_unknown', 'neurouter_read_result', { handle: 'rh_nope' });
     // call_tool
@@ -118,9 +137,17 @@ describe('contract v2 goldens (acme, mock)', () => {
     await call('script_runtime_error', 'run_script', { code: 'x = {}\nreturn x["missing"]' });
     await call('script_too_large', 'run_script', { code: 'return "x" * 1100000' });
     await call('script_missing_code', 'run_script', {});
-    // writes (mutate the mock: last)
-    const w = await call('cancel_order', 'cancel_order', { order_id: 'order_3', reason: 'other' });
+    // writes (mutate the mock: last). Destructive outside prod: plan + confirm token first (D5)
+    await call('cancel_order_dry_run', 'cancel_order', { order_id: 'order_3', reason: 'other', dry_run: true });
+    const need = await call('cancel_order_confirmation_required', 'cancel_order', { order_id: 'order_3', reason: 'other' });
+    expect(need.error).toMatchObject({ code: 'confirmation_required', next: [{ tool: 'cancel_order', args: { order_id: 'order_3', reason: 'other' } }] });
+    expect(need.data.plan).toMatchObject({ tool: 'cancel_order', target: 'order order_3', reversible: false });
+    const w = await call('cancel_order', 'cancel_order', need.error.next[0].args);
     expect(w.state.wrote).toBe('cancel_order → order order_3');
+    await call('cancel_order_token_reused', 'cancel_order', need.error.next[0].args);
+    await call('update_order', 'update_order', { order_id: 'order_4', note: 'gift' });
+    await call('script_confirmation_required', 'run_script', { code: 'return acme.cancel_order(order_id="order_5", reason="other")' });
+    await call('report_done', 'neurouter_report', { kind: 'done', text: 'Cancelled order_3' });
     await call('end_task', 'neurouter_end_task', { outcome: 'success' });
 
     // prod: confirmation without elicitation (plan in data)

@@ -90,7 +90,7 @@ function checkBody(schema: JsonSchema | null, body: unknown): string[] {
  * A list response wrapped in an object (`{total_count, items}`, Stripe's `{object, data, has_more, url}`):
  * the envelope's other fields are generated from its schema so required ones are present.
  */
-function listEnvelope(op: MockOperation, nsSeed: number, page: Obj[], total: number, more: boolean, dv: MockDataVersion): Obj {
+function listEnvelope(op: MockOperation, nsSeed: number, page: Obj[], total: number, more: boolean, nextCursor: string | null | undefined, dv: MockDataVersion): Obj {
   const w = op.listWrapper!;
   const props = isObj(w.schema.properties) ? (w.schema.properties as Obj) : {};
   const { [w.arrayProp]: _items, ...rest } = props;
@@ -100,9 +100,28 @@ function listEnvelope(op: MockOperation, nsSeed: number, page: Obj[], total: num
   const closed = w.schema.additionalProperties === false;
   if (!closed || 'total_count' in props) out.total_count = total;
   if ('has_more' in props) out.has_more = more;
+  // next-page tokens point at the next page (the list answers them), and are null/absent on the last page;
+  // without MOCK_PAGING_HEADER the generated placeholder stays (the 0.1/0.2 mock answers, recorded in goldens)
+  for (const k of nextCursor === undefined ? [] : Object.keys(props)) {
+    if (!NEXT_TOKEN.test(k)) continue;
+    const p = isObj(props[k]) ? (props[k] as Obj) : {};
+    const nullable = p.nullable === true || (Array.isArray(p.type) && p.type.includes('null'));
+    if (more && nextCursor !== null) out[k] = nextCursor;
+    else if (nullable) out[k] = null;
+    else delete out[k];
+  }
   out[w.arrayProp] = page;
   return out;
 }
+
+const NEXT_TOKEN = /^(next_?cursor|next_?page_?token|next_?token)$/i;
+
+/**
+ * Request header that makes list next-page tokens real (`tokens`): the token in the body is the next page's
+ * position, which the list accepts back as its cursor parameter. Neurouter's contract-2 pipeline sends it (its
+ * cursors carry upstream tokens); without it the mock keeps answering as before.
+ */
+export const MOCK_PAGING_HEADER = 'x-neurouter-mock-paging';
 
 function nowIso(store: MockStateStore): string {
   return new Date(store.now()).toISOString();
@@ -137,7 +156,8 @@ export async function handleMockRequest(model: MockModel, store: MockStateStore 
     const params: Record<string, string> = {};
     c.names.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1]!)));
     try {
-      return await dispatch(model, asStateStore(store), toMockNs(namespace), c.op, params, query, req.body);
+      const realTokens = Object.entries(req.headers ?? {}).some(([k, v]) => k.toLowerCase() === MOCK_PAGING_HEADER && v === 'tokens');
+      return await dispatch(model, asStateStore(store), toMockNs(namespace), c.op, params, query, req.body, realTokens);
     } catch (err) {
       if (err instanceof MockLimitError) return problem(err.status, err.status === 507 ? 'Insufficient Storage' : 'Payload Too Large', err.message, { code: err.code });
       throw err;
@@ -226,7 +246,7 @@ function seedParams(params: Record<string, string>): string {
   return JSON.stringify(Object.keys(params).sort().map((k) => [k, String(params[k]).toLowerCase()]));
 }
 
-async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: MockNs, op: MockOperation, params: Record<string, string>, query: Record<string, string | string[] | undefined>, body: unknown): Promise<MockResponse> {
+async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: MockNs, op: MockOperation, params: Record<string, string>, query: Record<string, string | string[] | undefined>, body: unknown, realTokens = false): Promise<MockResponse> {
   // derived from the namespace seed, not its name: an eval attempt sees what generation saw
   const nsSeed = (await store.seedOf?.(ns)) ?? DEFAULT_SEED;
   const dv = mockDataVersionOf(ns.name);
@@ -272,7 +292,7 @@ async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: Mock
       const more = end !== null ? offset > 0 : offset + page.length < total;
       const headers: Record<string, string> = { ...JSON_HEADERS };
       if (more && p.page && end === null) headers.link = `<?${p.page}=${Math.floor(offset / limit) + 2}&${p.limit ?? 'per_page'}=${limit}>; rel="next"`;
-      if (op.listWrapper) return { status: 200, headers, body: listEnvelope(op, nsSeed, page, total, more, dv) };
+      if (op.listWrapper) return { status: 200, headers, body: listEnvelope(op, nsSeed, page, total, more, !realTokens ? undefined : more && p.cursor && end === null ? String(offset + page.length) : null, dv) };
       return { status: op.successStatus, headers, body: page };
     }
     case 'create': {

@@ -22,10 +22,23 @@ import { envLabel, killSwitchFor, resolveVisibleTool, writeEnabled, type Confirm
 import type { OpsTools } from '../ops/ops.js';
 import { opFor } from '../ops/ops.js';
 import { validateScript } from './validate.js';
+import { writePlan, type ConfirmTokens } from '../pipeline/confirm-token.js';
+import type { CursorPayload } from '../paging/cursor.js';
+import { itemsOf, pagingPlan } from '../paging/plan.js';
 import { wrapScript } from './wrap.js';
 
 /** Ops helpers forwarded to the host (parallel / days_since / now run inside the executor). */
 export const SCRIPT_OPS = ['log_decision', 'report_unmet_need', 'report_issue'] as const;
+
+/** Contract 2: `ops.pages` (all items of a list tool across its pages; P4 adds `fn.pages()` on the functions). */
+const PAGES_STUB = [
+  'def pages(fn: str, args: dict[str, Any] | None = None, max_items: int = 500) -> list[Any]:',
+  '    """All items of a list function across its pages, e.g. ops.pages(fn="ns.list_orders", args={"status": "paid"}, max_items=200).',
+  '',
+  '    Each page is one tool call. Stops after max_items (at most 5000) or the last page."""',
+  '',
+].join('\n');
+const PAGES_MAX = 5000;
 
 export const RUN_SCRIPT_DEFINITION = {
   name: 'run_script',
@@ -58,6 +71,8 @@ export interface RunScriptDeps {
   log: { warn: (o: object, m: string) => void };
   /** Is the executor healthy right now (cached by the health loop)? */
   healthy: () => boolean;
+  /** contract 2: confirm tokens for scripts with destructive calls outside prod (D5) */
+  confirms?: ConfirmTokens;
 }
 
 interface Phase {
@@ -146,12 +161,16 @@ export function exampleCall(tools: ToolDef[]): string | null {
  * annotations say what a script can do here (writes possible → not read-only; destructive when any
  * callable tool is destructive).
  */
-export function runScriptEntry(ctx: RunContext): typeof RUN_SCRIPT_DEFINITION & { annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } } {
+export function runScriptEntry(ctx: RunContext): Omit<typeof RUN_SCRIPT_DEFINITION, 'inputSchema'> & { inputSchema: Record<string, unknown> } & { annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } } {
   const tools = allowedTools(ctx);
   const call = exampleCall(tools);
   const writes = tools.some((t) => t.risk.write);
   const description = call ? RUN_SCRIPT_DEFINITION.description.replace('(e.g. <namespace>.<function>(arg=...))', `(e.g. ${call})`) : RUN_SCRIPT_DEFINITION.description;
-  return { ...RUN_SCRIPT_DEFINITION, description, annotations: { readOnlyHint: !writes, destructiveHint: tools.some((t) => t.risk.write && t.risk.destructive), idempotentHint: false, openWorldHint: true } };
+  const destructive = tools.some((t) => t.risk.write && t.risk.destructive);
+  // contract 2 outside prod (D5): scripts with destructive calls run with the confirm token of their dry run
+  const confirm = ctx.contract === 2 && destructive && ctx.bundle.environment.writes.confirm === 'none';
+  const inputSchema = confirm ? { ...RUN_SCRIPT_DEFINITION.inputSchema, properties: { ...RUN_SCRIPT_DEFINITION.inputSchema.properties, confirm: { type: 'string', description: 'The token from the dry run (data.next / error.next) when the script makes destructive changes.' } } } : RUN_SCRIPT_DEFINITION.inputSchema;
+  return { ...RUN_SCRIPT_DEFINITION, description, inputSchema, annotations: { readOnlyHint: !writes, destructiveHint: destructive, idempotentHint: false, openWorldHint: true } };
 }
 
 /** Whether `run_script` is available to this principal (§9.3). */
@@ -197,6 +216,10 @@ export class ScriptRunner {
     }
     this.running.set(key, (this.running.get(key) ?? 0) + 1);
     try {
+      // contract 2 outside prod (D5): a script whose dry run plans destructive calls runs only with a confirm token
+      // for exactly that plan; the token round is the dry run's answer
+      const gated = await this.tokenGate(executor, ctx, code, mode, inputs, args, callAs, signal);
+      if (gated) return gated;
       // writes that need confirmation (prod, or confirm set elsewhere): dry run first, then elicit once with the plan (§9.7)
       const confirmMode = ctx.bundle.environment.writes.confirm;
       const confirmWrites = ctx.bundle.environment.writes.enabled && confirmMode !== 'none';
@@ -215,7 +238,8 @@ export class ScriptRunner {
               // elicit: the dry run already ran; return its plan (nothing was executed) for the user to review
               const planned = dry.planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, arguments: p.arguments }));
               const r = await this.finishRejected(ctx, code, 'execute', 'confirm_declined', `Not executed: this client cannot ask the user to confirm writes in ${where}. The dry run planned ${planned.length} change(s), none made:\n${listed}\nShow them to the user; they can approve the script from a client with MCP elicitation support.`, 'confirmation_unsupported');
-              const draft = errorDraft({ code: 'confirmation_unsupported', message: '', text: `The script makes ${planned.length} change(s) that need your user's approval in ${where}, and this client cannot ask; nothing changed. Show data.plan to the user.`, name: callAs.name, args: callAs.args, next: [] }, { write: true, data: { plan: planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, args: p.arguments })) } });
+              const report = ctx.contract === 2 && ctx.bundle.server.opsTools.end_task ? [{ tool: 'neurouter_report', args: { kind: 'blocked', text: `needs approval for a script with ${planned.length} change(s) in ${where}` } }] : [];
+              const draft = errorDraft({ code: 'confirmation_unsupported', message: '', text: `The script makes ${planned.length} change(s) that need your user's approval in ${where}, and this client cannot ask; nothing changed. Show data.plan to the user.`, name: callAs.name, args: callAs.args, next: report }, { write: true, data: { plan: this.planOf(ctx, dry.planned) } });
               return { result: { ...r, _meta: { ...(r._meta ?? {}), [META_PLANNED_CHANGES]: planned } }, draft };
             }
             const message = out.status === 'unsupported' ? `This client cannot ask the user to confirm writes in ${where}; the script was not run.` : 'The user declined the planned changes.';
@@ -232,6 +256,50 @@ export class ScriptRunner {
     } finally {
       this.running.set(key, (this.running.get(key) ?? 1) - 1);
     }
+  }
+
+  /**
+   * Contract 2, outside prod (D5): when the principal can call destructive tools, an `execute` run is dry-run first;
+   * if the plan has destructive calls, the run needs `confirm` = a token bound to the code, inputs and that plan
+   * (5 min, single use). Without one (or with a stale one) the answer is `confirmation_required` with `data.plan`
+   * and the run_script call carrying a fresh token; with it, the script runs with exactly those destructive calls
+   * approved (any other destructive call inside raises `confirmation_required`). Null: no gate applies.
+   */
+  private async tokenGate(executor: Executor, ctx: RunContext, code: string, mode: 'dry_run' | 'execute', inputs: Record<string, unknown>, args: Record<string, unknown>, callAs: ScriptCallAs, signal: AbortSignal | undefined): Promise<ScriptReply | null> {
+    const env = ctx.bundle.environment;
+    if (ctx.contract !== 2 || !this.d.confirms || mode !== 'execute' || !env.writes.enabled || env.writes.confirm !== 'none') return null;
+    const destructiveTools = new Set(allowedTools(ctx).filter((t) => t.risk.write && t.risk.destructive).map((t) => t.name));
+    if (!destructiveTools.size) return null;
+    const dry = await this.runOnce(executor, ctx, code, 'dry_run', inputs, callAs, signal, true);
+    if (dry.status !== 'ok') return { result: dry.result, draft: dry.draft };
+    const destructive = dry.planned.filter((p) => destructiveTools.has(p.tool));
+    if (!destructive.length) return null;
+    const binding = this.scriptBinding(ctx, code, inputs, callAs, destructive);
+    const token = typeof args.confirm === 'string' ? args.confirm : undefined;
+    const problem = token ? await this.d.confirms.spend(token, binding) : 'missing';
+    if (!problem) {
+      const plan = new Set(destructive.map((p) => `${p.tool}|${p.argsHash}`));
+      const run = await this.runOnce(executor, { ...ctx, approvedPlan: plan }, code, 'execute', inputs, callAs, signal);
+      return { result: run.result, draft: run.draft };
+    }
+    const why = problem === 'expired' ? 'The confirm token expired (5 minutes). ' : problem === 'used' ? 'The confirm token was already used. ' : problem === 'missing' ? '' : 'The confirm token is for another script or plan. ';
+    const text = `${why}The script makes ${destructive.length} destructive change(s); nothing changed yet. Repeat with the confirm token to run it.`;
+    const next = { tool: callAs.name, args: { ...withoutConfirm(callAs.args), confirm: this.d.confirms.mint(binding) } };
+    return { result: dry.result, draft: errorDraft({ code: 'confirmation_required', message: text, text, name: callAs.name, args: callAs.args, next: [next] }, { data: { plan: this.planOf(ctx, dry.planned) }, flags: ['dry_run'], write: true, ...(dry.draft.meta ? { meta: dry.draft.meta } : {}) }) };
+  }
+
+  /** What a script confirm token binds: the code, the inputs and the destructive calls of its plan. */
+  private scriptBinding(ctx: RunContext, code: string, inputs: Record<string, unknown>, callAs: ScriptCallAs, destructive: PlannedChange[]) {
+    const plan = sha256Hex(JSON.stringify(destructive.map((p) => `${p.tool}|${p.argsHash}`)));
+    return { tenantId: ctx.tenantId, environmentId: ctx.environment.id, credentialKey: ctx.credentialKey, tool: callAs.name, args: { code: sha256Hex(code), inputs, plan } };
+  }
+
+  /** Contract-2 plan entries (target, effect, reversible); contract 1 keeps `{tool, method, path, args}`. */
+  private planOf(ctx: RunContext, planned: PlannedChange[]): unknown[] {
+    return planned.map((p) => {
+      const t = ctx.contract === 2 ? ctx.bundle.build.tools.find((x) => x.name === p.tool) : undefined;
+      return t ? writePlan(t, p.arguments) : { tool: p.tool, method: p.method, path: p.path, args: p.arguments };
+    });
   }
 
   private async finishRejected(ctx: RunContext, code: string, mode: 'dry_run' | 'execute', status: ScriptStatus, message: string, errorCode?: ErrorCode): Promise<McpToolResult> {
@@ -258,11 +326,17 @@ export class ScriptRunner {
     budget: { calls: number; left: { calls: number; seconds: number } },
     innerErrors: Map<string, ErrorInfo>,
     meta: Record<string, unknown>,
+    src: { code: string; inputs: Record<string, unknown> },
   ): Draft {
+    const scriptCode = src.code;
+    const scriptInputs = src.inputs;
     const extra = { left: budget.left, scriptCalls: budget.calls, meta, ...(mode === 'dry_run' ? { flags: ['dry_run' as const] } : {}), ...(planned.length ? { write: true } : {}) };
     if (status === 'ok') {
-      const plan = planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, args: p.arguments }));
-      const data = mode === 'dry_run' ? { result: value, plan } : value;
+      const plan = this.planOf(ctx, planned);
+      // contract 2 outside prod: a dry run that plans destructive calls also hands back the confirmed run (D5)
+      const destructive = ctx.contract === 2 && this.d.confirms && ctx.bundle.environment.writes.confirm === 'none' ? planned.filter((p) => ctx.bundle.build.tools.find((t) => t.name === p.tool)?.risk.destructive) : [];
+      const next = mode === 'dry_run' && destructive.length ? { tool: callAs.name, args: { ...withoutConfirm(callAs.args), mode: 'execute', confirm: this.d.confirms!.mint(this.scriptBinding(ctx, scriptCode, scriptInputs, callAs, destructive)) } } : null;
+      const data = mode === 'dry_run' ? { result: value, plan, ...(next ? { next } : {}) } : value;
       if (!body.truncated) return okDraft(data, extra);
       const shown = typeof body.preview === 'string' ? Buffer.byteLength(body.preview) : 0;
       return okDraft(data, {
@@ -296,13 +370,47 @@ export class ScriptRunner {
     }
   }
 
+  /**
+   * `ops.pages(fn, args, max_items)` (contract 2): calls a list function page by page with the positions the
+   * pipeline reads from each upstream answer (the same ones `page.next_cursor` encodes), up to `max_items`. Each
+   * page is one tool call of the script (limits apply); a failing page raises its tool error.
+   */
+  private async pages(ctx: RunContext, kwargs: Record<string, unknown>, byFn: Map<string, ToolDef>, count: () => void, raise: (info: ErrorInfo) => HostCallResult, tools: ToolDef[], signal: AbortSignal | undefined, planned: PlannedChange[]): Promise<HostCallResult> {
+    const fn = typeof kwargs.fn === 'string' ? kwargs.fn : '';
+    const t = byFn.get(fn);
+    const bad = (text: string) => raise({ code: 'invalid_args', message: text, retry: 'after_fix', next: [] });
+    if (!t) return bad(`ops.pages: no function ${fn || '(fn missing)'} in this script's namespaces; pass fn="<ns>.<list function>".`);
+    if (!pagingPlan(t).list) return bad(`ops.pages: ${fn} does not return a list.`);
+    const raw = kwargs.args ?? {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('ops.pages: args must be a dict of keyword arguments.');
+    const max = Math.min(PAGES_MAX, Math.max(1, Number.isInteger(kwargs.max_items) ? (kwargs.max_items as number) : 500));
+    const map = pyArgMap(t);
+    const args: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) args[map[k] ?? k] = v;
+    const items: unknown[] = [];
+    let position: Exclude<CursorPayload, { k: 'r' }> | undefined;
+    for (let page = 0; page < PAGES_MAX && items.length < max; page++) {
+      if (page > 0) count();
+      const out = await this.d.pipeline.invoke(ctx, t.name, args, { planned, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
+      if (!out.ok) {
+        const info: ErrorInfo = out.draft.error ? await errorInfoFor(ctx, out.draft.error) : { code: 'upstream_error', message: out.error?.message ?? 'page failed', retry: 'no', next: [] };
+        return raise({ ...info, next: info.next.map((c) => asScriptCall(c, tools)) });
+      }
+      items.push(...(itemsOf(out.value) ?? []));
+      if (!out.paging?.more || !out.paging.next) break;
+      position = out.paging.next;
+    }
+    return { ok: true, value: items.slice(0, max) };
+  }
+
   /** Stubs regenerated from the filtered tool list, cached by (build, allowedSetHash). */
   private stubsFor(ctx: RunContext, tools: ToolDef[], ns: string): Record<string, string> {
     const ops = SCRIPT_OPS.filter((o) => ctx.bundle.server.opsTools[o]);
-    const k = `${ctx.bundle.build.id}|${sha256Hex(tools.map((t) => t.name).join(','))}|${ops.join(',')}`;
+    const v2 = ctx.contract === 2;
+    const k = `${ctx.bundle.build.id}|${sha256Hex(tools.map((t) => t.name).join(','))}|${ops.join(',')}|${v2 ? 2 : 1}`;
     const hit = this.stubCache.get(k);
     if (hit) return hit;
-    const out = { [ns]: generateStubs(tools, ns, { buildHash: ctx.bundle.build.hash }), ops: generateOpsStub(ops) };
+    const out = { [ns]: generateStubs(tools, ns, { buildHash: ctx.bundle.build.hash }), ops: generateOpsStub(ops) + (v2 ? `\n${PAGES_STUB}` : '') };
     if (this.stubCache.size > 200) this.stubCache.clear();
     this.stubCache.set(k, out);
     return out;
@@ -374,7 +482,7 @@ export class ScriptRunner {
       }
       const isError = status !== 'ok';
       const text = JSON.stringify(structured);
-      const draft = this.scriptDraft(ctx, status, body, value ?? null, mode, planned, callAs, { calls, left: { calls: Math.max(0, lim.maxToolCalls - calls), seconds: Math.max(0, Math.floor((lim.wallTimeSec * 1000 - (ended - started)) / 1000)) } }, innerErrors, { [META_CALL_ID]: auditId, [META_TASK_ID]: taskId, 'dev.neurouter/script-run-id': runId });
+      const draft = this.scriptDraft(ctx, status, body, value ?? null, mode, planned, callAs, { calls, left: { calls: Math.max(0, lim.maxToolCalls - calls), seconds: Math.max(0, Math.floor((lim.wallTimeSec * 1000 - (ended - started)) / 1000)) } }, innerErrors, { [META_CALL_ID]: auditId, [META_TASK_ID]: taskId, 'dev.neurouter/script-run-id': runId }, { code, inputs });
       return { status, planned, result: v1Result(text.length > 8192 ? `${text.slice(0, 8150)}… (truncated preview)` : text, structured, meta, isError), draft };
     };
     /** contract 2: the error objects raised into the script (by JSON message), so an uncaught one becomes the run's error */
@@ -417,6 +525,7 @@ export class ScriptRunner {
             return { ok: false, error: { code: info.code, message, ...(PY_ERROR[info.code] ? { pyType: PY_ERROR[info.code] } : { pyType: 'RuntimeError' }) } } as HostCallResult;
           };
           const unknownFn = async (): Promise<HostCallResult> => raise(await errorInfoFor(ctx, { code: 'unknown_tool', message: '', text: `No function ${fn} in this script's namespaces; nothing was called.`, name: fn, closest: closestNames(fn, [...byFn.keys()]), next: [{ tool: 'search_tools', args: { query: fn.split('.').pop() ?? fn } }] }));
+          if (fn === 'ops.pages' && v2) return this.pages(ctx, kwargs, byFn, () => calls++, raise, tools, signal, planned);
           if (fn.startsWith('ops.')) {
             const op = opFor(ctx, fn);
             if (!op || !(SCRIPT_OPS as readonly string[]).includes(op)) return v2 ? unknownFn() : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
@@ -460,7 +569,7 @@ export class ScriptRunner {
           code: wrapped.code,
           lineOffset: wrapped.lineOffset,
           colOffset: wrapped.colOffset,
-          modules: { [ns]: { functions: tools.map((t) => t.pyName.split('.').slice(1).join('.')), stubs: stubs[ns]! }, ops: { functions: [...opsFns], stubs: stubs.ops! } },
+          modules: { [ns]: { functions: tools.map((t) => t.pyName.split('.').slice(1).join('.')), stubs: stubs[ns]! }, ops: { functions: [...opsFns, ...(v2 ? ['pages'] : [])], stubs: stubs.ops! } },
           inputs,
           limits: { cpuTimeSec: lim.cpuTimeSec, wallTimeSec: lim.wallTimeSec, maxMemoryMb: lim.maxMemoryMb, maxToolCalls: lim.maxToolCalls, maxConcurrentCalls: lim.maxConcurrentCalls, maxResultBytes: lim.maxResultBytes },
           osPolicy: { datetime: new Date(started).toISOString(), seed: parseInt(sha256Hex(runId).slice(0, 8), 16) },
@@ -485,6 +594,12 @@ export class ScriptRunner {
     void planOnly;
     return finish(res.status as ScriptStatus, { value: res.value, ...(res.error ? { error: withBuiltinHint({ ...res.error }) } : {}), stats: { wallMs: res.stats.wallMs, suspensions: res.stats.suspensions, toolCalls: calls }, stdout: res.stdout, truncated: res.truncated === true, preview: res.preview, valueBytes: res.valueBytes });
   }
+}
+
+/** Call arguments without a confirm token (single use; next calls carry a fresh one). */
+function withoutConfirm(args: Record<string, unknown>): Record<string, unknown> {
+  const { confirm: _c, ...rest } = args;
+  return rest;
 }
 
 function safeParse(s: string): unknown {
