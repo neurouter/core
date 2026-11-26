@@ -22,6 +22,12 @@ export interface SpawnExecutorOptions {
   /** Extra Node flags for the child (default: `--import tsx` when `entry` is a .ts file). */
   execArgv?: string[];
   montyBinaryPath?: string;
+  /**
+   * Pinned sha256 of the Monty binary (e.g. computed at image build). When given, the parent does not
+   * hash the binary itself (a synchronous 47 MB read at startup); the child still verifies the binary
+   * against it before starting, and the client checks the child's `hello` against it.
+   */
+  montyBinarySha256?: string;
   /** Called when the child exits unexpectedly (it is restarted with backoff 1 s → 30 s). */
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
   logger?: ExecLogger;
@@ -69,7 +75,7 @@ export function spawnEmbeddedExecutor(opts: SpawnExecutorOptions): EmbeddedExecu
   const socketPath = join(dir, basename(opts.socketPath ?? 'neurouter-executor.sock'));
   const token = opts.token ?? randomBytes(32).toString('base64url');
   const montyBinaryPath = resolveMontyBinary(opts.montyBinaryPath);
-  const montyBinarySha256 = sha256File(montyBinaryPath);
+  const montyBinarySha256 = opts.montyBinarySha256?.trim().toLowerCase() || sha256File(montyBinaryPath);
   const resolved = opts.entry ? { entry: opts.entry, execArgv: opts.entry.endsWith('.ts') ? ['--import', import.meta.resolve('tsx')] : [] } : resolveExecutorEntry();
   const execArgv = opts.execArgv ?? resolved.execArgv;
   const env: NodeJS.ProcessEnv = {

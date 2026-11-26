@@ -83,6 +83,54 @@ export interface ServiceInputs {
   executor?: Executor | null;
   /** OTel logs provider override for the audit sink (tests). */
   otelLogProvider?: () => Promise<LogProviderLike>;
+  /** An executor boot already in flight (`bootExecutor`, started by `startServer` before the DB setup). */
+  executorBoot?: Promise<ExecutorBoot>;
+}
+
+export interface ExecutorBoot {
+  executor: Executor | null;
+  embedded: EmbeddedExecutor | null;
+  /** Set when the executor failed to start (code mode unavailable); never thrown. */
+  error?: unknown;
+}
+
+/**
+ * Starts the code-mode executor for `NEUROUTER_EXECUTOR_MODE` (embedded: spawns the child and awaits
+ * its socket). Never rejects: a failure is returned in `error`. Independent of the database, so
+ * `startServer` runs it concurrently with migrations and service init (cold start).
+ */
+export async function bootExecutor(config: Config, logger: Logger): Promise<ExecutorBoot> {
+  const mode = config.env.NEUROUTER_EXECUTOR_MODE;
+  if (mode === 'off') return { executor: null, embedded: null };
+  let embedded: EmbeddedExecutor | null = null;
+  try {
+    if (mode === 'local') return { executor: await LocalExecutor.create({ poolMax: config.env.NEUROUTER_EXECUTOR_POOL_MAX, prewarm: config.env.NEUROUTER_EXECUTOR_PREWARM, ...(config.env.MONTY_BINARY_PATH ? { binaryPath: config.env.MONTY_BINARY_PATH } : {}) }), embedded: null };
+    if (mode === 'remote') return { executor: new SocketExecutor({ address: parseExecutorUrl(config.env.NEUROUTER_EXECUTOR_URL!), token: config.env.NEUROUTER_EXECUTOR_TOKEN!, ...(config.env.MONTY_BINARY_SHA256 ? { expectedMontySha256: config.env.MONTY_BINARY_SHA256 } : {}) }), embedded: null };
+    embedded = spawnEmbeddedExecutor({
+      poolMax: config.env.NEUROUTER_EXECUTOR_POOL_MAX,
+      prewarm: config.env.NEUROUTER_EXECUTOR_PREWARM,
+      socketPath: config.env.NEUROUTER_EXECUTOR_SOCKET,
+      logLevel: config.env.LOG_LEVEL,
+      nodeEnv: config.env.NODE_ENV,
+      ...(config.env.NEUROUTER_EXECUTOR_TOKEN ? { token: config.env.NEUROUTER_EXECUTOR_TOKEN } : {}),
+      ...(config.env.MONTY_BINARY_PATH ? { montyBinaryPath: config.env.MONTY_BINARY_PATH } : {}),
+      // pinned at image build: the child verifies the binary against it, the parent skips its own hash
+      ...(config.env.MONTY_BINARY_PATH && config.env.MONTY_BINARY_SHA256 ? { montyBinarySha256: config.env.MONTY_BINARY_SHA256 } : {}),
+      onExit: (code, signal) => logger.warn({ code, signal }, 'code-mode executor exited; restarting'),
+    });
+    await embedded.ready(15_000);
+    return { executor: embedded.executor, embedded };
+  } catch (err) {
+    if (embedded) await embedded.close().catch(() => {});
+    return { executor: null, embedded: null, error: err };
+  }
+}
+
+/** Releases an executor boot that was never handed to the services (startup failed before). */
+export async function releaseExecutorBoot(boot: Promise<ExecutorBoot>): Promise<void> {
+  const r = await boot;
+  if (r.embedded) await r.embedded.close().catch(() => {});
+  else await r.executor?.close().catch(() => {});
 }
 
 export { upstreamPolicy, outboundPolicy } from './kernel/lib/net/policy.js';
@@ -265,28 +313,12 @@ export function createServices(input: ServiceInputs) {
     if (input.executor !== undefined) return;
     const mode = config.env.NEUROUTER_EXECUTOR_MODE;
     if (mode === 'off') return;
-    try {
-      if (mode === 'local') executor = await LocalExecutor.create({ poolMax: config.env.NEUROUTER_EXECUTOR_POOL_MAX, prewarm: config.env.NEUROUTER_EXECUTOR_PREWARM, ...(config.env.MONTY_BINARY_PATH ? { binaryPath: config.env.MONTY_BINARY_PATH } : {}) });
-      else if (mode === 'remote') executor = new SocketExecutor({ address: parseExecutorUrl(config.env.NEUROUTER_EXECUTOR_URL!), token: config.env.NEUROUTER_EXECUTOR_TOKEN!, ...(config.env.MONTY_BINARY_SHA256 ? { expectedMontySha256: config.env.MONTY_BINARY_SHA256 } : {}) });
-      else {
-        embedded = await spawnEmbeddedExecutor({
-          poolMax: config.env.NEUROUTER_EXECUTOR_POOL_MAX,
-          prewarm: config.env.NEUROUTER_EXECUTOR_PREWARM,
-          socketPath: config.env.NEUROUTER_EXECUTOR_SOCKET,
-          logLevel: config.env.LOG_LEVEL,
-          nodeEnv: config.env.NODE_ENV,
-          ...(config.env.NEUROUTER_EXECUTOR_TOKEN ? { token: config.env.NEUROUTER_EXECUTOR_TOKEN } : {}),
-          ...(config.env.MONTY_BINARY_PATH ? { montyBinaryPath: config.env.MONTY_BINARY_PATH } : {}),
-          onExit: (code, signal) => logger.warn({ code, signal }, 'code-mode executor exited; restarting'),
-        });
-        await embedded.ready(15_000);
-        executor = embedded.executor;
-      }
-      logger.info({ mode }, 'code-mode executor started');
-    } catch (err) {
-      logger.error({ err, mode }, 'code-mode executor failed to start; code mode is unavailable');
-      executor = null;
-    }
+    // the boot was started by startServer before the DB setup (overlap), else here
+    const r = await (input.executorBoot ?? bootExecutor(config, logger));
+    executor = r.executor;
+    embedded = r.embedded;
+    if (r.error === undefined) logger.info({ mode }, 'code-mode executor started');
+    else logger.error({ err: r.error, mode }, 'code-mode executor failed to start; code mode is unavailable');
     await executorHealth.check();
   };
   const scripts = new ScriptRunner({ db, executor: () => executor, pipeline, ops, tracker, audit, pages, metrics, now, log: logger, healthy: () => executorHealth.healthy });

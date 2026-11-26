@@ -7,6 +7,7 @@ import { SocketExecutor, parseExecutorUrl } from './client.js';
 import { encodeFrame, FrameDecoder } from './frames.js';
 import { MontyRunner } from './monty-runner.js';
 import { ExecutorServer } from './server.js';
+import { resolveMontyBinary, sha256File } from './monty-info.js';
 import { spawnEmbeddedExecutor, type EmbeddedExecutor } from './spawn.js';
 import { fakeHost, request, STALE_SCRIPT } from './test/helpers.js';
 
@@ -167,4 +168,24 @@ describe('spawnEmbeddedExecutor', () => {
     expect(emb.pid()).not.toBe(pid);
     expect(exits.length).toBe(1);
   }, 30_000);
+});
+
+describe('spawnEmbeddedExecutor with a pinned binary checksum', () => {
+  it('a matching pin starts (the parent does not re-hash); a wrong pin never becomes ready', async () => {
+    const actual = sha256File(resolveMontyBinary());
+    const ok = spawnEmbeddedExecutor({ poolMax: 1, prewarm: 0, logLevel: 'warn', nodeEnv: 'test', montyBinarySha256: actual.toUpperCase() });
+    try {
+      await ok.ready(30_000);
+      expect(ok.montyBinarySha256).toBe(actual);
+      expect(ok.executor.helloAck?.montyBinarySha256).toBe(actual);
+    } finally {
+      await ok.close();
+    }
+    const bad = spawnEmbeddedExecutor({ poolMax: 1, prewarm: 0, logLevel: 'warn', nodeEnv: 'test', montyBinarySha256: '0'.repeat(64) });
+    try {
+      await expect(bad.ready(3_000)).rejects.toThrow();
+    } finally {
+      await bad.close();
+    }
+  }, 60_000);
 });
