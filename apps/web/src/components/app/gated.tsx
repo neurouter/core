@@ -30,12 +30,14 @@ export function WithReason({ reason, children }: { reason: string | null; childr
 }
 
 /** A Button gated by a capability: disabled with a tooltip reason for Viewers and the demo. */
-export function GatedButton({ cap, demoOp, disabled, disabledReason, ...props }: ComponentProps<typeof Button> & { cap: Capability; demoOp?: string; disabledReason?: string | null }) {
+export function GatedButton({ cap, demoOp, disabled, disabledReason, render, nativeButton, ...props }: ComponentProps<typeof Button> & { cap: Capability; demoOp?: string; disabledReason?: string | null }) {
   const gate = useGate(cap, demoOp);
+  const off = gate.disabled || !!disabled;
   const reason = gate.reason ?? (disabled ? (disabledReason ?? null) : null);
   return (
     <WithReason reason={reason}>
-      <Button {...props} disabled={gate.disabled || disabled} />
+      {/* a disabled link would still navigate: render a real disabled button instead */}
+      {off ? <Button {...props} disabled /> : <Button {...props} {...(render ? { render, nativeButton: nativeButton ?? false } : {})} />}
     </WithReason>
   );
 }

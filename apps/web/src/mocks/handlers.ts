@@ -30,7 +30,10 @@ async function demoRefuses(key: string, request: Request): Promise<boolean> {
  * fixture answer 501 problem+json.
  */
 export function createContractHandlers(fixtures: ContractFixtures = {}, opts: { readOnly?: boolean } = {}): HttpHandler[] {
-  return ALL_ENDPOINTS.filter(({ def }) => def.kind !== 'navigation' && def.kind !== 'sse' && def.kind !== 'binary').map(({ key, def }: { key: string; def: EndpointDef }) =>
+  // static paths first (`/api/tools/search` before `/api/tools/:id`): MSW matches in order
+  const params = (path: string) => (path.match(/:/g) ?? []).length;
+  const endpoints = [...ALL_ENDPOINTS].sort((a, b) => params(a.def.path) - params(b.def.path));
+  return endpoints.filter(({ def }) => def.kind !== 'navigation' && def.kind !== 'sse' && def.kind !== 'binary').map(({ key, def }: { key: string; def: EndpointDef }) =>
     METHOD[def.method](def.path, async ({ request, params }) => {
       if (opts.readOnly && def.method !== 'GET' && (!DEMO_READ_ONLY_ALLOW.has(key) || (await demoRefuses(key, request)))) {
         return problem(403, 'forbidden', 'Read-only demo', DEMO_MESSAGE, { reason: 'demo_read_only' });

@@ -213,8 +213,10 @@ export function draftChanges(s: ServerState): OverlayChange[] {
         }
         continue;
       }
-      if (JSON.stringify(d[field]) === JSON.stringify(pub[field])) continue;
-      out.push({ kind: 'tool', target: key, field, change: pub[field] === undefined ? 'added' : 'changed', before: pub[field], after: d[field] });
+      const seed = s.tools.find((t) => keyOf(t) === key);
+      const base = pub[field] ?? (field === 'description' ? seed?.description : field === 'name' ? seed?.name : field === 'hidden' ? !!seed?.hidden : field === 'pinned' ? !!seed?.pinned : undefined);
+      if (JSON.stringify(d[field]) === JSON.stringify(base)) continue;
+      out.push({ kind: 'tool', target: key, field, change: base === undefined ? 'added' : 'changed', before: base, after: d[field] });
     }
   }
   return out;

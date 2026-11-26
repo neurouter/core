@@ -39,7 +39,7 @@ const search = z.object({
   step: z.enum(STEPS).optional().catch(undefined),
   draft: z.string().optional().catch(undefined),
   tab: z.enum(['url', 'upload', 'paste', 'graphql']).optional().catch(undefined),
-  sample: z.string().optional().catch(undefined),
+  sample: z.coerce.string().optional().catch(undefined),
   /** Created server and its quick-eval run (step 5), so a refresh resumes. */
   server: z.string().optional().catch(undefined),
   run: z.string().optional().catch(undefined),

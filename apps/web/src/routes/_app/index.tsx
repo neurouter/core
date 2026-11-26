@@ -158,7 +158,7 @@ function Dashboard() {
         </div>
       </section>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2 [&>*]:min-w-0">
         <section aria-labelledby="attention-title" className="flex flex-col gap-2.5 rounded-xl border bg-card p-4 md:p-5">
           <div className="flex items-center">
             <h2 id="attention-title" className="flex-1 text-base font-semibold">

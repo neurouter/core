@@ -1,3 +1,4 @@
+import * as React from "react"
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
@@ -45,6 +46,12 @@ function Button({
   size = "default",
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  // Neurouter: a button rendered as a link (render={<Link/>}, nativeButton={false}) keeps link
+  // semantics instead of getting role="button" from Base UI.
+  if (props.nativeButton === false && React.isValidElement(props.render)) {
+    const el = props.render as React.ReactElement<{ className?: string; children?: React.ReactNode }>
+    return React.cloneElement(el, { "data-slot": "button", className: cn(buttonVariants({ variant, size, className }), el.props.className), children: props.children as React.ReactNode } as never)
+  }
   return (
     <ButtonPrimitive
       data-slot="button"

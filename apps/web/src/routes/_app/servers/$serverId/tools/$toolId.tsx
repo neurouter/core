@@ -149,18 +149,35 @@ function DefinitionTab({ tool }: { tool: ToolDetail }) {
 
 /* ================================================================== overlay editor */
 
+/**
+ * Autosave a field 600 ms after the last keystroke (A-OVERLAY-LIFECYCLE). A pending edit is flushed
+ * when the editor unmounts (tab switch, "Review & publish"), so typing is never lost.
+ */
 function useDebouncedSave(value: string, original: string, delay: number, save: (v: string) => void) {
-  const first = useRef(true);
+  const pending = useRef<string | null>(null);
+  const saveRef = useRef(save);
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
+    saveRef.current = save;
+  });
+  useEffect(() => {
+    if (value === original) {
+      pending.current = null;
       return;
     }
-    if (value === original) return;
-    const t = setTimeout(() => save(value), delay);
+    pending.current = value;
+    const t = setTimeout(() => {
+      pending.current = null;
+      saveRef.current(value);
+    }, delay);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
+  useEffect(
+    () => () => {
+      if (pending.current !== null) saveRef.current(pending.current);
+    },
+    [],
+  );
 }
 
 function OverlayTab({ serverId, tool, entry, send, disabled, saving, saveError }: { serverId: string; tool: ToolDetail; entry: OverlayToolEntry; send: (ops: OverlayPatchOp[]) => void; disabled: boolean; saving: boolean; saveError: unknown }) {

@@ -23,7 +23,7 @@ import { overlayDownloadUrl } from '@/lib/download';
 import { formatRelative, plural } from '@/lib/format';
 import { notifyError, notifySuccess } from '@/lib/notify';
 
-const search = z.object({ publish: z.string().optional().catch(undefined), compare: z.coerce.number().optional().catch(undefined) });
+const search = z.object({ publish: z.coerce.string().optional().catch(undefined), compare: z.coerce.number().optional().catch(undefined) });
 
 export const Route = createFileRoute('/_app/servers/$serverId/overlay')({
   validateSearch: search,

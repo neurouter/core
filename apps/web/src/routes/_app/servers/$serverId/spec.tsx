@@ -21,7 +21,7 @@ import { specDownloadUrl } from '@/lib/download';
 import { formatBytes, formatRelative } from '@/lib/format';
 import { notifyError, notifySuccess } from '@/lib/notify';
 
-const search = z.object({ reimport: z.string().optional().catch(undefined), rev: z.string().optional().catch(undefined) });
+const search = z.object({ reimport: z.coerce.string().optional().catch(undefined), rev: z.string().optional().catch(undefined) });
 
 export const Route = createFileRoute('/_app/servers/$serverId/spec')({
   validateSearch: search,

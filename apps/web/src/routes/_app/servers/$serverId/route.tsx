@@ -11,13 +11,14 @@ import { PageHeader } from '@/components/layout/page-header';
 import { FileManagedNote, specFormatLabel } from '@/components/status/status';
 import { Button } from '@/components/ui/button';
 import { connectQuery, serverQuery } from '@/features/servers/queries';
+import { toolQuery } from '@/features/tools/queries';
 import { environmentsQuery } from '@/features/environments/queries';
 import { ClientSnippet } from '@/features/connect/client-snippet';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export const Route = createFileRoute('/_app/servers/$serverId')({
-  validateSearch: z.object({ connect: z.string().optional().catch(undefined) }),
+  validateSearch: z.object({ connect: z.coerce.string().optional().catch(undefined) }),
   beforeLoad: guard(['servers:read']),
   loader: ({ context, params }) => context.queryClient.ensureQueryData(serverQuery(params.serverId)),
   errorComponent: AreaError,
@@ -34,12 +35,13 @@ function ServerLayout() {
   const base = `/servers/${serverId}`;
   const tab = pathname.slice(base.length).split('/')[1] ?? '';
   const toolCrumb = tab === 'tools' && pathname.split('/').length > 4 ? decodeURIComponent(pathname.split('/')[4]!) : null;
+  const toolData = useQuery({ ...toolQuery(toolCrumb ?? ''), enabled: !!toolCrumb });
   useSetCrumbs(
     server.data
       ? [
           { label: 'Servers', to: '/servers' },
           ...(tab ? [{ label: server.data.name, to: base }, { label: TAB_LABEL[tab] ?? tab, ...(toolCrumb ? { to: `${base}/tools` } : {}) }] : [{ label: server.data.name }]),
-          ...(toolCrumb ? [{ label: toolCrumb.split('__').pop() ?? toolCrumb }] : []),
+          ...(toolCrumb ? [{ label: toolData.data?.name ?? '…' }] : []),
         ]
       : null,
   );

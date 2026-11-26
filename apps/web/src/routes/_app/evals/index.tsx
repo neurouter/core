@@ -31,7 +31,7 @@ import { ApiError } from '@/lib/api-client';
 import { formatRelative } from '@/lib/format';
 import { notifySuccess } from '@/lib/notify';
 
-const search = z.object({ server: z.string().optional().catch(undefined), new: z.string().optional().catch(undefined) });
+const search = z.object({ server: z.string().optional().catch(undefined), new: z.coerce.string().optional().catch(undefined) });
 
 export const Route = createFileRoute('/_app/evals/')({
   validateSearch: search,

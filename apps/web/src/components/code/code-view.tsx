@@ -16,7 +16,7 @@ function loadHighlighter(): Promise<Highlighter> {
   highlighter ??= (async () => {
     const [{ createHighlighterCore }, { createJavaScriptRegexEngine }] = await Promise.all([import('shiki/core'), import('shiki/engine/javascript')]);
     const h = await createHighlighterCore({
-      themes: [import('@shikijs/themes/github-light'), import('@shikijs/themes/github-dark')],
+      themes: [import('@shikijs/themes/github-light-default'), import('@shikijs/themes/github-dark-default')],
       langs: [import('@shikijs/langs/python'), import('@shikijs/langs/yaml'), import('@shikijs/langs/graphql'), import('@shikijs/langs/json')],
       engine: createJavaScriptRegexEngine(),
     });
@@ -37,7 +37,7 @@ export function CodeView({ code, lang, className, highlightLines, label, lineNum
     if (import.meta.env.MODE === 'test') return;
     loadHighlighter()
       .then((h) => {
-        if (alive) setTokens(h.codeToTokens(code, { lang, themes: { light: 'github-light', dark: 'github-dark' } }).tokens);
+        if (alive) setTokens(h.codeToTokens(code, { lang, themes: { light: 'github-light-default', dark: 'github-dark-default' } }).tokens);
       })
       .catch(() => {});
     return () => {

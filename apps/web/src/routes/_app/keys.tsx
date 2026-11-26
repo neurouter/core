@@ -18,7 +18,7 @@ import { useGate } from '@/components/app/gated';
 import { formatDate, formatRelative } from '@/lib/format';
 import { notifyError, notifySuccess } from '@/lib/notify';
 
-const search = z.object({ create: z.string().optional().catch(undefined), tab: z.enum(['keys', 'oauth']).optional().catch(undefined), server: z.string().optional().catch(undefined), env: z.string().optional().catch(undefined) });
+const search = z.object({ create: z.coerce.string().optional().catch(undefined), tab: z.enum(['keys', 'oauth']).optional().catch(undefined), server: z.string().optional().catch(undefined), env: z.string().optional().catch(undefined) });
 
 import { CreateKeyDialog } from '@/features/keys/create-key-dialog';
 

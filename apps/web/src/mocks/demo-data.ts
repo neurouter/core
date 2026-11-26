@@ -244,12 +244,12 @@ export const ENVS: Record<string, EnvSeed[]> = {
     { slug: 'mock', kind: 'dev', isMock: true, baseUrl: null, authType: 'none', secretRef: null, health: 'up', latencyMs: 4, writesOn: 'all', lastCallMin: 2, buildRev: 4 },
     { slug: 'dev', kind: 'dev', baseUrl: 'https://dev.orders.acme.test', authType: 'header', secretRef: 'env:ACME_DEV_TOKEN', health: 'up', latencyMs: 120, writesOn: 'all', lastCallMin: 6, buildRev: 4 },
     { slug: 'qa', kind: 'qa', baseUrl: 'https://qa.orders.acme.test', authType: 'oauth_client_credentials', secretRef: 'secret:ACME_QA_CLIENT', health: 'up', latencyMs: 180, writesOn: ['create_refund', 'update_order_address', 'add_order_note'], lastCallMin: 60, buildRev: 4 },
-    { slug: 'prod', kind: 'prod', baseUrl: 'https://api.orders.acme.test', authType: 'oauth_passthrough', secretRef: null, health: 'up', latencyMs: 1800, writesOn: ['add_order_note'], lastCallMin: 0, buildRev: 4, managedBy: 'file' },
+    { slug: 'prod', kind: 'prod', baseUrl: 'https://api.orders.acme.test', authType: 'oauth_passthrough', secretRef: null, health: 'up', latencyMs: 1800, writesOn: ['add_order_note'], lastCallMin: 0, buildRev: 4 },
   ],
   srv_lumen: [
     { slug: 'mock', kind: 'dev', isMock: true, baseUrl: null, authType: 'none', secretRef: null, health: 'up', latencyMs: 3, writesOn: 'all', lastCallMin: 40, buildRev: 2 },
     { slug: 'dev', kind: 'dev', baseUrl: 'https://dev.lumen.test/graphql', authType: 'bearer', secretRef: 'env:LUMEN_DEV_TOKEN', health: 'up', latencyMs: 90, writesOn: 'all', lastCallMin: 25, buildRev: 2 },
-    { slug: 'prod', kind: 'prod', baseUrl: 'https://lumen.test/graphql', authType: 'bearer', secretRef: 'secret:LUMEN_PROD_TOKEN', health: 'down', latencyMs: 0, writesOn: [], lastCallMin: 190, buildRev: 2 },
+    { slug: 'prod', kind: 'prod', baseUrl: 'https://lumen.test/graphql', authType: 'bearer', secretRef: 'secret:LUMEN_PROD_TOKEN', health: 'down', latencyMs: 0, writesOn: [], lastCallMin: 190, buildRev: 2, managedBy: 'file' },
   ],
   srv_bluefin: [
     { slug: 'mock', kind: 'dev', isMock: true, baseUrl: null, authType: 'none', secretRef: null, health: 'up', latencyMs: 3, writesOn: 'all', lastCallMin: 300, buildRev: 1 },

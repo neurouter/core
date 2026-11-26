@@ -18,7 +18,7 @@ const search = z.object({
   server: z.string().optional().catch(undefined),
   env: z.string().optional().catch(undefined),
   client: z.enum(['claude-code', 'cursor', 'vscode', 'http']).optional().catch(undefined),
-  key: z.string().optional().catch(undefined),
+  key: z.coerce.string().optional().catch(undefined),
 });
 
 export const Route = createFileRoute('/_app/connect')({
