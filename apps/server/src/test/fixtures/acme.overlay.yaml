@@ -1,10 +1,10 @@
 overlay: 1
 info:
-  notes: Contract golden fixture. listProducts is capped (truncated list); getShipment has a tiny byte budget (clipped object).
+  notes: Contract golden fixture. listProducts is capped (truncated list); getCustomer has a tiny byte budget (clipped object).
 tools:
   operationId:listProducts:
     response: { maxItems: 3 }
-  operationId:getShipment:
+  operationId:getCustomer:
     response: { maxBytes: 256 }
 composites:
   count_orders:

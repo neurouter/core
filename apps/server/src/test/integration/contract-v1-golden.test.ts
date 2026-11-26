@@ -42,7 +42,9 @@ describe('contract v1 goldens (acme, mock)', () => {
     await call('list_orders', 'list_orders', { limit: 2 });
     await call('list_orders_empty', 'list_orders', { status: 'refunded', customer_id: 'cus_doesnotexist' });
     await call('list_products_truncated', 'list_products', {});
-    await call('get_shipment_clipped', 'get_shipment', { shipment_id: 'shipment_1' });
+    await call('get_shipment', 'get_shipment', { shipment_id: 'shipment_1' });
+    const created = (await call('create_customer', 'create_customer', { name: `Ada ${'Lovelace '.repeat(30)}`.trim(), email: 'ada@example.com' }))?.structuredContent as { id: string };
+    await call('get_customer_clipped', 'get_customer', { customer_id: created.id });
     const nf = await call('get_order_not_found', 'get_order', { order_id: 'ord_doesnotexist' });
     await call('list_orders_invalid', 'list_orders', { status: 'open', limit: 500 });
     await call('get_order_missing_arg', 'get_order', { orderId: 'x' });

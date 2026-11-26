@@ -215,7 +215,7 @@ export class ScriptRunner {
               // elicit: the dry run already ran; return its plan (nothing was executed) for the user to review
               const planned = dry.planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, arguments: p.arguments }));
               const r = await this.finishRejected(ctx, code, 'execute', 'confirm_declined', `Not executed: this client cannot ask the user to confirm writes in ${where}. The dry run planned ${planned.length} change(s), none made:\n${listed}\nShow them to the user; they can approve the script from a client with MCP elicitation support.`, 'confirmation_unsupported');
-              const draft = errorDraft({ code: 'confirmation_unsupported', message: '', text: `The script makes ${planned.length} change(s) that need your user's approval in ${where}, and this client cannot ask; nothing changed. Show data.plan to the user.`, name: callAs.name, args: callAs.args, next: [] }, { data: { plan: planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, args: p.arguments })) } });
+              const draft = errorDraft({ code: 'confirmation_unsupported', message: '', text: `The script makes ${planned.length} change(s) that need your user's approval in ${where}, and this client cannot ask; nothing changed. Show data.plan to the user.`, name: callAs.name, args: callAs.args, next: [] }, { write: true, data: { plan: planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, args: p.arguments })) } });
               return { result: { ...r, _meta: { ...(r._meta ?? {}), [META_PLANNED_CHANGES]: planned } }, draft };
             }
             const message = out.status === 'unsupported' ? `This client cannot ask the user to confirm writes in ${where}; the script was not run.` : 'The user declined the planned changes.';
@@ -259,7 +259,7 @@ export class ScriptRunner {
     innerErrors: Map<string, ErrorInfo>,
     meta: Record<string, unknown>,
   ): Draft {
-    const extra = { left: budget.left, scriptCalls: budget.calls, meta, ...(mode === 'dry_run' ? { flags: ['dry_run' as const] } : {}) };
+    const extra = { left: budget.left, scriptCalls: budget.calls, meta, ...(mode === 'dry_run' ? { flags: ['dry_run' as const] } : {}), ...(planned.length ? { write: true } : {}) };
     if (status === 'ok') {
       const plan = planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, args: p.arguments }));
       const data = mode === 'dry_run' ? { result: value, plan } : value;
@@ -436,7 +436,7 @@ export class ScriptRunner {
             blocked += out.decision.startsWith('denied_') ? 1 : 0;
             if (v2 && out.draft.error) {
               // next calls name API tools; inside a script they become run_script calls of the same function
-              const info = await errorInfoFor(ctx, { ...out.draft.error, name: fn });
+              const info = await errorInfoFor(ctx, out.draft.error);
               return raise({ ...info, next: info.next.map((c) => asScriptCall(c, tools)) });
             }
             return { ok: false, error: { code: out.error?.code ?? 'tool_error', message: out.error?.message ?? 'tool call failed', ...(out.error?.errorId ? { errorId: out.error.errorId } : {}) } };

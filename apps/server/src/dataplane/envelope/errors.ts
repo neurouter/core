@@ -249,6 +249,7 @@ function messageFor(code: EnvelopeErrorCode, spec: ErrorSpec, ec: ErrorContext, 
   const status = spec.upstream?.status;
   switch (code) {
     case 'not_found': {
+      if (!spec.upstream) return clip(stripErrorId(spec.message), BUDGET.messageChars);
       const id = t ? pathId(t, spec.args ?? {}) : null;
       return id && t ? `No ${nounOf(t)} '${clip(String(id.value), 60)}' in ${ec.env}. Nothing changed.` : `The API found nothing for ${name} (${status ?? 404}) in ${ec.env}. Nothing changed.`;
     }

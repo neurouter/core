@@ -54,6 +54,8 @@ export interface Draft {
   flagPaths?: string[];
   /** a write was executed: `"<tool> → <entity label>"` */
   wrote?: string;
+  /** the call wrote or tried to write (state is shown in full) without an API write tool behind it (scripts) */
+  write?: boolean;
   left?: { calls?: number; seconds?: number };
   scriptCalls?: number;
   /** contract-2 `_meta` (call id, task id, script run id) */

@@ -13,12 +13,16 @@ export interface ShapeCut {
 
 type Schema = Record<string, unknown>;
 
-/** The list inside a value: the root array or the only array property of a root object. */
+/** Keys a list wrapper may carry next to its array (totals, cursors, links): `{total_count, items}`, `{data, has_more}`. */
+const WRAPPER_KEY = /^(total|count|next|prev|previous|cursor|page|more|has_?more|offset|limit|links?|meta|incomplete_results|object|url|start|end|size)|(total|count|cursor|token|page|url|more)$/i;
+
+/** The list inside a value: the root array, or the only array property of a list wrapper. */
 export function listIn(v: unknown): unknown[] | null {
   if (Array.isArray(v)) return v;
   if (v && typeof v === 'object') {
-    const arrays = Object.values(v as Record<string, unknown>).filter(Array.isArray);
-    if (arrays.length === 1) return arrays[0] as unknown[];
+    const entries = Object.entries(v as Record<string, unknown>);
+    const arrays = entries.filter(([, x]) => Array.isArray(x));
+    if (arrays.length === 1 && entries.every(([k, x]) => Array.isArray(x) || WRAPPER_KEY.test(k))) return arrays[0]![1] as unknown[];
   }
   return null;
 }
@@ -26,14 +30,16 @@ export function listIn(v: unknown): unknown[] | null {
 function schemaIsList(s: Schema | undefined): boolean | null {
   if (!s || typeof s !== 'object') return null;
   if (s.type === 'array') return true;
-  const props = s.properties && typeof s.properties === 'object' ? Object.values(s.properties as Record<string, Schema>) : null;
-  if (s.type === 'object' || props) return (props ?? []).filter((p) => p && p.type === 'array').length === 1;
-  return null;
+  const props = s.properties && typeof s.properties === 'object' ? Object.entries(s.properties as Record<string, Schema>) : null;
+  if (!props) return s.type === 'object' ? false : null;
+  const arrays = props.filter(([, p]) => p && p.type === 'array');
+  return arrays.length === 1 && props.every(([k, p]) => (p && p.type === 'array') || WRAPPER_KEY.test(k));
 }
 
 /**
- * A list tool (contract-v2 §2.1): the shaped success schema is an array or an object with exactly one array
- * property, or the binding has a detected pagination scheme. Without a schema, the value decides.
+ * A list tool (contract-v2 §2.1): the shaped success schema is an array or a list wrapper (exactly one array
+ * property, the others totals/cursors/links), or the binding has a detected pagination scheme. Without a
+ * schema, the value decides. (An entity with one array field, e.g. an order with line `items`, is not a list.)
  */
 export function isListTool(t: ToolDef, value: unknown): boolean {
   if (t.binding.type === 'http' && t.binding.pagination) return true;
@@ -49,7 +55,7 @@ function upstreamTotal(v: unknown): number | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   for (const k of TOTAL_KEYS) {
     const x = (v as Record<string, unknown>)[k];
-    if (typeof x === 'number' && Number.isFinite(x) && x >= 0) return x;
+    if (typeof x === 'number' && Number.isInteger(x) && x >= 0) return x;
   }
   return null;
 }
@@ -105,7 +111,13 @@ export function clippedView(cut: ShapeCut, handle: string | null): Truncated | n
 export function widenHint(t: ToolDef, args: Record<string, unknown>): string | undefined {
   const req = new Set(requiredOf(t));
   const filters = Object.keys(args).filter((k) => !req.has(k) && !isPagingArg(k) && args[k] !== undefined);
-  if (!filters.length) return '0 matches.';
+  if (!filters.length) {
+    const position = Object.keys(args).filter((k) => isPagingArg(k) && !/limit|per_page|page_size/i.test(k));
+    if (!position.length) return '0 items.';
+    const first = Object.fromEntries(Object.entries(args).filter(([k]) => !position.includes(k)));
+    const hint = `No items at this ${position.join('/')}. First page: ${t.name}(${JSON.stringify(first)})`;
+    return hint.length <= BUDGET.hintChars ? hint : `No items at this ${position.join('/')}; drop it for the first page.`;
+  }
   const wider = { ...args };
   delete wider[filters[filters.length - 1]!];
   const call = `${t.name}(${JSON.stringify(wider)})`;

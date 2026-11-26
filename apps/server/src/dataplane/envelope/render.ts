@@ -104,7 +104,7 @@ export class EnvelopeRenderer {
         if (this.d.typed.drop(ctx.bundle.build.id, tool.name)) this.d.onSchemaMismatch?.(ctx, tool, errs);
       }
     }
-    const write = Boolean(tool?.risk.write);
+    const write = Boolean(tool?.risk.write || draft.write);
     env.state = this.d.state.next({
       taskId: ctx.taskId,
       requestId: ctx.requestId,
