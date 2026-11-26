@@ -114,6 +114,17 @@ describe('mock handler', () => {
     expect((await handleMockRequest(m, s, 'ns', { method: 'GET', path: '/store/inventory' })).status).toBe(200);
   });
 
+  it('points integer references (Order.petId) at seeded items, not at the spec example 198772', async () => {
+    const m = (await compileFile(PETSTORE)).mockModel!;
+    const s = new MockStore();
+    for (const id of [1, 2, 3]) {
+      const order = (await handleMockRequest(m, s, 'ns', { method: 'GET', path: `/store/order/${id}` })).body as { petId: number };
+      expect(order.petId).toBeGreaterThanOrEqual(1);
+      expect(order.petId).toBeLessThanOrEqual(20);
+      expect((await handleMockRequest(m, s, 'ns', { method: 'GET', path: `/pet/${order.petId}` })).status).toBe(200);
+    }
+  });
+
   it('provides sample entities for eval generation', async () => {
     const m = (await compileFile(GITHUB_SUBSET)).mockModel as OpenApiMockModel;
     const samples = sampleEntities(m, new MockStore(), 'ns');

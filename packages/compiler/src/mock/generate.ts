@@ -4,6 +4,17 @@ import type { JsonSchema } from '@neurouter/shared';
 import { isObj, type Obj } from '../util.js';
 
 export const MOCK_REF_DATE = new Date('2026-01-15T12:00:00.000Z');
+/** Items seeded per collection, with integer ids 1..SEED_ITEMS. */
+export const SEED_ITEMS = 20;
+
+/**
+ * A reference to another entity (`petId`, `owner_id`), not the item's own `id`. Integer references
+ * point at a seeded id (1..SEED_ITEMS) and ignore spec examples, so following one resolves: the
+ * petstore example `Order.petId: 198772` made every agent that looked up order 1's pet get a 404.
+ */
+function isRefName(name: string): boolean {
+  return name !== 'id' && (/[a-z0-9]Id$/.test(name) || /_id$/i.test(name));
+}
 
 export function seededFaker(seed: number): Faker {
   const f = new Faker({ locale: [en, base] });
@@ -77,7 +88,8 @@ export function generateValue(schema: unknown, name: string, ctx: GenCtx): unkno
     return generateValue(target, name, { ...ctx, depth: ctx.depth + 1 });
   }
   if (schema.const !== undefined) return schema.const;
-  if (Array.isArray(schema.examples) && schema.examples.length && ctx.index <= 1 && !['id', 'number'].includes(name)) return schema.examples[0];
+  const intRef = isRefName(name) && (schema.type === 'integer' || (Array.isArray(schema.type) && schema.type.includes('integer')));
+  if (Array.isArray(schema.examples) && schema.examples.length && ctx.index <= 1 && !['id', 'number'].includes(name) && !intRef) return schema.examples[0];
   if (Array.isArray(schema.enum) && schema.enum.length) return f.helpers.arrayElement(schema.enum as unknown[]);
   for (const k of ['oneOf', 'anyOf'] as const) if (Array.isArray(schema[k]) && schema[k].length) return generateValue((schema[k] as unknown[])[0], name, ctx);
   if (Array.isArray(schema.allOf) && schema.allOf.length) return generateValue(schema.allOf[0], name, ctx);
@@ -89,7 +101,8 @@ export function generateValue(schema: unknown, name: string, ctx: GenCtx): unkno
       return stringFor(name, schema, ctx);
     case 'integer': {
       const n = name.toLowerCase();
-      if (n === 'id' || n.endsWith('_id') || n === 'number') return ctx.index * 1000 + f.number.int({ min: 1, max: 999 });
+      if (intRef) return f.number.int({ min: 1, max: SEED_ITEMS });
+      if (n === 'id' || n === 'number') return ctx.index * 1000 + f.number.int({ min: 1, max: 999 });
       const min = Number(schema.minimum ?? 0);
       const max = Number(schema.maximum ?? Math.max(min + 100, 100));
       return f.number.int({ min, max });

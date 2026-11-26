@@ -4,10 +4,10 @@
  */
 import type { JsonSchema } from '@neurouter/shared';
 import { isObj, type Obj } from '../util.js';
-import { generateValue, hashSeed, seededFaker } from './generate.js';
+import { generateValue, hashSeed, SEED_ITEMS, seededFaker } from './generate.js';
 import type { MockResource, OpenApiMockModel } from './model.js';
 
-export const SEED_ITEMS = 20;
+export { SEED_ITEMS };
 export const DEFAULT_SEED = 42;
 
 export interface Collection {
