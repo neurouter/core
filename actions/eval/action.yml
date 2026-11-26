@@ -11,7 +11,7 @@ inputs:
   modes: { description: tool,code, required: false, default: "tool,code" }
   repeats: { description: Attempts per task, required: false, default: "3" }
   min-score: { description: Fail below this headline score, required: false, default: "0" }
-  neurouter-version: { description: "npm version of the neurouter CLI (default: the version of this action: its tag, e.g. v0.1.1 → 0.1.1, else the CLI package version at this ref)", required: false, default: "" }
+  neurouter-version: { description: "npm version of the neurouter CLI (default: the version of this action: its tag, e.g. v0.2.0 → 0.2.0, else the CLI package version at this ref)", required: false, default: "" }
   openai-api-key: { description: "OpenAI API key (pass secrets.OPENAI_API_KEY); needed for gpt-* models", required: false, default: "" }
   anthropic-api-key: { description: "Anthropic API key (pass secrets.ANTHROPIC_API_KEY); needed for claude-* models", required: false, default: "" }
   gemini-api-key: { description: "Gemini API key (pass secrets.GEMINI_API_KEY); needed for gemini-* models", required: false, default: "" }
@@ -44,7 +44,7 @@ runs:
         NR_ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        # CLI version: the input, else this action's own tag (v0.1.1 → 0.1.1), else the CLI package version at this ref
+        # CLI version: the input, else this action's own tag (v0.2.0 → 0.2.0), else the CLI package version at this ref
         VERSION="${NR_VERSION}"
         if [ -z "$VERSION" ]; then
           if [[ "${NR_ACTION_REF:-}" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?)$ ]]; then VERSION="${BASH_REMATCH[1]}"

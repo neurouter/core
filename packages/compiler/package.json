@@ -1,6 +1,6 @@
 {
   "name": "@neurouter/compiler",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Neurouter compiler: OpenAPI/GraphQL specs to MCP tool models, overlays and mocks",
   "keywords": [
     "mcp",
@@ -43,7 +43,7 @@
     "prepack": "node ../../scripts/prepack.mjs"
   },
   "dependencies": {
-    "@neurouter/shared": "0.1.1",
+    "@neurouter/shared": "0.2.0",
     "@scalar/openapi-parser": "0.29.28",
     "yaml": "2.9.1",
     "graphql": "17.1.0",

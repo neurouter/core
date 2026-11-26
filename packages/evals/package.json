@@ -1,6 +1,6 @@
 {
   "name": "@neurouter/evals",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Neurouter evals: agent-readiness suites, runner, judge and fix suggestions over OpenAI, Anthropic and Gemini",
   "keywords": [
     "mcp",
@@ -46,8 +46,8 @@
     "@anthropic-ai/sdk": "1.14.0",
     "@google/genai": "3.6.1",
     "@modelcontextprotocol/client": "2.4.0",
-    "@neurouter/compiler": "0.1.1",
-    "@neurouter/shared": "0.1.1",
+    "@neurouter/compiler": "0.2.0",
+    "@neurouter/shared": "0.2.0",
     "openai": "7.65.0",
     "zod": "4.6.7"
   },
