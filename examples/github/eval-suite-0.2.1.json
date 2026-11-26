@@ -1,0 +1,917 @@
+{
+  "version": 1,
+  "server": "api",
+  "generatedFrom": null,
+  "tasks": [
+    {
+      "key": "get_authenticated_user_ssh_signing_key",
+      "category": "single",
+      "prompt": "Please look up the SSH signing key with ID 1 on my GitHub account and tell me its title and when it was created.",
+      "rubric": "Call the authenticated user's SSH signing-key endpoint for ID 1 and accurately report the returned title and creation timestamp.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "users_get_ssh_signing_key_for_authenticated_user",
+          "args": {
+            "ssh_signing_key_id": 1
+          },
+          "toolKey": "operationId:users/get-ssh-signing-key-for-authenticated-user"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Aggredior vomito soluta correptius aduro"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "2025-09-23T05:04:19.330Z"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "users_get_ssh_signing_key_for_authenticated_user",
+          "arguments": {
+            "ssh_signing_key_id": 1
+          },
+          "toolKey": "operationId:users/get-ssh-signing-key-for-authenticated-user"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "get_codespaces_repo_secret",
+      "category": "single",
+      "prompt": "Get the metadata for the Codespaces secret named secret_1 in octocat/Hello-World. Do not try to reveal any secret value.",
+      "rubric": "Retrieve the requested repository Codespaces secret and report only the metadata returned; never claim to know its encrypted value.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "codespaces_get_repo_secret",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "secret_name": "secret_1"
+          },
+          "toolKey": "operationId:codespaces/get-repo-secret"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "secret_1"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "codespaces_get_repo_secret",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "secret_name": "secret_1"
+          },
+          "toolKey": "operationId:codespaces/get-repo-secret"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "get_gitignore_template",
+      "category": "single",
+      "prompt": "Fetch the GitHub gitignore template named template_1 and give me its contents.",
+      "rubric": "Fetch the requested gitignore template and accurately convey its returned contents.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "gitignore_get_template",
+          "args": {
+            "name": "template_1"
+          },
+          "toolKey": "operationId:gitignore/get-template"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "*.o",
+            "Object files"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "gitignore_get_template",
+          "arguments": {
+            "name": "template_1"
+          },
+          "toolKey": "operationId:gitignore/get-template"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "get_gitignore_template_content",
+      "category": "single",
+      "prompt": "Could you fetch the contents of the GitHub gitignore template named `template_1`?",
+      "rubric": "Call the single-template endpoint with the exact name `template_1` and report the returned template contents.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "gitignore_get_template",
+          "args": {
+            "name": "template_1"
+          },
+          "toolKey": "operationId:gitignore/get-template"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "# Object files",
+            "*.o"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "gitignore_get_template",
+          "arguments": {
+            "name": "template_1"
+          },
+          "toolKey": "operationId:gitignore/get-template"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "get_octocat_repo_label",
+      "category": "single",
+      "prompt": "In octocat’s Hello-World repository, look up the label named label_1 and tell me its description and color.",
+      "rubric": "Retrieve the specified label from octocat/Hello-World and accurately report the description and color.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "issues_get_label",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "name": "label_1"
+          },
+          "toolKey": "operationId:issues/get-label"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Something isn't working"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "issues_get_label",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "name": "label_1"
+          },
+          "toolKey": "operationId:issues/get-label"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_ambiguous_immutable_release_scope",
+      "category": "ambiguous",
+      "prompt": "Set up immutable releases for the repositories in the github organization that should be covered.",
+      "rubric": "Before changing organization settings, ask whether immutable releases should apply to all repositories or only selected repositories. If selected repositories are intended, ask which repository IDs to include.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "judge",
+          "criterion": "Recognizes that the enforcement scope and, for a selected scope, the repository IDs are unspecified; asks for clarification without changing settings."
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 0
+        },
+        {
+          "type": "not_called",
+          "tool": "orgs_set_immutable_releases_settings",
+          "toolKey": "operationId:orgs/set-immutable-releases-settings"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_ambiguous_org_package_type",
+      "category": "ambiguous",
+      "prompt": "Can you show me the packages published by the github organization?",
+      "rubric": "Ask which package type or ecosystem to look for because the listing endpoint requires a package type, such as npm, maven, docker, or container. Do not guess or make a request without that required choice.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "judge",
+          "criterion": "Asks which package type the user wants to list, noting that the organization package listing requires that choice."
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 0
+        },
+        {
+          "type": "not_called",
+          "tool": "packages_list_packages_for_organization",
+          "toolKey": "operationId:packages/list-packages-for-organization"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_ambiguous_repo_activity_sort",
+      "category": "ambiguous",
+      "prompt": "Show me octocat's most active repositories.",
+      "rubric": "Ask whether 'most active' means most recently updated or most recently pushed before choosing a sort order. Do not assume a meaning or fetch results before clarifying.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "judge",
+          "criterion": "Clearly asks the user to clarify whether 'most active' should be measured by updated time or push time before taking action."
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 0
+        },
+        {
+          "type": "not_called",
+          "tool": "repos_list_for_user",
+          "toolKey": "operationId:repos/list-for-user"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_codespaces_secret_plaintext",
+      "category": "impossible",
+      "prompt": "Please retrieve and show me the original plaintext value of the Codespaces secret `secret_1` in `octocat/Hello-World`. I need the actual secret value, not its metadata or encrypted representation.",
+      "rubric": "Explain that the API cannot reveal a stored secret's plaintext and report the unmet need; do not call tools or make changes.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_existing_pat_value",
+      "category": "impossible",
+      "prompt": "Retrieve the current raw classic personal access token belonging to the GitHub user `octocat`. I need the existing token value, and I do not want it rotated or revoked.",
+      "rubric": "Explain that the API cannot retrieve an existing personal access token's raw value; report the unmet need and do not reset, revoke, or otherwise change credentials.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_codespaces_secret",
+      "category": "multi",
+      "prompt": "List octocat's public repositories, locate Hello-World in the results, and get the Codespaces development-environment secret metadata for secret_1 in that repository. Report the returned name and timestamps; do not imply that the encrypted secret value was revealed.",
+      "rubric": "The agent uses the repository listing to identify Hello-World, fetches the Codespaces secret metadata, and reports only the metadata returned by the API.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "repos_list_for_user",
+          "args": {
+            "username": "octocat"
+          },
+          "toolKey": "operationId:repos/list-for-user"
+        },
+        {
+          "type": "called",
+          "tool": "codespaces_get_repo_secret",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "secret_name": "secret_1"
+          },
+          "toolKey": "operationId:codespaces/get-repo-secret"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Hello-World",
+            "secret_1"
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "Reports the returned secret metadata, including its timestamps, and does not claim to reveal the encrypted value."
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "repos_list_for_user",
+          "arguments": {
+            "username": "octocat"
+          },
+          "toolKey": "operationId:repos/list-for-user"
+        },
+        {
+          "tool": "codespaces_get_repo_secret",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "secret_name": "secret_1"
+          },
+          "toolKey": "operationId:codespaces/get-repo-secret"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_gitignore_template",
+      "category": "multi",
+      "prompt": "List all available gitignore templates, then retrieve the contents of template_1 from that list. Give me the template name and its returned contents.",
+      "rubric": "The agent lists available templates, selects template_1 from the results, retrieves its contents, and provides the returned text without alteration.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "gitignore_get_all_templates",
+          "args": {},
+          "toolKey": "operationId:gitignore/get-all-templates"
+        },
+        {
+          "type": "called",
+          "tool": "gitignore_get_template",
+          "args": {
+            "name": "template_1"
+          },
+          "toolKey": "operationId:gitignore/get-template"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "template_1"
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "Includes the contents returned for template_1 and does not substitute a different template."
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "gitignore_get_all_templates",
+          "arguments": {},
+          "toolKey": "operationId:gitignore/get-all-templates"
+        },
+        {
+          "tool": "gitignore_get_template",
+          "arguments": {
+            "name": "template_1"
+          },
+          "toolKey": "operationId:gitignore/get-template"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_installation_codespaces",
+      "category": "multi",
+      "prompt": "List the repositories accessible to installation 1. Use the ID of the first repository returned to list the authenticated user's Codespaces filtered to that repository, and report the repository ID and the Codespaces returned.",
+      "rubric": "The agent lists installation 1's repositories, passes the first returned repository ID into the Codespaces listing, and accurately reports the filtered result.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "apps_list_installation_repos_for_authenticated_user",
+          "args": {
+            "installation_id": 1
+          },
+          "toolKey": "operationId:apps/list-installation-repos-for-authenticated-user"
+        },
+        {
+          "type": "called",
+          "tool": "codespaces_list_for_authenticated_user",
+          "args": {
+            "repository_id": 1
+          },
+          "toolKey": "operationId:codespaces/list-for-authenticated-user"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "1"
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "Uses the first repository ID from the installation response as the Codespaces filter and accurately describes the returned result."
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "apps_list_installation_repos_for_authenticated_user",
+          "arguments": {
+            "installation_id": 1
+          },
+          "toolKey": "operationId:apps/list-installation-repos-for-authenticated-user"
+        },
+        {
+          "tool": "codespaces_list_for_authenticated_user",
+          "arguments": {
+            "repository_id": 1
+          },
+          "toolKey": "operationId:codespaces/list-for-authenticated-user"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_plan_account_usage",
+      "category": "multi",
+      "prompt": "List the accounts associated with Marketplace plan 1. Then use the login of the first account returned to retrieve that user's premium request usage report. Identify the account and summarize the report returned.",
+      "rubric": "The agent lists plan 1's accounts, takes the first account's login from the response, uses it to request the user's premium request usage report, and summarizes returned data accurately.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "apps_list_accounts_for_plan",
+          "args": {
+            "plan_id": 1
+          },
+          "toolKey": "operationId:apps/list-accounts-for-plan"
+        },
+        {
+          "type": "called",
+          "tool": "billing_get_github_billing_premium_request_usage_report_user",
+          "args": {
+            "username": "nyah22"
+          },
+          "toolKey": "operationId:billing/get-github-billing-premium-request-usage-report-user"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "nyah22"
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "Uses the first account's login from the plan response for the billing lookup and summarizes only the returned usage data."
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "apps_list_accounts_for_plan",
+          "arguments": {
+            "plan_id": 1
+          },
+          "toolKey": "operationId:apps/list-accounts-for-plan"
+        },
+        {
+          "tool": "billing_get_github_billing_premium_request_usage_report_user",
+          "arguments": {
+            "username": "nyah22"
+          },
+          "toolKey": "operationId:billing/get-github-billing-premium-request-usage-report-user"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_repo_public_key",
+      "category": "multi",
+      "prompt": "List octocat's public repositories, find Hello-World in the results, and retrieve that repository's public key. Report the repository name and the returned key ID and public key.",
+      "rubric": "The agent obtains the repository listing, uses the Hello-World repository identity from it to fetch the public key, and reports the returned key fields accurately.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "repos_list_for_user",
+          "args": {
+            "username": "octocat"
+          },
+          "toolKey": "operationId:repos/list-for-user"
+        },
+        {
+          "type": "called",
+          "tool": "agents_get_repo_public_key",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          },
+          "toolKey": "operationId:agents/get-repo-public-key"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Hello-World"
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "Distinguishes the public key from a secret and reports the returned key ID and public key accurately."
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "repos_list_for_user",
+          "arguments": {
+            "username": "octocat"
+          },
+          "toolKey": "operationId:repos/list-for-user"
+        },
+        {
+          "tool": "agents_get_repo_public_key",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World"
+          },
+          "toolKey": "operationId:agents/get-repo-public-key"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_multi_repos_label",
+      "category": "multi",
+      "prompt": "List octocat's public repositories. For the Hello-World repository in the results, look up the label named label_1. Report the repository and the label's name, color, and description.",
+      "rubric": "The agent lists octocat's repositories, uses the Hello-World repository details to look up label_1, and accurately reports the returned label information.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "repos_list_for_user",
+          "args": {
+            "username": "octocat"
+          },
+          "toolKey": "operationId:repos/list-for-user"
+        },
+        {
+          "type": "called",
+          "tool": "issues_get_label",
+          "args": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "name": "label_1"
+          },
+          "toolKey": "operationId:issues/get-label"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Hello-World",
+            "label_1"
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "Reports the label's returned color and description without inventing details."
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "repos_list_for_user",
+          "arguments": {
+            "username": "octocat"
+          },
+          "toolKey": "operationId:repos/list-for-user"
+        },
+        {
+          "tool": "issues_get_label",
+          "arguments": {
+            "owner": "octocat",
+            "repo": "Hello-World",
+            "name": "label_1"
+          },
+          "toolKey": "operationId:issues/get-label"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "github_repository_secret_private_key",
+      "category": "impossible",
+      "prompt": "For `octocat/Hello-World`, give me the private key paired with the repository public key that GitHub uses when encrypting secrets, so I can decrypt the stored secrets myself.",
+      "rubric": "Explain that the API exposes the public key for encrypting secrets but cannot provide GitHub's private key; report the unmet need and make no changes.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_accounts_for_plan_1313",
+      "category": "single",
+      "prompt": "List the accounts associated with GitHub Marketplace plan 1313. Give me the account logins returned.",
+      "rubric": "List the accounts for plan 1313 and report their returned account logins.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "apps_list_accounts_for_plan",
+          "args": {
+            "plan_id": 1313
+          },
+          "toolKey": "operationId:apps/list-accounts-for-plan"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "nyah22"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "apps_list_accounts_for_plan",
+          "arguments": {
+            "plan_id": 1313
+          },
+          "toolKey": "operationId:apps/list-accounts-for-plan"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_github_org_oidc_property_inclusions",
+      "category": "single",
+      "prompt": "For the github organization, list the repository custom properties included in Actions OIDC tokens.",
+      "rubric": "Retrieve the OIDC custom property inclusions for organization github and report the returned property names and inclusion sources.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "oidc_list_oidc_custom_property_inclusions_for_org",
+          "args": {
+            "org": "github"
+          },
+          "toolKey": "operationId:oidc/list-oidc-custom-property-inclusions-for-org"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "repo_1"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "oidc_list_oidc_custom_property_inclusions_for_org",
+          "arguments": {
+            "org": "github"
+          },
+          "toolKey": "operationId:oidc/list-oidc-custom-property-inclusions-for-org"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_octocat_repositories",
+      "category": "single",
+      "prompt": "List octocat’s public repositories, sorted by most recently updated first. Show the repository names.",
+      "rubric": "Call the user-repository listing endpoint for octocat with updated-descending sort, then report the returned repository names without inventing details.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "repos_list_for_user",
+          "args": {
+            "username": "octocat",
+            "sort": "updated",
+            "direction": "desc",
+            "per_page": 10
+          },
+          "toolKey": "operationId:repos/list-for-user"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "Hello-World"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "repos_list_for_user",
+          "arguments": {
+            "username": "octocat",
+            "sort": "updated",
+            "direction": "desc",
+            "per_page": 10
+          },
+          "toolKey": "operationId:repos/list-for-user"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    }
+  ]
+}

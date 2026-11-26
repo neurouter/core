@@ -1,0 +1,1131 @@
+{
+  "version": 1,
+  "server": "api",
+  "generatedFrom": null,
+  "tasks": [
+    {
+      "key": "failed_user_initiated_topup_details",
+      "category": "multi",
+      "prompt": "Find the failed top-up that was initiated by the user, then retrieve that top-up’s full record. Summarize its ID, amount, and status.",
+      "rubric": "List failed top-ups, identify the one whose initiated_by value is user, and retrieve its record using the ID from the list result. Report the requested fields without implying any changes were made.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_topups",
+          "args": {
+            "status": "failed"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetTopups"
+        },
+        {
+          "type": "called",
+          "tool": "get_topups_topup",
+          "args": {
+            "topup": "topup_1"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetTopupsTopup"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "topup_1"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "11"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "failed"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_topups",
+          "arguments": {
+            "status": "failed"
+          },
+          "toolKey": "operationId:GetTopups"
+        },
+        {
+          "tool": "get_topups_topup",
+          "arguments": {
+            "topup": "topup_1"
+          },
+          "toolKey": "operationId:GetTopupsTopup"
+        }
+      ],
+      "seedState": {
+        "topups": [
+          {
+            "id": "topup_1",
+            "amount": 11,
+            "status": "failed",
+            "initiated_by": "user"
+          },
+          {
+            "id": "topup_2",
+            "amount": 76,
+            "status": "failed",
+            "initiated_by": "stripe"
+          },
+          {
+            "id": "topup_3",
+            "amount": 32,
+            "status": "pending",
+            "initiated_by": "stripe"
+          }
+        ]
+      },
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "financial_connection_account_owners",
+      "category": "multi",
+      "prompt": "Find the Financial Connections account belonging to customer 4roBs, then list the owners associated with that account. Include the account ID in your summary.",
+      "rubric": "Filter Financial Connections accounts by the customer, then use the returned account ID and ownership ID to list its owners. Summarize the owner results and identify the account.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_financial_connections_accounts",
+          "args": {
+            "account_holder": {
+              "customer": "4roBs"
+            }
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetFinancialConnectionsAccounts"
+        },
+        {
+          "type": "called",
+          "tool": "get_financial_connections_accounts_account_owners",
+          "args": {
+            "account": "account_1",
+            "ownership": "ymaawaHuiRgca9aZDrVpYv"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetFinancialConnectionsAccountsAccountOwners"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "account_1"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_financial_connections_accounts",
+          "arguments": {
+            "account_holder": {
+              "customer": "4roBs"
+            }
+          },
+          "toolKey": "operationId:GetFinancialConnectionsAccounts"
+        },
+        {
+          "tool": "get_financial_connections_accounts_account_owners",
+          "arguments": {
+            "account": "account_1",
+            "ownership": "ymaawaHuiRgca9aZDrVpYv"
+          },
+          "toolKey": "operationId:GetFinancialConnectionsAccountsAccountOwners"
+        }
+      ],
+      "seedState": {
+        "financial_connections_accounts": [
+          {
+            "id": "account_1",
+            "account_holder": {
+              "customer": "4roBs",
+              "type": "account"
+            },
+            "ownership": "ymaawaHuiRgca9aZDrVpYv",
+            "display_name": "perfumed hence",
+            "status": "inactive"
+          }
+        ]
+      },
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "high_value_topups_cutoff",
+      "category": "ambiguous",
+      "prompt": "Show me the high-value top-ups. Use your best judgment for the cutoff and tell me what you chose.",
+      "rubric": "Choose and state a reasonable threshold for “high-value,” then list top-ups at or above it. For this task, use an amount cutoff of 50 and treat the amount as Stripe API units. Do not modify anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_topups",
+          "args": {
+            "amount": {
+              "gte": 50
+            }
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetTopups"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "topup_2"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "50"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_topups",
+          "arguments": {
+            "amount": {
+              "gte": 50
+            }
+          },
+          "toolKey": "operationId:GetTopups"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_active_issuing_tokens",
+      "category": "single",
+      "prompt": "List the active issuing tokens for card EiZtvv. Include each token’s ID, network, and wallet provider.",
+      "rubric": "List issuing tokens for the specified card filtered to active status, and report the matching token’s ID, network, and wallet provider.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_issuing_tokens",
+          "args": {
+            "card": "EiZtvv",
+            "status": "active"
+          },
+          "toolKey": "operationId:GetIssuingTokens"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "token_1"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "mastercard"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "apple_pay"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_issuing_tokens",
+          "arguments": {
+            "card": "EiZtvv",
+            "status": "active"
+          },
+          "toolKey": "operationId:GetIssuingTokens"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_charge_refunds",
+      "category": "single",
+      "prompt": "Show me the refunds for charge demo, including each refund’s ID and amount.",
+      "rubric": "List refunds belonging to the specified charge and report the IDs and amounts from the response.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_charges_charge_refunds",
+          "args": {
+            "charge": "demo"
+          },
+          "toolKey": "operationId:GetChargesChargeRefunds"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "refund_1"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "refund_2"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "refund_3"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_charges_charge_refunds",
+          "arguments": {
+            "charge": "demo"
+          },
+          "toolKey": "operationId:GetChargesChargeRefunds"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_failed_topups",
+      "category": "single",
+      "prompt": "List the failed top-ups and include each top-up’s ID and amount.",
+      "rubric": "Call the top-ups list endpoint filtered to failed status, then report the returned top-up IDs and amounts accurately.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_topups",
+          "args": {
+            "status": "failed"
+          },
+          "toolKey": "operationId:GetTopups"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "topup_1"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "topup_2"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_topups",
+          "arguments": {
+            "status": "failed"
+          },
+          "toolKey": "operationId:GetTopups"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_invoice_credit_note_lines",
+      "category": "multi",
+      "prompt": "For invoice ee4ErYyDeho6TTIpxfJLAnq, find its credit note and fetch the credit note’s line items. Summarize the note’s amount and status, and report the line items returned.",
+      "rubric": "List credit notes filtered to the requested invoice, use the matching credit note ID from that result to fetch its line items, and summarize the note and returned lines without inventing line-item details.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_credit_notes",
+          "args": {
+            "invoice": "ee4ErYyDeho6TTIpxfJLAnq"
+          },
+          "toolKey": "operationId:GetCreditNotes"
+        },
+        {
+          "type": "called",
+          "tool": "get_credit_notes_credit_note_lines",
+          "args": {
+            "credit_note": "credit_note_1"
+          },
+          "toolKey": "operationId:GetCreditNotesCreditNoteLines"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "framing"
+        },
+        {
+          "type": "judge",
+          "criterion": "Correctly identifies the matching note as credit_note_1, reports its amount as 47 and status as void, and summarizes the line-items response without making up item details."
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_credit_notes",
+          "arguments": {
+            "invoice": "ee4ErYyDeho6TTIpxfJLAnq"
+          },
+          "toolKey": "operationId:GetCreditNotes"
+        },
+        {
+          "tool": "get_credit_notes_credit_note_lines",
+          "arguments": {
+            "credit_note": "credit_note_1"
+          },
+          "toolKey": "operationId:GetCreditNotesCreditNoteLines"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_nondefault_terminal_config",
+      "category": "single",
+      "prompt": "Find the non-default Terminal configuration and give me its ID and name.",
+      "rubric": "List terminal configurations filtered to non-default configurations and identify the matching configuration’s ID and name.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_terminal_configurations",
+          "args": {
+            "is_account_default": false
+          },
+          "toolKey": "operationId:GetTerminalConfigurations"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "configuration_2"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "when yet with"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_terminal_configurations",
+          "arguments": {
+            "is_account_default": false
+          },
+          "toolKey": "operationId:GetTerminalConfigurations"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "list_prices_by_currency",
+      "category": "single",
+      "prompt": "Find the price or prices denominated in universe currency, and give me their IDs and product IDs.",
+      "rubric": "List prices filtered by the requested currency and report the matching price ID and product ID.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_prices",
+          "args": {
+            "currency": "universe"
+          },
+          "toolKey": "operationId:GetPrices"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "price_3"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "la45x"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_prices",
+          "arguments": {
+            "currency": "universe"
+          },
+          "toolKey": "operationId:GetPrices"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "open_topups_status_interpretation",
+      "category": "ambiguous",
+      "prompt": "Show me the open top-ups. Use your best judgment for what “open” means here, and tell me how you interpreted it.",
+      "rubric": "Stripe top-ups do not have an “open” status in the available status filter. Make the reasonable, explicit choice to interpret “open” as pending, list pending top-ups, and explain that interpretation. Do not modify anything.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_topups",
+          "args": {
+            "status": "pending"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetTopups"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "topup_3"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "pending"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_topups",
+          "arguments": {
+            "status": "pending"
+          },
+          "toolKey": "operationId:GetTopups"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "recent_topups_timeframe_clarification",
+      "category": "ambiguous",
+      "prompt": "Show me top-ups from the recent period.",
+      "rubric": "“Recent” does not specify a date range. Ask the user what timeframe they mean (for example, the last few days or a specific date range) before listing top-ups; do not guess or call the API yet.",
+      "assertions": [
+        {
+          "type": "not_called",
+          "tool": "get_topups",
+          "toolKey": "operationId:GetTopups"
+        },
+        {
+          "type": "max_calls",
+          "n": 0
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "judge",
+          "criterion": "Ask the user to define the timeframe meant by “recent” before fetching top-ups."
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "retrieve_active_recurring_price",
+      "category": "multi",
+      "prompt": "Find an active recurring price, then retrieve its full record by the price ID returned in the list. Summarize the price ID, currency, and recurring interval.",
+      "rubric": "List active recurring prices, then retrieve a listed price using its returned ID. Report the requested price details accurately.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_prices",
+          "args": {
+            "active": true,
+            "type": "recurring"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetPrices"
+        },
+        {
+          "type": "called",
+          "tool": "get_prices_price",
+          "args": {
+            "price": "price_1"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetPricesPrice"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "price_1"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "considero"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "day"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_prices",
+          "arguments": {
+            "active": true,
+            "type": "recurring"
+          },
+          "toolKey": "operationId:GetPrices"
+        },
+        {
+          "tool": "get_prices_price",
+          "arguments": {
+            "price": "price_1"
+          },
+          "toolKey": "operationId:GetPricesPrice"
+        }
+      ],
+      "seedState": {
+        "prices": [
+          {
+            "id": "price_1",
+            "active": true,
+            "currency": "considero",
+            "type": "recurring",
+            "recurring": {
+              "interval": "day"
+            }
+          }
+        ]
+      },
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "retrieve_coupon",
+      "category": "single",
+      "prompt": "Retrieve coupon coupon_3 and tell me its name and whether it is valid.",
+      "rubric": "Retrieve the specified coupon and accurately report its name and valid status.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_coupons_coupon",
+          "args": {
+            "coupon": "coupon_3"
+          },
+          "toolKey": "operationId:GetCouponsCoupon"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "coupon_3"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "anti eke"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "false"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_coupons_coupon",
+          "arguments": {
+            "coupon": "coupon_3"
+          },
+          "toolKey": "operationId:GetCouponsCoupon"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "retrieve_first_refund_for_charge",
+      "category": "multi",
+      "prompt": "For charge demo, list its refunds and retrieve the first refund returned. Summarize the refund ID, amount, and status.",
+      "rubric": "List refunds for the specified charge, then retrieve the first refund using its ID from the list. Report the requested fields from the refund record.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_charges_charge_refunds",
+          "args": {
+            "charge": "demo"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetChargesChargeRefunds"
+        },
+        {
+          "type": "called",
+          "tool": "get_refunds_refund",
+          "args": {
+            "refund": "refund_1"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetRefundsRefund"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "refund_1"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "17"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "closed"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_charges_charge_refunds",
+          "arguments": {
+            "charge": "demo"
+          },
+          "toolKey": "operationId:GetChargesChargeRefunds"
+        },
+        {
+          "tool": "get_refunds_refund",
+          "arguments": {
+            "refund": "refund_1"
+          },
+          "toolKey": "operationId:GetRefundsRefund"
+        }
+      ],
+      "seedState": {
+        "charge_refunds": [
+          {
+            "id": "refund_1",
+            "charge": "demo",
+            "amount": 17,
+            "created": 92,
+            "status": "closed"
+          },
+          {
+            "id": "refund_2",
+            "charge": "demo",
+            "amount": 76,
+            "created": 46,
+            "status": "closed"
+          },
+          {
+            "id": "refund_3",
+            "charge": "demo",
+            "amount": 35,
+            "created": 25,
+            "status": "closed"
+          }
+        ]
+      },
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "retrieve_invoice",
+      "category": "single",
+      "prompt": "Look up invoice invoice_3 and tell me its status and amount due.",
+      "rubric": "Retrieve the specified invoice and accurately state its status and amount due.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_invoices_invoice",
+          "args": {
+            "invoice": "invoice_3"
+          },
+          "toolKey": "operationId:GetInvoicesInvoice"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "invoice_3"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "paid"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "90"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_invoices_invoice",
+          "arguments": {
+            "invoice": "invoice_3"
+          },
+          "toolKey": "operationId:GetInvoicesInvoice"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "retrieve_newest_event",
+      "category": "multi",
+      "prompt": "Show me the details of the newest event currently returned by Stripe’s event list. First identify the newest event, then retrieve it by its ID and summarize its ID, type, and creation time.",
+      "rubric": "Request one event from the list, use its returned ID to retrieve that event, and report the requested fields from the retrieved record.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_events",
+          "args": {
+            "limit": 1
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetEvents"
+        },
+        {
+          "type": "called",
+          "tool": "get_events_id",
+          "args": {
+            "id": "event_1"
+          },
+          "minTimes": 1,
+          "toolKey": "operationId:GetEventsId"
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "max_calls",
+          "n": 2
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "event_1"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "60"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_events",
+          "arguments": {
+            "limit": 1
+          },
+          "toolKey": "operationId:GetEvents"
+        },
+        {
+          "tool": "get_events_id",
+          "arguments": {
+            "id": "event_1"
+          },
+          "toolKey": "operationId:GetEventsId"
+        }
+      ],
+      "seedState": {
+        "events": [
+          {
+            "id": "event_1",
+            "type": "UwUWkCV1x5DQXfQZca",
+            "created": 60
+          },
+          {
+            "id": "event_3",
+            "type": "Nb",
+            "created": 10
+          },
+          {
+            "id": "event_2",
+            "type": "WYN",
+            "created": 4
+          }
+        ]
+      },
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "retrieve_payment_link",
+      "category": "single",
+      "prompt": "Retrieve payment_link_2 and tell me whether it’s active and what URL it uses.",
+      "rubric": "Retrieve the requested payment link and report its active flag and URL accurately.",
+      "assertions": [
+        {
+          "type": "called",
+          "tool": "get_payment_links_payment_link",
+          "args": {
+            "payment_link": "payment_link_2"
+          },
+          "toolKey": "operationId:GetPaymentLinksPaymentLink"
+        },
+        {
+          "type": "max_calls",
+          "n": 1
+        },
+        {
+          "type": "no_writes"
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "payment_link_2"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "optimistic-tribe.name"
+          ]
+        },
+        {
+          "type": "answer_contains",
+          "anyOf": [
+            "false"
+          ]
+        },
+        {
+          "type": "framing"
+        }
+      ],
+      "referenceCalls": [
+        {
+          "tool": "get_payment_links_payment_link",
+          "arguments": {
+            "payment_link": "payment_link_2"
+          },
+          "toolKey": "operationId:GetPaymentLinksPaymentLink"
+        }
+      ],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "stripe_card_cvc_unavailable",
+      "category": "impossible",
+      "prompt": "For customer_1, tell me the CVC that was entered for their most recent card payment. I need the original security code, not a new one.",
+      "rubric": "Explain that the API cannot retrieve a card's CVC; Stripe does not make stored CVCs available for retrieval. Do not guess or claim to have found it, and report the unmet need.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "stripe_support_case_transcript_unavailable",
+      "category": "impossible",
+      "prompt": "Can you show me the conversation history from my latest Stripe support case about an account review, including the messages from Stripe support?",
+      "rubric": "Explain that the available Stripe API tools cannot retrieve support case transcripts. Do not invent messages or attempt unrelated API calls; report the unmet need.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    },
+    {
+      "key": "terminal_location_live_weather_unavailable",
+      "category": "impossible",
+      "prompt": "What is the current weather outside my Stripe Terminal location location_1? Please include the temperature and whether it is raining right now.",
+      "rubric": "Explain that the available Stripe API tools do not provide current weather data. Do not fabricate weather conditions; report the unmet need.",
+      "assertions": [
+        {
+          "type": "framing"
+        },
+        {
+          "type": "unmet_need_reported_or_declined"
+        },
+        {
+          "type": "no_writes"
+        }
+      ],
+      "referenceCalls": [],
+      "seedState": {},
+      "tags": [],
+      "enabled": true
+    }
+  ]
+}
