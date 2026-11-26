@@ -50,11 +50,13 @@ export interface EmbeddedExecutor {
 }
 
 /**
- * Resolves the executor entry next to this module: `main.js` when running from `dist/` (production),
+ * Resolves the executor entry next to this module: `executor/main.js` in the server's production
+ * bundle (`dist-bundle/`, whose own `main.js` is the server), `main.js` when running from `dist/`,
  * `main.ts` through the tsx loader when running from source (dev/tests, so the child is never stale).
  */
-export function resolveExecutorEntry(): { entry: string; execArgv: string[] } {
-  const here = dirname(fileURLToPath(import.meta.url));
+export function resolveExecutorEntry(here = dirname(fileURLToPath(import.meta.url))): { entry: string; execArgv: string[] } {
+  const bundled = join(here, 'executor', 'main.js');
+  if (existsSync(bundled)) return { entry: bundled, execArgv: [] };
   const js = join(here, 'main.js');
   if (existsSync(js)) return { entry: js, execArgv: [] };
   const ts = join(here, 'main.ts');
@@ -62,7 +64,7 @@ export function resolveExecutorEntry(): { entry: string; execArgv: string[] } {
   throw new Error(`executor entry not found in ${here} (build apps/executor)`);
 }
 
-const LEVELS: Record<number, keyof ExecLogger> = { 20: 'debug', 30: 'info', 40: 'warn', 50: 'error' };
+const LEVELS: Record<number, keyof ExecLogger> = { 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'error' };
 
 /**
  * Embedded mode (§10.6): spawns `apps/executor` as a child process listening on a Unix socket in a
@@ -86,6 +88,8 @@ export function spawnEmbeddedExecutor(opts: SpawnExecutorOptions): EmbeddedExecu
     NEUROUTER_EXECUTOR_POOL_MAX: String(opts.poolMax),
     NEUROUTER_EXECUTOR_PREWARM: String(opts.prewarm),
     LOG_LEVEL: opts.logLevel ?? 'info',
+    // the image's prebuilt V8 compile cache (not a secret)
+    ...(process.env.NODE_COMPILE_CACHE ? { NODE_COMPILE_CACHE: process.env.NODE_COMPILE_CACHE } : {}),
   };
   const executor = new SocketExecutor({ address: { socketPath }, token, expectedMontySha256: montyBinarySha256, logger: log, connectTimeoutMs: 5000 });
 

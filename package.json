@@ -20,7 +20,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:server": "npm run dev -w @neurouter/server",
-    "build": "tsc -b && npm run build --if-present -w @neurouter/web",
+    "build": "tsc -b && npm run bundle -w @neurouter/server && npm run build --if-present -w @neurouter/web",
     "start": "npm run start -w @neurouter/server",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,6 +34,7 @@
     "@eslint/js": "10.0.1",
     "@types/node": "24.19.2",
     "@vitest/coverage-v8": "5.1.1",
+    "esbuild": "0.28.2",
     "eslint": "10.15.0",
     "globals": "17.14.0",
     "tsx": "4.23.15",

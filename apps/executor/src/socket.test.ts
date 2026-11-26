@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import { encodeFrame, FrameDecoder } from './frames.js';
 import { MontyRunner } from './monty-runner.js';
 import { ExecutorServer } from './server.js';
 import { resolveMontyBinary, sha256File } from './monty-info.js';
-import { spawnEmbeddedExecutor, type EmbeddedExecutor } from './spawn.js';
+import { resolveExecutorEntry, spawnEmbeddedExecutor, type EmbeddedExecutor } from './spawn.js';
 import { fakeHost, request, STALE_SCRIPT } from './test/helpers.js';
 
 const TOKEN = 't'.repeat(40);
@@ -188,4 +188,21 @@ describe('spawnEmbeddedExecutor with a pinned binary checksum', () => {
       await bad.close();
     }
   }, 60_000);
+});
+
+describe('resolveExecutorEntry', () => {
+  it('prefers executor/main.js (the server bundle, whose own main.js is the server), then main.js, then main.ts', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nr-entry-'));
+    try {
+      writeFileSync(join(dir, 'main.ts'), '');
+      expect(resolveExecutorEntry(dir).entry).toBe(join(dir, 'main.ts'));
+      writeFileSync(join(dir, 'main.js'), '');
+      expect(resolveExecutorEntry(dir)).toEqual({ entry: join(dir, 'main.js'), execArgv: [] });
+      mkdirSync(join(dir, 'executor'));
+      writeFileSync(join(dir, 'executor', 'main.js'), '');
+      expect(resolveExecutorEntry(dir)).toEqual({ entry: join(dir, 'executor', 'main.js'), execArgv: [] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

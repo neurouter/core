@@ -31,6 +31,9 @@ jobs:
           EMBEDDINGS_ENABLED: 'false'
           NEUROUTER_TEST_PG_URL: postgres://neurouter:neurouter@127.0.0.1:5432/neurouter
       - run: npm run build
+      # the production bundle (Docker CMD) and the unbundled build (`npm start`, `npx neurouter serve`)
+      - run: node apps/server/scripts/smoke.mjs
+      - run: node apps/server/scripts/smoke.mjs --entry dist
 
   executor-macos:
     runs-on: macos-latest

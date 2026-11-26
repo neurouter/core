@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import type { Scope } from '@neurouter/shared';
@@ -43,8 +43,29 @@ export class ConfigError extends Error {
   }
 }
 
-/** apps/server (works from src/ under tsx and dist/ when built). */
-export const SERVER_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+/**
+ * Directory of the `@neurouter/server` package (`apps/server`, or `node_modules/@neurouter/server`):
+ * the nearest ancestor of `from` whose package.json is named `@neurouter/server`. Works from `src/`
+ * (tsx), `dist/` and the production bundle `dist-bundle/`. `NEUROUTER_SERVER_DIR` overrides it.
+ */
+export function findServerPackageDir(from: string, override = process.env.NEUROUTER_SERVER_DIR): string {
+  if (override) return resolve(override);
+  for (let dir = resolve(from); ; ) {
+    const pkg = join(dir, 'package.json');
+    if (existsSync(pkg)) {
+      try {
+        if ((JSON.parse(readFileSync(pkg, 'utf8')) as { name?: string }).name === '@neurouter/server') return dir;
+      } catch {
+        // unreadable package.json: keep walking up
+      }
+    }
+    const up = dirname(dir);
+    if (up === dir) throw new Error(`@neurouter/server package.json not found above ${from} (set NEUROUTER_SERVER_DIR)`);
+    dir = up;
+  }
+}
+
+export const SERVER_PACKAGE_DIR = findServerPackageDir(dirname(fileURLToPath(import.meta.url)));
 
 /**
  * Loads `.env` files outside production: `$NEUROUTER_ENV_FILE`, else the first of

@@ -117,6 +117,8 @@ export async function bootExecutor(config: Config, logger: Logger): Promise<Exec
       // pinned at image build: the child verifies the binary against it, the parent skips its own hash
       ...(config.env.MONTY_BINARY_PATH && config.env.MONTY_BINARY_SHA256 ? { montyBinarySha256: config.env.MONTY_BINARY_SHA256 } : {}),
       onExit: (code, signal) => logger.warn({ code, signal }, 'code-mode executor exited; restarting'),
+      // relays the child's own log lines (pool started, listening, fatal errors) into the server log
+      logger,
     });
     await embedded.ready(15_000);
     return { executor: embedded.executor, embedded };
