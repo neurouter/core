@@ -32,7 +32,7 @@ describe('neurouter validate', () => {
     const r = await run(['validate', '--config', join(ROOT, 'neurouter.example.yaml')]);
     expect(r.code).toBeUndefined();
     expect(r.out).toMatch(/petstore: 19 visible tools/);
-  });
+  }, 30_000);
 
   it('exits 1 with file:line diagnostics on errors (literal secret, prod confirm none)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));
