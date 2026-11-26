@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import type * as OpenAiSdk from 'openai';
 import type { ResponseCreateParamsNonStreaming, ResponseInputItem, ResponseOutputItem, Response as OpenAIResponse } from 'openai/resources/responses/responses';
 import { LlmError, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmContentBlock, type LlmCreateOptions, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmTextBlock, type LlmToolResultBlock, type LlmToolUseBlock } from './types.js';
 
@@ -22,20 +22,27 @@ export interface OpenAiResponsesApi {
  */
 export class OpenAiLlmClient implements LlmClient {
   readonly provider = 'openai' as const;
-  private readonly client: OpenAiResponsesApi;
+  private client?: Promise<OpenAiResponsesApi>;
 
-  constructor(opts: { apiKey: string; baseURL?: string; maxRetries?: number; client?: OpenAiResponsesApi; fetch?: typeof fetch }) {
+  constructor(private readonly opts: { apiKey: string; baseURL?: string; maxRetries?: number; client?: OpenAiResponsesApi; fetch?: typeof fetch }) {
     if (!opts.apiKey && !opts.client) throw new LlmKeyError('OPENAI_API_KEY is not configured');
-    this.client = opts.client ?? new OpenAI({ apiKey: opts.apiKey, ...(opts.baseURL ? { baseURL: opts.baseURL } : {}), maxRetries: opts.maxRetries ?? 2, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+    if (opts.client) this.client = Promise.resolve(opts.client);
+  }
+
+  /** The SDK is imported on first use, not at boot (cold start: it is ~240 files). */
+  private sdk(): Promise<OpenAiResponsesApi> {
+    const { apiKey, baseURL, maxRetries, fetch } = this.opts;
+    return (this.client ??= loadSdk().then(({ default: O }) => new O({ apiKey, ...(baseURL ? { baseURL } : {}), maxRetries: maxRetries ?? 2, ...(fetch ? { fetch } : {}) })));
   }
 
   async create(req: LlmRequest, opts: LlmCreateOptions = {}): Promise<LlmResponse> {
     const body = toOpenAiRequest(req);
+    const client = await this.sdk();
     let res: OpenAIResponse;
     try {
-      res = await this.client.responses.create(body, opts.signal ? { signal: opts.signal } : undefined);
+      res = await client.responses.create(body, opts.signal ? { signal: opts.signal } : undefined);
     } catch (err) {
-      throw mapOpenAiError(err);
+      throw mapOpenAiError(err, (await loadSdk()).default);
     }
     return fromOpenAiResponse(res, req.model);
   }
@@ -137,7 +144,10 @@ export function fromOpenAiResponse(res: OpenAIResponse, requestedModel: string):
   };
 }
 
-export function mapOpenAiError(err: unknown): Error {
+let sdkModule: Promise<typeof OpenAiSdk> | undefined;
+const loadSdk = () => (sdkModule ??= import('openai'));
+
+export function mapOpenAiError(err: unknown, OpenAI: typeof OpenAiSdk.default): Error {
   if (err instanceof OpenAI.AuthenticationError || err instanceof OpenAI.PermissionDeniedError) return new LlmKeyError(err.message);
   if (err instanceof OpenAI.RateLimitError) {
     const ra = Number(err.headers?.get?.('retry-after'));

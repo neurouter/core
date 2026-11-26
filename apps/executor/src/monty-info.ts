@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { findMontyBinary } from '@pydantic/monty/node';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import type * as MontyNode from '@pydantic/monty/node';
 
 let version: string | null = null;
 
@@ -16,9 +17,19 @@ export function montyVersion(): string {
   return version;
 }
 
-/** Resolves the `monty` worker binary (explicit path, `MONTY_BINARY_PATH`, or the platform package). */
+/**
+ * Resolves the `monty` worker binary (explicit path, `MONTY_BINARY_PATH`, or the platform package).
+ * `@pydantic/monty` is only loaded for the platform lookup (the server process spawns the executor
+ * with a pinned path and never needs the package itself).
+ */
 export function resolveMontyBinary(explicit?: string): string {
-  return findMontyBinary(explicit || process.env.MONTY_BINARY_PATH || undefined);
+  const path = explicit || process.env.MONTY_BINARY_PATH;
+  if (path) {
+    if (!existsSync(path)) throw new Error(`monty binary not found at binaryPath: ${path}`);
+    return path;
+  }
+  const { findMontyBinary } = createRequire(import.meta.url)('@pydantic/monty/node') as typeof MontyNode;
+  return findMontyBinary();
 }
 
 export function sha256File(path: string): string {

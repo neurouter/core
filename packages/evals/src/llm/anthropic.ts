@@ -1,4 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
+import type * as AnthropicSdk from '@anthropic-ai/sdk';
 import { FALLBACK_BETA, LlmError, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmCreateOptions, type LlmRequest, type LlmResponse } from './types.js';
 
 /**
@@ -8,31 +9,40 @@ import { FALLBACK_BETA, LlmError, LlmKeyError, LlmRateLimitError, type LlmClient
  */
 export class AnthropicLlmClient implements LlmClient {
   readonly provider = 'anthropic' as const;
-  private readonly client: Anthropic;
+  private client?: Promise<Anthropic>;
 
-  constructor(opts: { apiKey: string; baseURL?: string; maxRetries?: number }) {
+  constructor(private readonly opts: { apiKey: string; baseURL?: string; maxRetries?: number }) {
     if (!opts.apiKey) throw new LlmKeyError();
-    this.client = new Anthropic({ apiKey: opts.apiKey, ...(opts.baseURL ? { baseURL: opts.baseURL } : {}), maxRetries: opts.maxRetries ?? 2 });
+  }
+
+  /** The SDK is imported on first use, not at boot (cold start: it is ~270 files). */
+  private sdk(): Promise<Anthropic> {
+    const { apiKey, baseURL, maxRetries } = this.opts;
+    return (this.client ??= loadSdk().then(({ default: A }) => new A({ apiKey, ...(baseURL ? { baseURL } : {}), maxRetries: maxRetries ?? 2 })));
   }
 
   async create(req: LlmRequest, opts: LlmCreateOptions = {}): Promise<LlmResponse> {
     const { fallbacks, ...rest } = req;
     const betas = [...(opts.betas ?? [])];
     if (fallbacks && !betas.includes(FALLBACK_BETA)) betas.push(FALLBACK_BETA);
+    const client = await this.sdk();
     try {
       if (betas.length) {
-        const res = await this.client.beta.messages.create({ ...(rest as Record<string, unknown>), ...(fallbacks ? { fallbacks } : {}), betas } as never, opts.signal ? { signal: opts.signal } : undefined);
+        const res = await client.beta.messages.create({ ...(rest as Record<string, unknown>), ...(fallbacks ? { fallbacks } : {}), betas } as never, opts.signal ? { signal: opts.signal } : undefined);
         return res as unknown as LlmResponse;
       }
-      const res = await this.client.messages.create(rest as never, opts.signal ? { signal: opts.signal } : undefined);
+      const res = await client.messages.create(rest as never, opts.signal ? { signal: opts.signal } : undefined);
       return res as unknown as LlmResponse;
     } catch (err) {
-      throw mapSdkError(err);
+      throw mapSdkError(err, (await loadSdk()).default);
     }
   }
 }
 
-export function mapSdkError(err: unknown): Error {
+let sdkModule: Promise<typeof AnthropicSdk> | undefined;
+const loadSdk = () => (sdkModule ??= import('@anthropic-ai/sdk'));
+
+export function mapSdkError(err: unknown, Anthropic: typeof AnthropicSdk.default): Error {
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return new LlmKeyError(err.message);
   if (err instanceof Anthropic.RateLimitError) {
     const ra = Number(err.headers?.get?.('retry-after'));

@@ -1,17 +1,5 @@
-import {
-  ExternalModule,
-  FunctionSnapshot,
-  Monty,
-  MontyComplete,
-  MontyCrashedError,
-  MontyRuntimeError,
-  MontySyntaxError,
-  MontyTypingError,
-  NameLookupSnapshot,
-  NOT_HANDLED,
-  type MontySession,
-  type Snapshot,
-} from '@pydantic/monty';
+import type * as MontyModule from '@pydantic/monty';
+import type { ExternalModule, Monty, MontySession, Snapshot } from '@pydantic/monty';
 import { jsonBytes, toJson, truncateUtf8 } from './convert.js';
 import { montyVersion, resolveMontyBinary, verifyMontyBinary } from './monty-info.js';
 import {
@@ -27,6 +15,18 @@ import {
   type RunResult,
   type RunStatus,
 } from './types.js';
+
+/**
+ * `@pydantic/monty` (its native addon and the OpenTelemetry API it imports) is loaded by
+ * `MontyRunner.create`, not when this package is imported: the server process imports
+ * `@neurouter/executor` for the socket client and the spawner, but only the executor runs Monty.
+ */
+let montyModule: typeof MontyModule | undefined;
+const loadMonty = async (): Promise<typeof MontyModule> => (montyModule ??= await import('@pydantic/monty'));
+const M = (): typeof MontyModule => {
+  if (!montyModule) throw new Error('@pydantic/monty is not loaded (MontyRunner.create loads it)');
+  return montyModule;
+};
 
 export interface MontyRunnerOptions {
   /** Explicit worker binary (default: `MONTY_BINARY_PATH`, then the platform package). */
@@ -88,7 +88,7 @@ export class MontyRunner {
     const poolMax = Math.max(1, opts.poolMax);
     const prewarm = Math.max(0, Math.min(opts.prewarm, poolMax));
     const clock = opts.executionClock ?? (process.platform === 'linux' ? 'cpu' : 'wall');
-    const pool = await Monty.create({
+    const pool = await (await loadMonty()).Monty.create({
       binaryPath,
       executionClock: clock,
       minProcesses: prewarm,
@@ -172,14 +172,15 @@ export class MontyRunner {
         if (!(ns === 'ops' && BUILTIN_OPS.has(fn))) allowed.add(`${ns}.${fn}`);
       }
       const stubs = ns === 'ops' ? `${BUILTIN_OPS_STUBS}\n${spec.stubs}` : spec.stubs;
-      externalModules[ns] = new ExternalModule(attrs, { stubs });
+      externalModules[ns] = new (M().ExternalModule)(attrs, { stubs });
     }
     const inputs = req.inputs ?? {};
     const globalStubs = ['from typing import Any', 'def days_since(iso: str) -> float: ...', ...Object.keys(inputs).filter((k) => IDENT.test(k)).map((k) => `${k}: Any`)].join('\n') + '\n';
     const frozenNow = new Date(req.osPolicy.datetime);
     const nowMs = Number.isNaN(frozenNow.getTime()) ? Date.now() : frozenNow.getTime();
     const prelude = req.prelude ?? `import ${Object.keys(modules).join(', ')}`;
-    const denyOs = () => NOT_HANDLED;
+    const notHandled = M().NOT_HANDLED;
+    const denyOs = () => notHandled;
 
     const callHost = async (fn: string, kwargs: Record<string, unknown>): Promise<HostCallResult> => {
       stats.toolCalls++;
@@ -268,7 +269,7 @@ export class MontyRunner {
       workerPid = s.workerPid;
       // feed 1: the prelude binds the namespaces (imports resolve only from externalModules)
       let snap: Snapshot = await race(s.feedStart(prelude, { os: denyOs }));
-      while (!(snap instanceof MontyComplete)) snap = await race(snap.resumeAuto());
+      while (!(snap instanceof M().MontyComplete)) snap = await race(snap.resumeAuto());
       // feed 2: the wrapped user code
       snap = await race(
         s.feedStart(req.code, {
@@ -282,9 +283,9 @@ export class MontyRunner {
           },
         }),
       );
-      while (!(snap instanceof MontyComplete)) {
+      while (!(snap instanceof M().MontyComplete)) {
         stats.suspensions++;
-        if (snap instanceof FunctionSnapshot) {
+        if (snap instanceof M().FunctionSnapshot) {
           const name = snap.functionName;
           if (snap.isOsFunction) {
             snap = await race(snap.resumeNotHandled());
@@ -320,7 +321,7 @@ export class MontyRunner {
           snap = await race(snap.resumeAuto());
           continue;
         }
-        if (snap instanceof NameLookupSnapshot && BARE_GLOBALS.has(snap.variableName)) {
+        if (snap instanceof M().NameLookupSnapshot && BARE_GLOBALS.has(snap.variableName)) {
           snap = await race(snap.resume(snap.variableName));
           continue;
         }
@@ -384,7 +385,9 @@ function cleanTraceback(text: string, offset: number): string {
 
 /** Maps a Monty exception to a run status and a user-facing error with user line numbers. */
 export function mapError(err: unknown, offset: number, limitTripped: string | null, cpuSec: number, colOffset = 0): { status: RunStatus; error: RunError } {
-  if (err instanceof MontyTypingError) {
+  // a Monty error implies Monty is loaded; without it nothing below can match
+  const { MontyTypingError, MontySyntaxError, MontyRuntimeError, MontyCrashedError } = montyModule ?? ({} as Partial<typeof MontyModule>);
+  if (MontyTypingError && err instanceof MontyTypingError) {
     let diags: TypingDiagnostic[] = [];
     try {
       diags = JSON.parse(err.display()) as TypingDiagnostic[];
@@ -406,12 +409,12 @@ export function mapError(err: unknown, offset: number, limitTripped: string | nu
       },
     };
   }
-  if (err instanceof MontySyntaxError) {
+  if (MontySyntaxError && err instanceof MontySyntaxError) {
     const tb = err.display('traceback');
     const m = /line (\d+)/.exec(tb);
     return { status: 'syntax_error', error: { type: 'SyntaxError', message: err.display('msg'), ...(m ? { line: mapLine(Number(m[1]), offset)! } : {}), traceback: cleanTraceback(tb, offset) } };
   }
-  if (err instanceof MontyRuntimeError) {
+  if (MontyRuntimeError && err instanceof MontyRuntimeError) {
     const { typeName } = err.exception;
     const frames = err.traceback();
     const last = frames[frames.length - 1];
@@ -426,7 +429,7 @@ export function mapError(err: unknown, offset: number, limitTripped: string | nu
       },
     };
   }
-  if (err instanceof MontyCrashedError) {
+  if (MontyCrashedError && err instanceof MontyCrashedError) {
     if (err.timedOut) return { status: 'limit_exceeded', error: { type: 'TimeoutError', message: `time limit exceeded (${cpuSec}s execution budget)` } };
     return { status: 'crashed', error: { type: 'crashed', message: err.message + (err.exitStatus ? ` (${err.exitStatus})` : '') } };
   }

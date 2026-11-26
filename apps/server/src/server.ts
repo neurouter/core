@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import { buildApp } from './app.js';
 import { fileEnvDefaults, type FileEnvDefaults } from './controlplane/config-sync/file-env.js';
-import { createServices, initServices, type ServiceInputs, type Services } from './deps.js';
+import { bootExecutor, createServices, initServices, releaseExecutorBoot, type ServiceInputs, type Services } from './deps.js';
 import { registerJobs } from './jobs.js';
 import { ConfigError, loadConfig, loadDotenv, type Config } from './kernel/config/load.js';
 import { MemoryCoordination } from './kernel/coordination/memory.js';
@@ -92,19 +92,29 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   for (const w of file?.warnings ?? []) logger.warn(`neurouter.yaml: ${w}`);
   const dbs = createDatabases({ databaseUrl: config.databaseUrl, auditDatabaseUrl: config.auditDatabaseUrl, poolMax: config.env.DB_POOL_MAX, auditPoolMax: config.env.AUDIT_DB_POOL_MAX, onWarn: (msg, err) => logger.warn({ err }, msg) });
   logger.info({ dialect: dbs.main.dialect, database: redactDatabaseUrl(config.databaseUrl) }, 'database configured');
-  if (config.env.MIGRATE_ON_START) {
-    const applied = await migrateAll(dbs, { embeddingDims: config.env.EMBEDDINGS_DIMS }, opts.extensions?.migrations ?? {});
-    if (applied.main.length + applied.audit.length) logger.info({ main: applied.main, audit: applied.audit }, 'migrations applied');
-  }
+  // the executor child boots concurrently with migrations, coordination and service init; it is still
+  // awaited (in initServices) before listen, so tools/list offers run_script from the first request
+  const executorBoot = opts.services?.executor !== undefined || config.env.NEUROUTER_EXECUTOR_MODE === 'off' ? undefined : bootExecutor(config, logger);
   let coordination: CoordinationStore = new MemoryCoordination(systemClock);
-  if (config.env.COORDINATION_BACKEND === 'postgres' || (config.env.COORDINATION_BACKEND === 'auto' && dbs.main.dialect === 'postgres')) {
-    if (dbs.main.dialect !== 'postgres') throw new Error('COORDINATION_BACKEND=postgres requires a Postgres DATABASE_URL');
-    const pgc = new PostgresCoordination(dbs.main.db, systemClock, () => new pg.Client({ connectionString: config.databaseUrl, application_name: 'neurouter-listen' }), logger);
-    await pgc.start();
-    coordination = pgc;
+  let services: Services;
+  try {
+    if (config.env.MIGRATE_ON_START) {
+      const applied = await migrateAll(dbs, { embeddingDims: config.env.EMBEDDINGS_DIMS }, opts.extensions?.migrations ?? {});
+      if (applied.main.length + applied.audit.length) logger.info({ main: applied.main, audit: applied.audit }, 'migrations applied');
+    }
+    if (config.env.COORDINATION_BACKEND === 'postgres' || (config.env.COORDINATION_BACKEND === 'auto' && dbs.main.dialect === 'postgres')) {
+      if (dbs.main.dialect !== 'postgres') throw new Error('COORDINATION_BACKEND=postgres requires a Postgres DATABASE_URL');
+      const pgc = new PostgresCoordination(dbs.main.db, systemClock, () => new pg.Client({ connectionString: config.databaseUrl, application_name: 'neurouter-listen' }), logger);
+      await pgc.start();
+      coordination = pgc;
+    }
+    services = createServices({ config, logger, dbs, clock: systemClock, coordination, version: SERVER_VERSION, ...(executorBoot ? { executorBoot } : {}), ...(opts.services ?? {}), ...(opts.extensions ? { extensions: opts.extensions } : {}) });
+    await initServices(services);
+  } catch (err) {
+    // never leave the executor child running when the boot fails
+    if (executorBoot) await releaseExecutorBoot(executorBoot);
+    throw err;
   }
-  const services = createServices({ config, logger, dbs, clock: systemClock, coordination, version: SERVER_VERSION, ...(opts.services ?? {}), ...(opts.extensions ? { extensions: opts.extensions } : {}) });
-  await initServices(services);
   if (config.env.NEUROUTER_CONFIG && config.env.NEUROUTER_CONFIG_MODE !== 'console') {
     const r = await services.configSync.loadFile(config.env.NEUROUTER_CONFIG);
     if (r.ok) logger.info({ path: config.env.NEUROUTER_CONFIG, servers: r.servers, environments: r.environments }, 'neurouter.yaml applied');

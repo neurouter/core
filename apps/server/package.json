@@ -42,6 +42,8 @@
   ],
   "scripts": {
     "build": "tsc -b",
+    "bundle": "node scripts/bundle.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "vitest run",

@@ -1,4 +1,3 @@
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { META_TASK_ID } from '@neurouter/shared';
 
 export interface McpToolInfo {
@@ -32,6 +31,8 @@ export const EVAL_CLIENT_INFO = { name: 'neurouter-eval', version: '0.1.0' } as 
  */
 export async function createMcpHttpClient(opts: { url: string; apiKey: string; headers?: Record<string, string>; timeoutMs?: number; fetch?: typeof fetch }): Promise<McpSession> {
   const timeout = opts.timeoutMs ?? 60_000;
+  // imported on first use, not at boot (cold start)
+  const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
   const client = new Client(EVAL_CLIENT_INFO, { capabilities: {}, versionNegotiation: { mode: 'auto', probe: { timeoutMs: Math.min(timeout, 10_000) } } } as never);
   const transport = new StreamableHTTPClientTransport(new URL(opts.url), {
     requestInit: { headers: { authorization: `Bearer ${opts.apiKey}`, ...(opts.headers ?? {}) } },

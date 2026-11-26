@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, loadConfig } from './load.js';
+import { ConfigError, loadConfig, loadMigrateConfig } from './load.js';
 import { parseMasterKeys } from './env.js';
 
 const key = () => randomBytes(32).toString('base64');
@@ -96,5 +96,19 @@ describe('parseMasterKeys', () => {
   });
   it.each(['', 'nocolon', `bad id:${key()}`, `k1:${key()},k1:${key()}`])('rejects %j', (v) => {
     expect(() => parseMasterKeys(v)).toThrow();
+  });
+});
+
+describe('loadMigrateConfig', () => {
+  it('production needs only the database settings (no PUBLIC_URL, OIDC, master keys or pepper)', () => {
+    expect(() => loadConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgres://u:p@db/n' })).toThrow(ConfigError);
+    const c = loadMigrateConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgres://u:p@db/n', EMBEDDINGS_DIMS: '256' });
+    expect(c).toMatchObject({ databaseUrl: 'postgres://u:p@db/n', auditDatabaseUrl: 'postgres://u:p@db/n', isProduction: true, env: { EMBEDDINGS_DIMS: 256 } });
+    expect(loadMigrateConfig({ ...prodEnv(), AUDIT_DATABASE_URL: 'postgres://u:p@db/audit' }).auditDatabaseUrl).toBe('postgres://u:p@db/audit');
+  });
+
+  it('keeps the database URL checks', () => {
+    expect(() => loadMigrateConfig({ DATABASE_URL: 'mysql://x' })).toThrow(/DATABASE_URL must start with/);
+    expect(() => loadMigrateConfig({ DATABASE_URL: 'sqlite::memory:', AUDIT_DATABASE_URL: 'http://x' })).toThrow(/AUDIT_DATABASE_URL must start with/);
   });
 });

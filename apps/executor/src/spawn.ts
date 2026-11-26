@@ -22,6 +22,12 @@ export interface SpawnExecutorOptions {
   /** Extra Node flags for the child (default: `--import tsx` when `entry` is a .ts file). */
   execArgv?: string[];
   montyBinaryPath?: string;
+  /**
+   * Pinned sha256 of the Monty binary (e.g. computed at image build). When given, the parent does not
+   * hash the binary itself (a synchronous 47 MB read at startup); the child still verifies the binary
+   * against it before starting, and the client checks the child's `hello` against it.
+   */
+  montyBinarySha256?: string;
   /** Called when the child exits unexpectedly (it is restarted with backoff 1 s → 30 s). */
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
   logger?: ExecLogger;
@@ -44,11 +50,13 @@ export interface EmbeddedExecutor {
 }
 
 /**
- * Resolves the executor entry next to this module: `main.js` when running from `dist/` (production),
+ * Resolves the executor entry next to this module: `executor/main.js` in the server's production
+ * bundle (`dist-bundle/`, whose own `main.js` is the server), `main.js` when running from `dist/`,
  * `main.ts` through the tsx loader when running from source (dev/tests, so the child is never stale).
  */
-export function resolveExecutorEntry(): { entry: string; execArgv: string[] } {
-  const here = dirname(fileURLToPath(import.meta.url));
+export function resolveExecutorEntry(here = dirname(fileURLToPath(import.meta.url))): { entry: string; execArgv: string[] } {
+  const bundled = join(here, 'executor', 'main.js');
+  if (existsSync(bundled)) return { entry: bundled, execArgv: [] };
   const js = join(here, 'main.js');
   if (existsSync(js)) return { entry: js, execArgv: [] };
   const ts = join(here, 'main.ts');
@@ -56,7 +64,7 @@ export function resolveExecutorEntry(): { entry: string; execArgv: string[] } {
   throw new Error(`executor entry not found in ${here} (build apps/executor)`);
 }
 
-const LEVELS: Record<number, keyof ExecLogger> = { 20: 'debug', 30: 'info', 40: 'warn', 50: 'error' };
+const LEVELS: Record<number, keyof ExecLogger> = { 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'error' };
 
 /**
  * Embedded mode (§10.6): spawns `apps/executor` as a child process listening on a Unix socket in a
@@ -69,7 +77,7 @@ export function spawnEmbeddedExecutor(opts: SpawnExecutorOptions): EmbeddedExecu
   const socketPath = join(dir, basename(opts.socketPath ?? 'neurouter-executor.sock'));
   const token = opts.token ?? randomBytes(32).toString('base64url');
   const montyBinaryPath = resolveMontyBinary(opts.montyBinaryPath);
-  const montyBinarySha256 = sha256File(montyBinaryPath);
+  const montyBinarySha256 = opts.montyBinarySha256?.trim().toLowerCase() || sha256File(montyBinaryPath);
   const resolved = opts.entry ? { entry: opts.entry, execArgv: opts.entry.endsWith('.ts') ? ['--import', import.meta.resolve('tsx')] : [] } : resolveExecutorEntry();
   const execArgv = opts.execArgv ?? resolved.execArgv;
   const env: NodeJS.ProcessEnv = {
@@ -80,6 +88,8 @@ export function spawnEmbeddedExecutor(opts: SpawnExecutorOptions): EmbeddedExecu
     NEUROUTER_EXECUTOR_POOL_MAX: String(opts.poolMax),
     NEUROUTER_EXECUTOR_PREWARM: String(opts.prewarm),
     LOG_LEVEL: opts.logLevel ?? 'info',
+    // the image's prebuilt V8 compile cache (not a secret)
+    ...(process.env.NODE_COMPILE_CACHE ? { NODE_COMPILE_CACHE: process.env.NODE_COMPILE_CACHE } : {}),
   };
   const executor = new SocketExecutor({ address: { socketPath }, token, expectedMontySha256: montyBinarySha256, logger: log, connectTimeoutMs: 5000 });
 

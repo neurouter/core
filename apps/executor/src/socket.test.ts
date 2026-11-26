@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +7,8 @@ import { SocketExecutor, parseExecutorUrl } from './client.js';
 import { encodeFrame, FrameDecoder } from './frames.js';
 import { MontyRunner } from './monty-runner.js';
 import { ExecutorServer } from './server.js';
-import { spawnEmbeddedExecutor, type EmbeddedExecutor } from './spawn.js';
+import { resolveMontyBinary, sha256File } from './monty-info.js';
+import { resolveExecutorEntry, spawnEmbeddedExecutor, type EmbeddedExecutor } from './spawn.js';
 import { fakeHost, request, STALE_SCRIPT } from './test/helpers.js';
 
 const TOKEN = 't'.repeat(40);
@@ -167,4 +168,41 @@ describe('spawnEmbeddedExecutor', () => {
     expect(emb.pid()).not.toBe(pid);
     expect(exits.length).toBe(1);
   }, 30_000);
+});
+
+describe('spawnEmbeddedExecutor with a pinned binary checksum', () => {
+  it('a matching pin starts (the parent does not re-hash); a wrong pin never becomes ready', async () => {
+    const actual = sha256File(resolveMontyBinary());
+    const ok = spawnEmbeddedExecutor({ poolMax: 1, prewarm: 0, logLevel: 'warn', nodeEnv: 'test', montyBinarySha256: actual.toUpperCase() });
+    try {
+      await ok.ready(30_000);
+      expect(ok.montyBinarySha256).toBe(actual);
+      expect(ok.executor.helloAck?.montyBinarySha256).toBe(actual);
+    } finally {
+      await ok.close();
+    }
+    const bad = spawnEmbeddedExecutor({ poolMax: 1, prewarm: 0, logLevel: 'warn', nodeEnv: 'test', montyBinarySha256: '0'.repeat(64) });
+    try {
+      await expect(bad.ready(3_000)).rejects.toThrow();
+    } finally {
+      await bad.close();
+    }
+  }, 60_000);
+});
+
+describe('resolveExecutorEntry', () => {
+  it('prefers executor/main.js (the server bundle, whose own main.js is the server), then main.js, then main.ts', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nr-entry-'));
+    try {
+      writeFileSync(join(dir, 'main.ts'), '');
+      expect(resolveExecutorEntry(dir).entry).toBe(join(dir, 'main.ts'));
+      writeFileSync(join(dir, 'main.js'), '');
+      expect(resolveExecutorEntry(dir)).toEqual({ entry: join(dir, 'main.js'), execArgv: [] });
+      mkdirSync(join(dir, 'executor'));
+      writeFileSync(join(dir, 'executor', 'main.js'), '');
+      expect(resolveExecutorEntry(dir)).toEqual({ entry: join(dir, 'executor', 'main.js'), execArgv: [] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

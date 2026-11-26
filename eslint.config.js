@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/coverage/**', '**/node_modules/**', 'apps/web/**', 'apps/server/data/**', '**/data/**', 'tmp/**', 'out/**', '.agent/**', '.claude/**', '.neurouter/**'],
+    ignores: ['**/dist/**', '**/dist-bundle/**', '**/coverage/**', '**/node_modules/**', 'apps/web/**', 'apps/server/data/**', '**/data/**', 'tmp/**', 'out/**', '.agent/**', '.claude/**', '.neurouter/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -18,7 +18,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/**/*.ts', 'packages/{compiler,evals,cli}/**/*.ts', 'scripts/**/*.{js,mjs}', '*.{js,ts}', 'packages/shared/vitest.config.ts'],
+    files: ['apps/**/*.ts', 'packages/{compiler,evals,cli}/**/*.ts', 'scripts/**/*.{js,mjs}', 'apps/*/scripts/**/*.mjs', '*.{js,ts}', 'packages/shared/vitest.config.ts'],
     languageOptions: { globals: { ...globals.node } },
   },
   {
