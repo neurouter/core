@@ -18,7 +18,7 @@ import type { ConfigSync } from '../config-sync/reconcile.js';
 import type { ApiKeysService } from '../keys/api-keys.service.js';
 import type { BuildsService } from '../servers/builds.service.js';
 import type { ServersService } from '../servers/servers.service.js';
-import type { SpecFetcher } from '../servers/fetch-spec.js';
+import type { GraphqlIntrospector, SpecFetcher } from '../servers/fetch-spec.js';
 import type { UsersService } from '../users/users.service.js';
 import type { ConsolePorts } from './ports.js';
 import type { EvalsService } from '../evals/evals.service.js';
@@ -42,6 +42,7 @@ export interface ApiContext {
   servers: ServersService;
   builds: BuildsService;
   fetchSpec: SpecFetcher;
+  introspectGraphql: GraphqlIntrospector;
   configSync: ConfigSync;
   apiKeys: ApiKeysService;
   users: UsersService;

@@ -32,7 +32,7 @@ export async function consoleOn(s: RunningServer): Promise<TestContext> {
 }
 
 /** In-process server (SQLite memory, embeddings off, executor off unless asked), no listening socket. */
-export async function createTestContext(env: Record<string, string> = {}): Promise<TestContext> {
+export async function createTestContext(env: Record<string, string> = {}, services: NonNullable<Parameters<typeof startServer>[0]>['services'] = {}): Promise<TestContext> {
   return withHelpers(await startServer({
     env: {
       NODE_ENV: 'test',
@@ -46,7 +46,7 @@ export async function createTestContext(env: Record<string, string> = {}): Promi
     },
     listen: false,
     jobs: false,
-    services: { defaultMetrics: false },
+    services: { defaultMetrics: false, ...services },
   }));
 }
 

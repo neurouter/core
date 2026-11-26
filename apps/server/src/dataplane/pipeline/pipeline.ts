@@ -1,4 +1,4 @@
-import { shapeResponse, wrapStructured } from '@neurouter/compiler';
+import { GRAPHQL_ACCEPT, shapeResponse, wrapStructured } from '@neurouter/compiler';
 import {
   META_CALL_ID,
   META_DRY_RUN,
@@ -391,7 +391,7 @@ export class Pipeline {
           if (!hostAllowed(url, env.allowedHosts)) throw new RequestBuildError(`host ${url.host} is not in allowedHosts`, 'host_not_allowed');
           urlTemplate = url.pathname;
           const variables = Object.fromEntries(tool.binding.variables.map((v) => [v.name, specArgs[v.arg]]).filter(([, v]) => v !== undefined));
-          upstream = await this.d.http.invoke(env.id, { method: 'POST', url, urlTemplate, headers: { accept: 'application/json', 'content-type': 'application/json', 'user-agent': `neurouter/${this.d.version}`, ...lower(env.headers), ...cred.headers }, body: JSON.stringify({ query: tool.binding.document, variables }) }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) });
+          upstream = await this.d.http.invoke(env.id, { method: 'POST', url, urlTemplate, headers: { accept: GRAPHQL_ACCEPT, 'content-type': 'application/json', 'user-agent': `neurouter/${this.d.version}`, ...lower(env.headers), ...cred.headers }, body: JSON.stringify({ query: tool.binding.document, variables }) }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) });
         } else {
           const req = buildHttpRequest(tool, specArgs, { baseUrl: env.baseUrl, headers: env.headers, allowedHosts: env.allowedHosts, credentials: cred }, this.d.version);
           urlTemplate = req.urlTemplate;

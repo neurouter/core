@@ -85,9 +85,17 @@ export type SpecReimportResult = z.infer<typeof SpecReimportResult>;
 
 /* ------------------------------------------------------------------ spec previews (§14.15) */
 
+const IntrospectionHeaderName = z.string().regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/, 'invalid header name');
+
 export const SpecPreviewSource = z.union([
   SpecSourceIn,
-  z.object({ graphqlEndpoint: z.url({ protocol: /^https?$/ }), headerRef: z.object({ name: z.string().min(1), secretRef: z.string() }).optional() }),
+  z.object({
+    graphqlEndpoint: z.url({ protocol: /^https?$/ }),
+    /** One header whose value comes from a reference (`env:NAME`); kept with the server for re-imports. */
+    headerRef: z.object({ name: IntrospectionHeaderName, secretRef: z.string() }).optional(),
+    /** Headers sent with the introspection request only (e.g. Authorization); never stored. */
+    headers: z.array(z.object({ name: IntrospectionHeaderName, value: z.string().max(8192) })).max(10).optional(),
+  }),
 ]);
 export type SpecPreviewSource = z.infer<typeof SpecPreviewSource>;
 

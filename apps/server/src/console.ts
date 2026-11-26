@@ -132,6 +132,7 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
     servers: s.servers,
     builds: s.builds,
     fetchSpec: s.fetchSpec,
+    introspectGraphql: s.introspectGraphql,
     configSync: s.configSync,
     apiKeys: s.apiKeys,
     users: s.users,

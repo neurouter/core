@@ -1,7 +1,7 @@
 import { gunzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import { compile, diffSpecs, parseOverlay, applyOverlayPatch, type CompileResult } from '@neurouter/compiler';
-import { api, OPS_TOOLS, OPS_VISIBILITY, readinessBand, type ConnectConfig, type EnvironmentCreate, type OpsTool, type SpecPreview, type SpecSourceIn, type ToolDef } from '@neurouter/shared';
+import { api, OPS_TOOLS, parseSecretRef, OPS_VISIBILITY, readinessBand, type ConnectConfig, type EnvironmentCreate, type OpsTool, type SpecPreview, type SpecSourceIn, type ToolDef } from '@neurouter/shared';
 import { toIso } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -39,6 +39,36 @@ export async function specBytes(c: ApiContext, source: SpecSourceIn): Promise<{ 
     return { bytes: f.bytes, sourceUrl: source.url, contentType: f.contentType };
   }
   return { bytes: Buffer.from(source.content, 'utf8'), sourceUrl: null, contentType: null };
+}
+
+export interface GraphqlEndpointSource {
+  url: string;
+  /** `env:NAME` reference for one request header (stored with the server; never the value). */
+  headerRef?: { name: string; secretRef: string };
+}
+
+/**
+ * Introspects a live GraphQL endpoint (backend §8.3) through the SSRF-guarded outbound fetch.
+ * `headers` are one-off request headers (never stored); `headerRef` must be an `env:NAME` reference
+ * (stored `secret:` values belong to an environment, which does not exist before the import).
+ */
+export async function introspectEndpoint(c: Pick<ApiContext, 'introspectGraphql'>, src: GraphqlEndpointSource, headers: Array<{ name: string; value: string }> = [], env: NodeJS.ProcessEnv = process.env): Promise<{ bytes: Uint8Array; sourceUrl: string; contentType: string }> {
+  const h: Record<string, string> = {};
+  for (const x of headers) h[x.name.toLowerCase()] = x.value;
+  if (src.headerRef) {
+    const ref = parseSecretRef(src.headerRef.secretRef);
+    if (!ref || ref.kind !== 'env') throw AppError.validation('The header reference must be env:NAME (stored secrets belong to an environment)', [{ path: ['source', 'headerRef', 'secretRef'], message: 'use env:NAME', code: 'unsupported_ref' }]);
+    const v = env[ref.name];
+    if (!v) throw AppError.validation(`The server has no ${ref.name} environment variable`, [{ path: ['source', 'headerRef', 'secretRef'], message: `${ref.name} is not set`, code: 'ref_unresolved' }]);
+    h[src.headerRef.name.toLowerCase()] = v;
+  }
+  const out = await c.introspectGraphql(src.url, h);
+  return { bytes: out.bytes, sourceUrl: src.url, contentType: out.contentType };
+}
+
+/** The stored `servers.spec_source` for an introspected endpoint (re-import introspects again). */
+function endpointSpecSource(src: GraphqlEndpointSource, graphql?: PreviewState['graphql']): Record<string, unknown> {
+  return { graphqlEndpoint: src.url, ...(src.headerRef ? { headerRef: src.headerRef } : {}), format: 'graphql-introspection', ...(graphql ? { graphql } : {}) };
 }
 
 /** 422 spec_invalid / spec_unsupported when the compile has errors (before anything is stored). */
@@ -89,6 +119,8 @@ interface PreviewState {
   slug: string | null;
   format?: string;
   graphql?: { selectionDepth?: number; endpointPath?: string };
+  /** Set when the spec came from introspecting a live endpoint. */
+  graphqlEndpoint?: GraphqlEndpointSource;
   overlayYaml: string;
   result: Omit<SpecPreview, 'id' | 'expiresAt' | 'name' | 'slug' | 'overlayDraftYaml'>;
 }
@@ -167,7 +199,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
         name: body.name,
         ...(body.description !== undefined ? { description: body.description } : {}),
         spec: { bytes: p.content, sourceUrl: p.source_url, ...(st.format ? { formatHint: st.format as never } : {}) },
-        specSource: p.source_url ? { url: p.source_url } : { upload: true },
+        specSource: st.graphqlEndpoint ? endpointSpecSource(st.graphqlEndpoint, st.graphql) : { ...(p.source_url ? { url: p.source_url } : { upload: true }), ...(st.format ? { format: st.format } : {}), ...(st.graphql ? { graphql: st.graphql } : {}) },
         overlay: st.overlayYaml.trim() ? { yaml: st.overlayYaml, source: 'console', message: 'Initial overlay from the import wizard' } : null,
         createdBy: u.id,
       });
@@ -277,7 +309,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   route(app, 'specs.reimport', api.specs.reimport, async (req, reply) => {
     const u = requireUser(req);
     const s = await serverOr404(c, req.params.id);
-    const src = parseJsonColumn<{ url?: string; path?: string }>(s.spec_source) ?? {};
+    const src = parseJsonColumn<{ url?: string; path?: string; graphqlEndpoint?: string; headerRef?: GraphqlEndpointSource['headerRef'] }>(s.spec_source) ?? {};
     if (s.managed_by === 'file' && c.config.configMode !== 'console') assertConsoleManaged(c.config, s, 'This server\'s spec');
     let input: { bytes: Uint8Array; sourceUrl: string | null; contentType: string | null };
     if ('previewId' in req.body) {
@@ -286,6 +318,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
       input = { bytes: p.content, sourceUrl: p.source_url, contentType: null };
     } else if (req.body.source) input = await specBytes(c, req.body.source);
     else if (src.url) input = await specBytes(c, { url: src.url });
+    else if (src.graphqlEndpoint) input = await introspectEndpoint(c, { url: src.graphqlEndpoint, ...(src.headerRef ? { headerRef: src.headerRef } : {}) });
     else throw AppError.validation('No stored URL to refetch; upload the spec instead', [{ path: ['source'], message: 'required', code: 'required' }]);
     const r = await compileBytes(input.bytes, s.slug);
     assertCompiles(r);
@@ -335,19 +368,23 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   route(app, 'specs.preview', api.specs.preview, async (req, reply) => {
     const u = requireUser(req);
     const body = req.body;
-    if (u.anonymous && 'url' in body.source) throw new AppError('forbidden', 'The public demo only previews pasted or uploaded specs', { extensions: { reason: 'demo_read_only' } });
-    if ('graphqlEndpoint' in body.source) throw AppError.validation('GraphQL endpoint introspection is not supported from the console yet; paste the SDL or introspection JSON', [{ path: ['source'], message: 'unsupported', code: 'unsupported' }]);
+    if (u.anonymous && ('url' in body.source || 'graphqlEndpoint' in body.source)) throw new AppError('forbidden', 'The public demo only previews pasted or uploaded specs', { extensions: { reason: 'demo_read_only' } });
     const started = c.clock.now();
-    const src = await specBytes(c, body.source as SpecSourceIn);
-    const r = await compileBytes(src.bytes, 'preview', body.format, body.graphql);
+    const source = body.source;
+    const endpoint: GraphqlEndpointSource | null = 'graphqlEndpoint' in source ? { url: source.graphqlEndpoint, ...(source.headerRef ? { headerRef: source.headerRef } : {}) } : null;
+    const src = endpoint ? await introspectEndpoint(c, endpoint, 'headers' in source ? source.headers : []) : await specBytes(c, source as SpecSourceIn);
+    const format = endpoint ? 'graphql-introspection' : body.format;
+    const r = await compileBytes(src.bytes, 'preview', format, body.graphql);
     let diff: SpecPreview['diff'] = null;
     if (body.serverId) {
       const s = await serverOr404(c, body.serverId);
       const prev = s.latest_build_id ? (await v.buildTools(s.latest_build_id)).map((t) => t.def) : [];
       diff = diffSpecs(prev, r.tools, []) as never;
     }
-    const slug = slugify(r.title || '');
-    const st: PreviewState = { name: r.title || null, slug, ...(body.format ? { format: body.format } : {}), ...(body.graphql ? { graphql: body.graphql } : {}), overlayYaml: '', result: previewFrom(r, slug, c.clock.now() - started, diff) };
+    // an introspection result carries no API title: name the draft after the endpoint's host
+    const title = endpoint && (!r.title || r.title === 'GraphQL API') ? `${new URL(endpoint.url).hostname} GraphQL` : r.title;
+    const slug = slugify(title || '');
+    const st: PreviewState = { name: title || null, slug, ...(format ? { format } : {}), ...(endpoint ? { graphqlEndpoint: endpoint } : {}), ...(body.graphql ? { graphql: body.graphql } : {}), overlayYaml: '', result: previewFrom(r, slug, c.clock.now() - started, diff) };
     const id = newId();
     const expires = c.clock.now() + PREVIEW_TTL_MS;
     await db.insertInto('spec_previews').values({ id, tenant_id: c.tenantId, server_id: body.serverId ?? null, status: st.result.status, content: Buffer.from(src.bytes), source_url: src.sourceUrl, state: toJsonColumn(st), created_by: u.id, created_at: c.clock.now(), expires_at: expires }).execute();

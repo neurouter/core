@@ -209,6 +209,9 @@ const FETCH_MESSAGES: Record<string, string> = {
   too_large: 'The spec is larger than 10 MB.',
   not_a_spec: 'The URL returned something that is not an OpenAPI 3.x or GraphQL document.',
   blocked_host: 'That host is blocked: private networks and cloud metadata addresses are not allowed.',
+  unauthorized: 'The GraphQL endpoint refused the request (401/403). Add an Authorization header and try again.',
+  introspection_disabled: 'The GraphQL endpoint has introspection turned off. Paste or upload the SDL or an introspection JSON instead.',
+  not_graphql: 'The URL did not answer like a GraphQL endpoint. Check the URL (usually it ends in /graphql).',
 };
 
 export function sourceErrorMessage(err: unknown): string {
@@ -225,11 +228,13 @@ function SourceStep({ onCompiled }: { onCompiled: (previewId: string) => void })
   const [tab, setTab] = useState<'url' | 'upload' | 'paste' | 'graphql'>(s.tab ?? 'url');
   const [url, setUrl] = useState(s.sample ? SAMPLE_URL : '');
   const [gqlUrl, setGqlUrl] = useState('');
+  const [gqlHeaderName, setGqlHeaderName] = useState('Authorization');
+  const [gqlHeaderValue, setGqlHeaderValue] = useState('');
   const [paste, setPaste] = useState('');
   const [file, setFile] = useState<{ name: string; content: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const create = useMutation({
-    mutationFn: (source: { url: string } | { content: string; filename?: string } | { graphqlEndpoint: string }) => apiFetch(api.specs.preview, { body: { source } }),
+    mutationFn: (source: { url: string } | { content: string; filename?: string } | { graphqlEndpoint: string; headers?: { name: string; value: string }[] }) => apiFetch(api.specs.preview, { body: { source } }),
     onSuccess: (r) => onCompiled(r.previewId),
     onError: (err) => setError(sourceErrorMessage(err)),
   });
@@ -237,7 +242,7 @@ function SourceStep({ onCompiled }: { onCompiled: (previewId: string) => void })
     e?.preventDefault();
     setError(null);
     if (tab === 'url') create.mutate({ url: url.trim() });
-    else if (tab === 'graphql') create.mutate({ graphqlEndpoint: gqlUrl.trim() });
+    else if (tab === 'graphql') create.mutate({ graphqlEndpoint: gqlUrl.trim(), ...(gqlHeaderName.trim() && gqlHeaderValue ? { headers: [{ name: gqlHeaderName.trim(), value: gqlHeaderValue }] } : {}) });
     else if (tab === 'upload' && file) create.mutate({ content: file.content, filename: file.name });
     else if (tab === 'paste') create.mutate({ content: paste });
   };
@@ -273,7 +278,18 @@ function SourceStep({ onCompiled }: { onCompiled: (previewId: string) => void })
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="gql-url">GraphQL endpoint</Label>
               <Input id="gql-url" type="url" placeholder="https://api.example.com/graphql" value={gqlUrl} onChange={(e) => setGqlUrl(e.target.value)} />
-              <p className="text-[12.5px] text-muted-foreground">Neurouter runs an introspection query. Header credentials can be added after import, per environment.</p>
+              <p className="text-[12.5px] text-muted-foreground">Neurouter runs one introspection query from the server. Upstream credentials for tool calls are set later, per environment.</p>
+              <div className="mt-2 flex flex-wrap gap-3">
+                <div className="flex min-w-40 flex-col gap-1.5">
+                  <Label htmlFor="gql-header-name">Header (optional)</Label>
+                  <Input id="gql-header-name" placeholder="Authorization" value={gqlHeaderName} onChange={(e) => setGqlHeaderName(e.target.value)} />
+                </div>
+                <div className="flex min-w-64 flex-1 flex-col gap-1.5">
+                  <Label htmlFor="gql-header-value">Value</Label>
+                  <Input id="gql-header-value" type="password" autoComplete="off" placeholder="Bearer …" value={gqlHeaderValue} onChange={(e) => setGqlHeaderValue(e.target.value)} />
+                </div>
+              </div>
+              <p className="text-[12.5px] text-muted-foreground">Sent with the introspection request only; never stored.</p>
             </div>
           ) : null}
           {tab === 'upload' ? <FileDrop accept=".yaml,.yml,.json,.graphql,.gql" maxBytes={10 * 1024 * 1024} file={file} onFile={(f) => setFile(f)} onError={setError} /> : null}

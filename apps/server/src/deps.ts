@@ -46,7 +46,7 @@ import { createVectorIndex } from './dataplane/search/vector-index.js';
 import { recordUsage } from './dataplane/tasks/usage.js';
 import { BuildsService } from './controlplane/servers/builds.service.js';
 import { ServersService } from './controlplane/servers/servers.service.js';
-import { createSpecFetcher } from './controlplane/servers/fetch-spec.js';
+import { createGraphqlIntrospector, createSpecFetcher } from './controlplane/servers/fetch-spec.js';
 import { ConfigSync } from './controlplane/config-sync/reconcile.js';
 import { ApiKeysService } from './controlplane/keys/api-keys.service.js';
 import { UsersService } from './controlplane/users/users.service.js';
@@ -273,6 +273,7 @@ export function createServices(input: ServiceInputs) {
   const builds = new BuildsService(db, dbs.main.dialect, clock, coord, { onBuild: () => indexer?.kick() });
   const servers = new ServersService(db, clock, coord, builds, audit);
   const fetchSpec = createSpecFetcher(outboundFetch);
+  const introspectGraphql = createGraphqlIntrospector(outboundFetch);
   const configSync = new ConfigSync({ db, clock, coord, servers, settings, audit, fetchSpec, tenantId });
   const apiKeys = new ApiKeysService(db, clock, config.hashPepper, audit, coord);
   const users = new UsersService(db, clock, audit, config);
@@ -348,7 +349,7 @@ export function createServices(input: ServiceInputs) {
     outboundFetch, upstreamFetchFor, embedder, vectorIndex, indexer: indexer!, search,
     runtime, bus, limiter, authenticator, tracker, errors, pages, mock, credentials, http, pipeline, ops, scripts, dispatcher,
     executor: () => executor, executorHealth, startExecutor,
-    builds, servers, fetchSpec, configSync, apiKeys, users,
+    builds, servers, fetchSpec, introspectGraphql, configSync, apiKeys, users,
     oauthClients, oauthTokens, authorization, consoleSessions, upstreamOAuth,
     evals, localUrl,
     shutdown,

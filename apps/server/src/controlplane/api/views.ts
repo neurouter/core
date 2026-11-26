@@ -173,7 +173,7 @@ export class Views {
 
   async serverDetail(s: Srv): Promise<ServerDetail> {
     const row = await this.serverRow(s);
-    const src = parseJsonColumn<{ url?: string; path?: string; upload?: boolean }>(s.spec_source) ?? {};
+    const src = parseJsonColumn<{ url?: string; path?: string; upload?: boolean; graphqlEndpoint?: string }>(s.spec_source) ?? {};
     const spec = s.current_spec_revision_id ? await this.db.selectFrom('spec_revisions').selectAll().where('id', '=', s.current_spec_revision_id).executeTakeFirst() : null;
     const ov = s.published_overlay_revision_id ? await this.db.selectFrom('overlay_revisions').selectAll().where('id', '=', s.published_overlay_revision_id).executeTakeFirst() : null;
     const draft = await this.db.selectFrom('overlay_drafts').select(['change_count', 'updated_at']).where('server_id', '=', s.id).executeTakeFirst();
@@ -186,7 +186,7 @@ export class Views {
       opsTools: parseOpsTools(s.ops_tools),
       publicReport: toBool(s.public_report),
       publicReportUrl: toBool(s.public_report) ? `${this.publicUrl}/public/servers/${s.slug}/report` : null,
-      specSource: { url: src.url ?? null, path: src.path ?? null, upload: !src.url && !src.path },
+      specSource: { url: src.url ?? src.graphqlEndpoint ?? null, path: src.path ?? null, upload: !src.url && !src.path && !src.graphqlEndpoint },
       currentSpec: spec ? await this.specRow(spec) : null,
       publishedOverlay: ov ? await this.overlayRow(ov) : null,
       draft: draft ? { changeCount: draft.change_count, updatedAt: toIso(draft.updated_at) } : null,

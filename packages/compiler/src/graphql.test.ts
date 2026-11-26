@@ -80,3 +80,15 @@ describe('GraphQL pipeline', () => {
     expect(r.diagnostics[0]!.code).toBe('spec_invalid');
   });
 });
+
+describe('introspection responses', () => {
+  it('accepts { data: { __schema } } and bare { __schema }; reports disabled introspection and non-GraphQL answers', async () => {
+    const { readIntrospectionResponse, GRAPHQL_INTROSPECTION_QUERY } = await import('./index.js');
+    expect(GRAPHQL_INTROSPECTION_QUERY).toContain('__schema');
+    expect(readIntrospectionResponse('{"data":{"__schema":{"types":[]}}}')).toEqual({ ok: true, json: '{"__schema":{"types":[]}}' });
+    expect(readIntrospectionResponse('{"__schema":{"types":[]}}').ok).toBe(true);
+    expect(readIntrospectionResponse('{"errors":[{"message":"introspection disabled"}]}')).toMatchObject({ ok: false, reason: 'introspection_disabled' });
+    expect(readIntrospectionResponse('<html></html>')).toMatchObject({ ok: false, reason: 'not_graphql' });
+    expect(readIntrospectionResponse('{"data":null}')).toMatchObject({ ok: false, reason: 'not_graphql' });
+  });
+});

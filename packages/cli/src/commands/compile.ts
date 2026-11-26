@@ -1,20 +1,17 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { compile, pyNamespace } from '@neurouter/compiler';
+import { compile, GRAPHQL_ACCEPT, GRAPHQL_INTROSPECTION_QUERY, pyNamespace, readIntrospectionResponse } from '@neurouter/compiler';
 import { neurouterYamlJsonSchema } from '@neurouter/shared';
 import { parseConfigYaml } from '@neurouter/server';
 import { readSpec } from './common.js';
 
-const INTROSPECTION = `query IntrospectionQuery { __schema { queryType { name } mutationType { name } subscriptionType { name } types { ...FullType } directives { name description locations args { ...InputValue } } } }
-fragment FullType on __Type { kind name description fields(includeDeprecated: true) { name description args { ...InputValue } type { ...TypeRef } isDeprecated deprecationReason } inputFields { ...InputValue } interfaces { ...TypeRef } enumValues(includeDeprecated: true) { name description isDeprecated deprecationReason } possibleTypes { ...TypeRef } }
-fragment InputValue on __InputValue { name description type { ...TypeRef } defaultValue }
-fragment TypeRef on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } } } } }`;
-
 export async function cmdCompile(o: { spec?: string; overlay?: string; out?: string; stubs?: string; namespace?: string; graphqlEndpoint?: string }): Promise<void> {
   let bytes: Uint8Array;
   if (o.graphqlEndpoint) {
-    const res = await fetch(o.graphqlEndpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: INTROSPECTION }) });
-    bytes = new Uint8Array(await res.arrayBuffer());
+    const res = await fetch(o.graphqlEndpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: GRAPHQL_ACCEPT }, body: JSON.stringify({ query: GRAPHQL_INTROSPECTION_QUERY, operationName: 'IntrospectionQuery' }) });
+    const out = readIntrospectionResponse(await res.text());
+    if (!out.ok) throw new Error(res.ok ? out.message : `${o.graphqlEndpoint} answered ${res.status}: ${out.message}`);
+    bytes = new TextEncoder().encode(out.json);
   } else if (o.spec) bytes = await readSpec(o.spec);
   else throw new Error('--spec or --graphql-endpoint is required');
   const overlay = o.overlay ? readFileSync(o.overlay, 'utf8') : undefined;
