@@ -17,7 +17,7 @@ import { closestNames, exampleArgs } from '../envelope/relations.js';
 import { StateTracker } from '../envelope/state.js';
 import { BUDGET } from '../envelope/types.js';
 import { v1Result, withExtraText } from '../envelope/v1.js';
-import { V2_OPS, visibleTools, type Surface } from './surface.js';
+import { agentInputSchema, V2_OPS, visibleTools, type Surface } from './surface.js';
 
 export interface DispatchDeps {
   pipeline: Pipeline;
@@ -315,8 +315,8 @@ export class Dispatcher {
         readOnly: t.risk.readOnly,
         write: t.risk.write,
         destructive: t.risk.destructive,
-        ...(includeSchemas && format === 'json' ? { inputSchema: t.inputSchema } : {}),
-        ...(format === 'json' ? { args: argSignature(t.inputSchema) } : {}),
+        ...(includeSchemas && format === 'json' ? { inputSchema: v2 ? agentInputSchema(t) : t.inputSchema } : {}),
+        ...(format === 'json' ? { args: argSignature(v2 ? agentInputSchema(t) : t.inputSchema) } : {}),
         ...(format === 'python' ? { pySignature: t.pySignature, pyName: t.pyName } : {}),
         score: r.score,
         tool: t,

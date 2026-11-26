@@ -288,10 +288,11 @@ function nextFor(code: EnvelopeErrorCode, spec: ErrorSpec, ec: ErrorContext, cor
   if (spec.next) return spec.next;
   const t = spec.tool;
   const args = spec.args ?? {};
-  const same: Call | null = t ? { tool: spec.name ?? t.name, args } : null;
+  const extra = spec.extraArgs ?? {};
+  const same: Call | null = t ? { tool: spec.name ?? t.name, args: { ...args, ...extra } } : null;
   switch (code) {
     case 'invalid_args':
-      return t && corrected ? [{ tool: spec.name ?? t.name, args: corrected }] : [];
+      return t && corrected ? [{ tool: spec.name ?? t.name, args: { ...corrected, ...extra } }] : [];
     case 'not_found': {
       const parent = t ? parentListCall(t, args, ec.tools) : null;
       return parent ? [parent] : t ? [searchCall(t.title || t.name)] : [];
@@ -317,7 +318,7 @@ function nextFor(code: EnvelopeErrorCode, spec: ErrorSpec, ec: ErrorContext, cor
       const limitKey = Object.keys(propsOf(t)).find((k) => isPagingArg(k) && /limit|per_page|page_size/i.test(k));
       if (!limitKey) return [];
       const cur = typeof args[limitKey] === 'number' ? (args[limitKey] as number) : 20;
-      return [{ tool: t.name, args: { ...args, [limitKey]: Math.max(1, Math.floor(cur / 2)) } }];
+      return [{ tool: t.name, args: { ...args, ...extra, [limitKey]: Math.max(1, Math.floor(cur / 2)) } }];
     }
     case 'upstream_rejected': {
       const ex = t ? exampleArgs(t) : null;

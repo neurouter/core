@@ -22,10 +22,22 @@ import { envLabel, killSwitchFor, resolveVisibleTool, writeEnabled, type Confirm
 import type { OpsTools } from '../ops/ops.js';
 import { opFor } from '../ops/ops.js';
 import { validateScript } from './validate.js';
+import type { CursorPayload } from '../paging/cursor.js';
+import { itemsOf, pagingPlan } from '../paging/plan.js';
 import { wrapScript } from './wrap.js';
 
 /** Ops helpers forwarded to the host (parallel / days_since / now run inside the executor). */
 export const SCRIPT_OPS = ['log_decision', 'report_unmet_need', 'report_issue'] as const;
+
+/** Contract 2: `ops.pages` (all items of a list tool across its pages; P4 adds `fn.pages()` on the functions). */
+const PAGES_STUB = [
+  'def pages(fn: str, args: dict[str, Any] | None = None, max_items: int = 500) -> list[Any]:',
+  '    """All items of a list function across its pages, e.g. ops.pages(fn="ns.list_orders", args={"status": "paid"}, max_items=200).',
+  '',
+  '    Each page is one tool call. Stops after max_items (at most 5000) or the last page."""',
+  '',
+].join('\n');
+const PAGES_MAX = 5000;
 
 export const RUN_SCRIPT_DEFINITION = {
   name: 'run_script',
@@ -296,13 +308,47 @@ export class ScriptRunner {
     }
   }
 
+  /**
+   * `ops.pages(fn, args, max_items)` (contract 2): calls a list function page by page with the positions the
+   * pipeline reads from each upstream answer (the same ones `page.next_cursor` encodes), up to `max_items`. Each
+   * page is one tool call of the script (limits apply); a failing page raises its tool error.
+   */
+  private async pages(ctx: RunContext, kwargs: Record<string, unknown>, byFn: Map<string, ToolDef>, count: () => void, raise: (info: ErrorInfo) => HostCallResult, tools: ToolDef[], signal: AbortSignal | undefined, planned: PlannedChange[]): Promise<HostCallResult> {
+    const fn = typeof kwargs.fn === 'string' ? kwargs.fn : '';
+    const t = byFn.get(fn);
+    const bad = (text: string) => raise({ code: 'invalid_args', message: text, retry: 'after_fix', next: [] });
+    if (!t) return bad(`ops.pages: no function ${fn || '(fn missing)'} in this script's namespaces; pass fn="<ns>.<list function>".`);
+    if (!pagingPlan(t).list) return bad(`ops.pages: ${fn} does not return a list.`);
+    const raw = kwargs.args ?? {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('ops.pages: args must be a dict of keyword arguments.');
+    const max = Math.min(PAGES_MAX, Math.max(1, Number.isInteger(kwargs.max_items) ? (kwargs.max_items as number) : 500));
+    const map = pyArgMap(t);
+    const args: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) args[map[k] ?? k] = v;
+    const items: unknown[] = [];
+    let position: Exclude<CursorPayload, { k: 'r' }> | undefined;
+    for (let page = 0; page < PAGES_MAX && items.length < max; page++) {
+      if (page > 0) count();
+      const out = await this.d.pipeline.invoke(ctx, t.name, args, { planned, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
+      if (!out.ok) {
+        const info: ErrorInfo = out.draft.error ? await errorInfoFor(ctx, out.draft.error) : { code: 'upstream_error', message: out.error?.message ?? 'page failed', retry: 'no', next: [] };
+        return raise({ ...info, next: info.next.map((c) => asScriptCall(c, tools)) });
+      }
+      items.push(...(itemsOf(out.value) ?? []));
+      if (!out.paging?.more || !out.paging.next) break;
+      position = out.paging.next;
+    }
+    return { ok: true, value: items.slice(0, max) };
+  }
+
   /** Stubs regenerated from the filtered tool list, cached by (build, allowedSetHash). */
   private stubsFor(ctx: RunContext, tools: ToolDef[], ns: string): Record<string, string> {
     const ops = SCRIPT_OPS.filter((o) => ctx.bundle.server.opsTools[o]);
-    const k = `${ctx.bundle.build.id}|${sha256Hex(tools.map((t) => t.name).join(','))}|${ops.join(',')}`;
+    const v2 = ctx.contract === 2;
+    const k = `${ctx.bundle.build.id}|${sha256Hex(tools.map((t) => t.name).join(','))}|${ops.join(',')}|${v2 ? 2 : 1}`;
     const hit = this.stubCache.get(k);
     if (hit) return hit;
-    const out = { [ns]: generateStubs(tools, ns, { buildHash: ctx.bundle.build.hash }), ops: generateOpsStub(ops) };
+    const out = { [ns]: generateStubs(tools, ns, { buildHash: ctx.bundle.build.hash }), ops: generateOpsStub(ops) + (v2 ? `\n${PAGES_STUB}` : '') };
     if (this.stubCache.size > 200) this.stubCache.clear();
     this.stubCache.set(k, out);
     return out;
@@ -417,6 +463,7 @@ export class ScriptRunner {
             return { ok: false, error: { code: info.code, message, ...(PY_ERROR[info.code] ? { pyType: PY_ERROR[info.code] } : { pyType: 'RuntimeError' }) } } as HostCallResult;
           };
           const unknownFn = async (): Promise<HostCallResult> => raise(await errorInfoFor(ctx, { code: 'unknown_tool', message: '', text: `No function ${fn} in this script's namespaces; nothing was called.`, name: fn, closest: closestNames(fn, [...byFn.keys()]), next: [{ tool: 'search_tools', args: { query: fn.split('.').pop() ?? fn } }] }));
+          if (fn === 'ops.pages' && v2) return this.pages(ctx, kwargs, byFn, () => calls++, raise, tools, signal, planned);
           if (fn.startsWith('ops.')) {
             const op = opFor(ctx, fn);
             if (!op || !(SCRIPT_OPS as readonly string[]).includes(op)) return v2 ? unknownFn() : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
@@ -460,7 +507,7 @@ export class ScriptRunner {
           code: wrapped.code,
           lineOffset: wrapped.lineOffset,
           colOffset: wrapped.colOffset,
-          modules: { [ns]: { functions: tools.map((t) => t.pyName.split('.').slice(1).join('.')), stubs: stubs[ns]! }, ops: { functions: [...opsFns], stubs: stubs.ops! } },
+          modules: { [ns]: { functions: tools.map((t) => t.pyName.split('.').slice(1).join('.')), stubs: stubs[ns]! }, ops: { functions: [...opsFns, ...(v2 ? ['pages'] : [])], stubs: stubs.ops! } },
           inputs,
           limits: { cpuTimeSec: lim.cpuTimeSec, wallTimeSec: lim.wallTimeSec, maxMemoryMb: lim.maxMemoryMb, maxToolCalls: lim.maxToolCalls, maxConcurrentCalls: lim.maxConcurrentCalls, maxResultBytes: lim.maxResultBytes },
           osPolicy: { datetime: new Date(started).toISOString(), seed: parseInt(sha256Hex(runId).slice(0, 8), 16) },

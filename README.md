@@ -57,12 +57,18 @@ Tool results follow one of two contracts, chosen per session:
 
 - **Contract 2** (default for servers created from this release on): every `tools/call` result is one envelope,
   `{"ok","data","page","truncated","error","state"}` (plus an optional `hint`), as the only text item and as
-  `structuredContent`. `data` is the API's payload unchanged; `page` says `count`/`total`/`has_more` on list tools;
-  `truncated` names what Neurouter cut and the exact call that returns it; `error` has a code, a short message,
+  `structuredContent`. `data` is the API's payload unchanged; `page` says `count`/`total`/`has_more` on list tools,
+  with `next_cursor`: pass it as `cursor` to the same tool with the same other arguments for the next page, whatever
+  the upstream's paging style (cursor tokens, page/per_page, offset/limit, `starting_after`, `Link` headers) and
+  for the rest of a list Neurouter cut. Cursors are signed, bound to the tool, arguments and credential, and last
+  1 hour. Every tool takes `fields` (dot paths, per item on lists; the overlay `include` is the default set) and
+  list tools take `limit` (the upstream page size); names the upstream already uses get an `nr_` prefix.
+  `truncated` names the object fields Neurouter clipped and the `fields` call that returns them; `error` has a code, a short message,
   every invalid field with its allowed values, `retry` and `next` (the exact call to make next); `state` carries the
   environment, write mode, task and call counter (and identical-result streaks). Unknown tools answer with an
   envelope (`unknown_tool` + closest names), not a JSON-RPC error. In `run_script`, tool functions return plain data
-  and raise `LookupError`/`ValueError`/`PermissionError`/… whose message is the error object.
+  and raise `LookupError`/`ValueError`/`PermissionError`/… whose message is the error object;
+  `ops.pages(fn="ns.list_x", args={…}, max_items=500)` returns the items of every page.
 - **Contract 1**: the 0.2.x shapes. Servers created before contract 2 keep it until switched.
 
 A client picks a version with the capability `experimental["dev.neurouter/contract"] = {"versions":[2,1]}` or the

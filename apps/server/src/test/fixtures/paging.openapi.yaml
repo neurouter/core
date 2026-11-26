@@ -1,0 +1,235 @@
+openapi: 3.1.0
+info:
+  title: Paging styles
+  version: 1.0.0
+  description: One list per upstream paging style (contract-2 cursor tests). Served by the mock and by a fake HTTP upstream.
+servers:
+  - url: https://api.paging.test
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      summary: List widgets (cursor + limit)
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 5 } }
+      responses:
+        '200':
+          description: A page of widgets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Widget' } }
+                  next_cursor: { type: [string, 'null'] }
+  /gadgets:
+    get:
+      operationId: listGadgets
+      summary: List gadgets (page/per_page, Link header)
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 5 } }
+      responses:
+        '200':
+          description: A page of gadgets
+          headers:
+            Link: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Widget' } }
+  /gizmos:
+    get:
+      operationId: listGizmos
+      summary: List gizmos (offset/limit, total)
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 5 } }
+      responses:
+        '200':
+          description: A page of gizmos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Widget' } }
+                  total_count: { type: integer }
+  /charges:
+    get:
+      operationId: listCharges
+      summary: List charges (starting_after, has_more)
+      parameters:
+        - { name: starting_after, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 5 } }
+      responses:
+        '200':
+          description: A page of charges
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [object, data, has_more]
+                properties:
+                  object: { type: string, enum: [list] }
+                  data: { type: array, items: { $ref: '#/components/schemas/Widget' } }
+                  has_more: { type: boolean }
+  /documents:
+    get:
+      operationId: listDocuments
+      summary: List documents (pageToken/pageSize)
+      parameters:
+        - { name: pageToken, in: query, schema: { type: string } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 5 } }
+      responses:
+        '200':
+          description: A page of documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents: { type: array, items: { $ref: '#/components/schemas/Widget' } }
+                  nextPageToken: { type: string }
+  /notes:
+    get:
+      operationId: listNotes
+      summary: List notes (no upstream paging; the overlay caps it)
+      responses:
+        '200':
+          description: All notes
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Note' } }
+    post:
+      operationId: createNote
+      summary: Create a note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Note' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Note' }
+  /notes/{noteId}:
+    get:
+      operationId: getNote
+      summary: Get a note
+      parameters:
+        - { name: noteId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One note
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Note' }
+  /reports:
+    get:
+      operationId: listReports
+      summary: List reports (upstream arguments named limit and fields that mean something else)
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 5 } }
+        - { name: limit, in: query, description: Maximum amount, schema: { type: number } }
+        - { name: fields, in: query, description: Upstream field set name, schema: { type: string } }
+      responses:
+        '200':
+          description: Reports
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Widget' } }
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      summary: Get one widget
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One widget
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Widget' }
+  /gadgets/{id}:
+    get:
+      operationId: getGadget
+      summary: Get one gadget
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One gadget
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Widget' }
+  /gizmos/{id}:
+    get:
+      operationId: getGizmo
+      summary: Get one gizmo
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One gizmo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Widget' }
+  /charges/{id}:
+    get:
+      operationId: getCharge
+      summary: Get one charge
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One charge
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Widget' }
+  /documents/{id}:
+    get:
+      operationId: getDocument
+      summary: Get one document
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One document
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Widget' }
+  /reports/{id}:
+    get:
+      operationId: getReport
+      summary: Get one report
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: One report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Widget' }
+components:
+  schemas:
+    Widget:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string }
+        color: { type: string }
+    Note:
+      type: object
+      required: [title]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        body: { type: string }
+        author: { type: string }

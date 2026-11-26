@@ -170,12 +170,18 @@ describe('contract 2 (acme, mock)', () => {
       await follow(m, 'run_script', { code: 'return acme.list_orders(limit=500)' }, 'invalid_args');
     });
 
-    it('truncated.next returns the cut part', async () => {
+    it('page.next_cursor returns the cut part as further pages of the same tool', async () => {
       const m = c();
-      const cut = assertEnvelope((await m.call('list_products', {})).result);
-      const more = assertEnvelope((await m.call(cut.truncated.next.tool, cut.truncated.next.args)).result);
-      expect(more.page).toMatchObject({ count: 17, total: 20, has_more: false });
-      expect(more.truncated).toBeNull();
+      let env = assertEnvelope((await m.call('list_products', {})).result);
+      const seen: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        seen.push(...env.data.items.map((p: { sku: string }) => p.sku));
+        if (!env.page.has_more) break;
+        env = assertEnvelope((await m.call('list_products', { cursor: env.page.next_cursor })).result);
+      }
+      expect(new Set(seen).size).toBe(20);
+      expect(env.page).toMatchObject({ count: 2, total: 20, has_more: false, next_cursor: null });
+      expect(env.truncated).toBeNull();
     });
 
     it('rate_limited: retry after the wait, with retry_after_ms and the same call as next', async () => {
