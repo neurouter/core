@@ -7,7 +7,7 @@ appVersion: "0.1.0"
 license: Apache-2.0
 keywords: [mcp, model-context-protocol, openapi, graphql, ai-agents, code-mode, evals]
 sources:
-  - https://github.com/neurouter/neurouter
+  - https://github.com/neurouter/core
 maintainers:
   - name: Neurouter contributors
     url: https://github.com/neurouter

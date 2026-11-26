@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: neurouter/neurouter/actions/eval@v0.1.0
+      - uses: neurouter/core/actions/eval@v0.1.0
         with:
           spec: openapi.yaml
           suite: neurouter/suite.json      # optional: freeze a generated suite for stable CI

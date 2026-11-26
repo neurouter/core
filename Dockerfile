@@ -102,7 +102,7 @@ ARG REVISION=unknown
 LABEL org.opencontainers.image.title="Neurouter" \
       org.opencontainers.image.description="Turn an OpenAPI or GraphQL API into a governed MCP server with code mode, ops tools and evals." \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.source="https://github.com/neurouter/neurouter" \
+      org.opencontainers.image.source="https://github.com/neurouter/core" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
 HEALTHCHECK --interval=15s --timeout=3s --start-period=30s CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

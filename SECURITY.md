@@ -1,6 +1,6 @@
 # Security
 
-Report vulnerabilities privately through GitHub security advisories on `neurouter/neurouter`.
+Report vulnerabilities privately through GitHub security advisories on `neurouter/core`.
 
 ## What the gateway guarantees (backend spec §18)
 
