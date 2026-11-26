@@ -19,7 +19,7 @@ afterEach(async () => dbs.close());
 
 async function seeded(n: number) {
   const store = new SqlAuditStore(dbs.audit.db, 'sqlite', { clock });
-  for (let i = 0; i < n; i++) store.record({ id: newId(), ts: now + i, kind: 'tool_call', decision: 'allowed', status: 'ok', toolName: 'gh__x' });
+  for (let i = 0; i < n; i++) store.record({ id: newId(), tenantId: 't1', ts: now + i, kind: 'tool_call', decision: 'allowed', status: 'ok', toolName: 'gh__x' });
   await store.flush();
   return store;
 }
@@ -73,7 +73,7 @@ describe('sink dispatcher', () => {
     expect(await d.runOnce()).toEqual({ test: { delivered: 7, error: null } });
     expect(got).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(await d.cursor('test')).toBe(7);
-    store.record({ id: newId(), ts: now, kind: 'admin_action', decision: 'allowed', status: 'ok' });
+    store.record({ id: newId(), tenantId: 't1', ts: now, kind: 'admin_action', decision: 'allowed', status: 'ok' });
     await store.flush();
     fail = true;
     expect((await d.runOnce()).test).toMatchObject({ delivered: 0, error: 'down' });

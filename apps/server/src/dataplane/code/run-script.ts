@@ -178,7 +178,7 @@ export class ScriptRunner {
     if (!taskId) {
       const p = ctx0.principal;
       taskId = await this.d.tracker.create(
-        { tenantId: ctx0.tenantId, serverId: ctx0.server.id, environmentId: ctx0.environment.id, credentialKey: ctx0.credentialKey, clientName: ctx0.client.name, clientVersion: ctx0.client.version, principalType: p.type, userId: p.type === 'external' ? null : p.userId, apiKeyId: p.type === 'api_key' ? p.apiKeyId : null, oauthClientId: p.type === 'user' ? p.oauthClientId : null, traceId: null },
+        { tenantId: ctx0.tenantId, serverId: ctx0.server.id, environmentId: ctx0.environment.id, credentialKey: ctx0.credentialKey, clientName: ctx0.client.name, clientVersion: ctx0.client.version, principalType: p.type, userId: p.type === 'external' ? null : p.userId, apiKeyId: p.type === 'api_key' ? p.apiKeyId : null, oauthClientId: p.type === 'user' ? p.oauthClientId : null, traceId: null, origin: ctx0.origin },
         'script',
         null,
       );
@@ -201,7 +201,7 @@ export class ScriptRunner {
       const auditId = newId();
       const preview = value === undefined ? null : JSON.stringify(value).slice(0, 8192);
       await this.d.db
-        .updateTable('script_runs')
+        .updateTable('script_runs').where('tenant_id', '=', ctx.tenantId)
         .set({ status, error: body.error ? toJsonColumn(body.error) : null, result_preview: preview === null ? null : toJsonColumn(safeParse(preview)), result_bytes: body.valueBytes ?? (preview ? Buffer.byteLength(preview) : 0), result_handle: handle, planned_changes: toJsonColumn(planned.map(({ argsHash: _h, ...p }) => p)), stats: toJsonColumn(stats), phases: toJsonColumn(phases), stdout: body.stdout ? body.stdout.slice(0, 16384) : null, audit_id: auditId, ended_at: ended })
         .where('id', '=', runId)
         .execute();

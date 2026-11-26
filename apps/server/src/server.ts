@@ -15,6 +15,7 @@ import { systemClock } from './kernel/lib/clock.js';
 import { createLogger } from './kernel/lib/logger.js';
 import { SERVER_VERSION } from './version.js';
 import { routePlugins } from './routes.js';
+import type { NeurouterExtensions } from './extensions.js';
 
 export { ConfigError };
 
@@ -54,6 +55,8 @@ export interface StartOptions {
   /** Start the background job scheduler (default true when listening). */
   jobs?: boolean;
   loadDotenv?: boolean;
+  /** Extension points (multi-tenancy spec §1.4): tenancy, policies, executor decorator, routes, migrations, jobs, features. */
+  extensions?: NeurouterExtensions;
 }
 
 export interface RunningServer {
@@ -96,7 +99,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   let services: Services;
   try {
     if (config.env.MIGRATE_ON_START) {
-      const applied = await migrateAll(dbs, { embeddingDims: config.env.EMBEDDINGS_DIMS });
+      const applied = await migrateAll(dbs, { embeddingDims: config.env.EMBEDDINGS_DIMS }, opts.extensions?.migrations ?? {});
       if (applied.main.length + applied.audit.length) logger.info({ main: applied.main, audit: applied.audit }, 'migrations applied');
     }
     if (config.env.COORDINATION_BACKEND === 'postgres' || (config.env.COORDINATION_BACKEND === 'auto' && dbs.main.dialect === 'postgres')) {
@@ -105,7 +108,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       await pgc.start();
       coordination = pgc;
     }
-    services = createServices({ config, logger, dbs, clock: systemClock, coordination, version: SERVER_VERSION, ...(executorBoot ? { executorBoot } : {}), ...(opts.services ?? {}) });
+    services = createServices({ config, logger, dbs, clock: systemClock, coordination, version: SERVER_VERSION, ...(executorBoot ? { executorBoot } : {}), ...(opts.services ?? {}), ...(opts.extensions ? { extensions: opts.extensions } : {}) });
     await initServices(services);
   } catch (err) {
     // never leave the executor child running when the boot fails

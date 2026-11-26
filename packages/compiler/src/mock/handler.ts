@@ -7,7 +7,7 @@ import { isObj, type Obj } from '../util.js';
 import { generateValue, hashSeed, seededFaker } from './generate.js';
 import { handleGraphqlMock } from './graphql.js';
 import type { MockModel, MockOperation, OpenApiMockModel } from './model.js';
-import { newItem, type MockStore } from './store.js';
+import { asStateStore, MockLimitError, mockSeedKey, newItem, toMockNs, type MockNs, type MockStateStore, type MockStore } from './store.js';
 
 export interface MockRequest {
   method: string;
@@ -85,16 +85,20 @@ function checkBody(schema: JsonSchema | null, body: unknown): string[] {
   return errors;
 }
 
-function nowIso(store: MockStore): string {
+function nowIso(store: MockStateStore): string {
   return new Date(store.now()).toISOString();
 }
 
-function touch(item: Obj, store: MockStore, created: boolean): void {
+function touch(item: Obj, store: MockStateStore, created: boolean): void {
   if ('updated_at' in item || created) if ('updated_at' in item) item.updated_at = nowIso(store);
   if (created && 'created_at' in item) item.created_at = nowIso(store);
 }
 
-export async function handleMockRequest(model: MockModel, store: MockStore, namespace: string, req: MockRequest): Promise<MockResponse> {
+/**
+ * Answers one mock request. `store` is any `MockStateStore` (a bare `MockStore` is wrapped in memory);
+ * `namespace` is a `MockNs` or, for standalone use, a bare namespace name.
+ */
+export async function handleMockRequest(model: MockModel, store: MockStateStore | MockStore, namespace: MockNs | string, req: MockRequest): Promise<MockResponse> {
   const method = req.method.toUpperCase();
   const [rawPath, qs] = req.path.split('?', 2) as [string, string | undefined];
   const query: Record<string, string | string[] | undefined> = { ...(req.query ?? {}) };
@@ -113,12 +117,18 @@ export async function handleMockRequest(model: MockModel, store: MockStore, name
     if (c.op.method !== method && !(method === 'HEAD' && c.op.method === 'GET')) continue;
     const params: Record<string, string> = {};
     c.names.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1]!)));
-    return dispatch(model, store, namespace, c.op, params, query, req.body);
+    try {
+      return await dispatch(model, asStateStore(store), toMockNs(namespace), c.op, params, query, req.body);
+    } catch (err) {
+      if (err instanceof MockLimitError) return problem(err.status, err.status === 507 ? 'Insufficient Storage' : 'Payload Too Large', err.message, { code: err.code });
+      throw err;
+    }
   }
   return matchedPath ? problem(405, 'Method Not Allowed', `${method} is not supported on ${rawPath}`) : problem(404, 'Not Found', `No mock operation for ${method} ${rawPath}`);
 }
 
-function dispatch(model: OpenApiMockModel, store: MockStore, namespace: string, op: MockOperation, params: Record<string, string>, query: Record<string, string | string[] | undefined>, body: unknown): MockResponse {
+async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: MockNs, op: MockOperation, params: Record<string, string>, query: Record<string, string | string[] | undefined>, body: unknown): Promise<MockResponse> {
+  const namespace = mockSeedKey(ns);
   const resource = op.resource ? model.resources[op.resource] : undefined;
   if (!resource || op.kind === 'action') {
     if (op.requestSchema && op.method !== 'GET') {
@@ -131,13 +141,10 @@ function dispatch(model: OpenApiMockModel, store: MockStore, namespace: string, 
     return { status: op.successStatus, headers: JSON_HEADERS, body: generateValue(op.responseSchema, 'result', { faker, defs, depth: 0, index: 1 }) };
   }
   const scope = Object.fromEntries(resource.scopeParams.map((p) => [p, params[p] ?? '']));
-  const coll = store.collection(namespace, resource, scope);
-  const idOf = (it: Obj) => String(it[resource.idField]);
-  const find = (id: string) => coll.items.findIndex((it) => idOf(it) === id);
 
   switch (op.kind) {
     case 'list': {
-      let items = coll.items;
+      let items = await store.list(ns, resource, scope);
       for (const [param, field] of Object.entries(op.filters)) {
         const raw = query[param];
         if (raw === undefined || raw === '') continue;
@@ -161,35 +168,34 @@ function dispatch(model: OpenApiMockModel, store: MockStore, namespace: string, 
     case 'create': {
       const errs = checkBody(op.requestSchema, body);
       if (errs.length) return problem(422, 'Unprocessable Entity', errs.join('; '), { errors: errs });
-      const id = coll.nextId++;
-      const item = { ...newItem(resource, hashSeed(namespace, resource.key, id), id, scope), ...(isObj(body) ? body : {}) };
-      item[resource.idField] = resource.idType === 'integer' ? id : `${resource.name}_${id}`;
-      touch(item, store, true);
-      coll.items.push(item);
+      const item = await store.create(ns, resource, scope, (id) => {
+        const it = { ...newItem(resource, hashSeed(namespace, resource.key, id), id, scope), ...(isObj(body) ? body : {}) };
+        it[resource.idField] = resource.idType === 'integer' ? id : `${resource.name}_${id}`;
+        touch(it, store, true);
+        return it;
+      });
       return { status: op.successStatus === 200 ? 200 : op.successStatus, headers: JSON_HEADERS, body: item };
     }
     case 'read': {
-      const i = find(params[op.idParam!] ?? '');
-      if (i < 0) return problem(404, 'Not Found', `${resource.name} ${params[op.idParam!]} not found`);
-      return { status: 200, headers: JSON_HEADERS, body: coll.items[i] };
+      const item = await store.get(ns, resource, scope, params[op.idParam!] ?? '');
+      if (!item) return problem(404, 'Not Found', `${resource.name} ${params[op.idParam!]} not found`);
+      return { status: 200, headers: JSON_HEADERS, body: item };
     }
     case 'update':
     case 'replace': {
       const id = op.bodyId ? (isObj(body) ? String(body[resource.idField] ?? '') : '') : (params[op.idParam!] ?? '');
-      const i = find(id);
-      if (i < 0) return problem(404, 'Not Found', `${resource.name} ${id} not found`);
+      const prev = await store.get(ns, resource, scope, id);
+      if (!prev) return problem(404, 'Not Found', `${resource.name} ${id} not found`);
       if (!isObj(body)) return problem(422, 'Unprocessable Entity', 'request body must be a JSON object');
-      const prev = coll.items[i]!;
       const next = op.kind === 'update' ? { ...prev, ...body } : { ...body };
       next[resource.idField] = prev[resource.idField];
       touch(next, store, false);
-      coll.items[i] = next;
+      // last writer wins; a concurrent delete in between makes it a 404
+      if (!(await store.put(ns, resource, scope, id, next))) return problem(404, 'Not Found', `${resource.name} ${id} not found`);
       return { status: op.successStatus === 204 ? 200 : op.successStatus, headers: JSON_HEADERS, body: next };
     }
     case 'delete': {
-      const i = find(params[op.idParam!] ?? '');
-      if (i < 0) return problem(404, 'Not Found', `${resource.name} ${params[op.idParam!]} not found`);
-      coll.items.splice(i, 1);
+      if (!(await store.remove(ns, resource, scope, params[op.idParam!] ?? ''))) return problem(404, 'Not Found', `${resource.name} ${params[op.idParam!]} not found`);
       return { status: 204, headers: {}, body: null };
     }
   }

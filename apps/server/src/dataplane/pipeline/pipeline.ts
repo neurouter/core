@@ -383,6 +383,7 @@ export class Pipeline {
         upstream = await this.callMock(ctx, tool, specArgs);
       } else {
         const cred = await this.d.credentials.resolve(env.auth, {
+          tenantId: ctx.tenantId,
           environmentId: env.id,
           userId: principalUserId(ctx.principal),
           inbound: ctx.principal.type === 'external' ? { bearer: ctx.principal.bearer, audiences: ((ctx.principal as unknown as { audiences?: string[] }).audiences ?? []) } : null,
@@ -521,7 +522,8 @@ export class Pipeline {
   }
 
   private async callMock(ctx: RunContext, tool: ToolDef, specArgs: Record<string, unknown>): Promise<UpstreamResponse> {
-    const ns = ctx.mockNamespace ?? `env:${ctx.environment.id}`;
+    // bound to the authenticated request: its tenant, its environment, `env` unless an eval namespace was accepted (G13)
+    const ns = { tenantId: ctx.tenantId, environmentId: ctx.environment.id, name: ctx.mockNamespace ?? 'env' };
     const started = this.d.now();
     let method = 'POST';
     let path = '/graphql';
@@ -543,7 +545,7 @@ export class Pipeline {
       path = tool.binding.endpointPath ?? '/graphql';
       body = { query: tool.binding.document, variables: Object.fromEntries(tool.binding.variables.map((v) => [v.name, specArgs[v.arg]]).filter(([, v]) => v !== undefined)) };
     }
-    const res = await this.d.mock.handle({ environmentId: ctx.environment.id, namespace: ns, method, path, query, headers, body, mockModel: ctx.bundle.build.mockModel() });
+    const res = await this.d.mock.handle({ ns, method, path, query, headers, body, mockModel: ctx.bundle.build.mockModel() });
     const json = res.body === undefined ? '' : JSON.stringify(res.body);
     return { status: res.status, body: res.body ?? null, bytes: Buffer.byteLength(json ?? ''), headers: Object.fromEntries(Object.entries(res.headers ?? {}).filter(([k]) => /^(link|retry-after|x-ratelimit-.*)$/i.test(k)).map(([k, v]) => [k.toLowerCase(), v])), latencyMs: this.d.now() - started };
   }

@@ -1,5 +1,5 @@
 import { gunzipSync } from 'node:zlib';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { compile, diffSpecs, parseOverlay, applyOverlayPatch, type CompileResult } from '@neurouter/compiler';
 import { api, OPS_TOOLS, parseSecretRef, SAMPLE_SPEC_URL, OPS_VISIBILITY, readinessBand, type ConnectConfig, type EnvironmentCreate, type OpsTool, type SpecPreview, type SpecSourceIn, type ToolDef } from '@neurouter/shared';
 import { toIso } from '../../../kernel/lib/clock.js';
@@ -9,7 +9,10 @@ import { parseJsonColumn, toBool, toJsonColumn } from '../../../kernel/lib/json.
 import { decodeCursor, clampLimit, toPage } from '../../../kernel/lib/pagination.js';
 import { unindexBuildTools } from '../../../kernel/db/tools-fts.js';
 import { CONFIG_CHANGED, environmentRuntime, parseExposure, parseOpsTools } from '../../../kernel/runtime-config.js';
-import { requireUser } from '../../auth/guards.js';
+import { requireTenant, requireUser, tenantOf } from '../../auth/guards.js';
+import { assertEnvRefsAllowed } from '../env-refs.js';
+import { envRefDenialMessage } from '../../../kernel/secrets/env-refs.js';
+import type { TenantRef } from '../../../kernel/tenancy/types.js';
 import { assertConsoleManaged, assertWithinCodeCap, EnvironmentsService } from '../../environments/environments.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
@@ -28,8 +31,9 @@ export const OPS_TITLES: Record<OpsTool | 'read_result', { title: string; descri
   read_result: { title: 'Read more of a truncated result', description: 'Page through a large result behind a handle.' },
 };
 
-export async function serverOr404(c: ApiContext, id: string) {
-  return c.servers.get(c.tenantId, id);
+/** A server of the request's tenant (another tenant's id reads as not found). */
+export async function serverOr404(c: ApiContext, req: FastifyRequest, id: string) {
+  return c.servers.get(tenantOf(req), id);
 }
 
 /** Bytes of a spec source; URL fetches go through safe-fetch (§6.2). */
@@ -52,13 +56,16 @@ export interface GraphqlEndpointSource {
  * `headers` are one-off request headers (never stored); `headerRef` must be an `env:NAME` reference
  * (stored `secret:` values belong to an environment, which does not exist before the import).
  */
-export async function introspectEndpoint(c: Pick<ApiContext, 'introspectGraphql'>, src: GraphqlEndpointSource, headers: Array<{ name: string; value: string }> = [], env: NodeJS.ProcessEnv = process.env): Promise<{ bytes: Uint8Array; sourceUrl: string; contentType: string }> {
+export async function introspectEndpoint(c: Pick<ApiContext, 'introspectGraphql' | 'envRefs'>, tenant: TenantRef, src: GraphqlEndpointSource, headers: Array<{ name: string; value: string }> = []): Promise<{ bytes: Uint8Array; sourceUrl: string; contentType: string }> {
   const h: Record<string, string> = {};
   for (const x of headers) h[x.name.toLowerCase()] = x.value;
   if (src.headerRef) {
     const ref = parseSecretRef(src.headerRef.secretRef);
     if (!ref || ref.kind !== 'env') throw AppError.validation('The header reference must be env:NAME (stored secrets belong to an environment)', [{ path: ['source', 'headerRef', 'secretRef'], message: 'use env:NAME', code: 'unsupported_ref' }]);
-    const v = env[ref.name];
+    // G12: never a gateway-internal variable, and only when the tenant may use env references at all
+    const denied = await c.envRefs.denial(tenant, ref.name);
+    if (denied) throw AppError.validation(envRefDenialMessage(ref.name, denied), [{ path: ['source', 'headerRef', 'secretRef'], message: envRefDenialMessage(ref.name, denied), code: 'unsupported_ref' }]);
+    const v = await c.envRefs.read(tenant, ref.name);
     if (!v) throw AppError.validation(`The server has no ${ref.name} environment variable`, [{ path: ['source', 'headerRef', 'secretRef'], message: `${ref.name} is not set`, code: 'ref_unresolved' }]);
     h[src.headerRef.name.toLowerCase()] = v;
   }
@@ -163,14 +170,14 @@ function slugify(title: string): string | null {
 /** servers, opsTools, specs, builds, spec previews, readiness (§14.4, §14.5, §14.15). */
 export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise<void> {
   const db = c.dbs.main.db;
-  const envs = new EnvironmentsService(db, c.clock, c.coord, c.config, c.tenantId);
+  const envsFor = (req: FastifyRequest) => new EnvironmentsService(db, c.clock, c.coord, c.config, tenantOf(req));
   const v = c.views;
 
   route(app, 'servers.list', api.servers.list, async (req) => {
     const q = req.query;
     const limit = clampLimit(q.limit);
     const key = decodeCursor(q.cursor);
-    let qb = db.selectFrom('servers').selectAll().where('tenant_id', '=', c.tenantId);
+    let qb = db.selectFrom('servers').selectAll().where('tenant_id', '=', tenantOf(req));
     if (q.q) qb = qb.where((eb) => eb.or([eb('slug', 'like', `%${q.q}%`), eb('name', 'like', `%${q.q}%`)]));
     if (q.status?.length) qb = qb.where('status', 'in', q.status);
     if (q.kind) qb = qb.where('kind', '=', q.kind);
@@ -180,23 +187,26 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     return { items: await Promise.all(page.items.map((r) => v.serverRow(r))), nextCursor: page.nextCursor };
   });
 
-  const createEnvironments = async (serverId: string, list: EnvironmentCreate[] | undefined) => {
-    for (const e of list ?? []) if (e.slug !== 'mock') await envs.create(serverId, e);
+  const createEnvironments = async (req: FastifyRequest, serverId: string, list: EnvironmentCreate[] | undefined) => {
+    for (const e of list ?? []) if (e.slug !== 'mock') await envsFor(req).create(serverId, e);
   };
 
   route(app, 'servers.create', api.servers.create, async (req, reply) => {
     const u = requireUser(req);
     const body = req.body;
     const cap = await c.settings.get('codeLimitsCap');
-    for (const e of body.environments ?? []) assertWithinCodeCap(e.limits, cap);
+    for (const [i, e] of (body.environments ?? []).entries()) {
+      assertWithinCodeCap(e.limits, cap);
+      await assertEnvRefsAllowed(c.envRefs, req, e.auth, ['environments', i, 'auth']);
+    }
     if ('previewId' in body) {
-      const p = await db.selectFrom('spec_previews').selectAll().where('id', '=', body.previewId).executeTakeFirst();
+      const p = await db.selectFrom('spec_previews').selectAll().where('id', '=', body.previewId).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
       if (!p || p.expires_at <= c.clock.now() || !p.content) throw AppError.notFound('Spec preview');
       const st = parseJsonColumn<PreviewState>(p.state)!;
       const r = await compileBytes(p.content, body.slug, st.format, st.graphql, st.overlayYaml || undefined);
       assertCompiles(r);
       const { server } = await c.servers.create({
-        tenantId: c.tenantId,
+        tenantId: tenantOf(req),
         slug: body.slug,
         name: body.name,
         ...(body.description !== undefined ? { description: body.description } : {}),
@@ -205,17 +215,17 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
         overlay: st.overlayYaml.trim() ? { yaml: st.overlayYaml, source: 'console', message: 'Initial overlay from the import wizard' } : null,
         createdBy: u.id,
       });
-      await createEnvironments(server.id, body.environments);
-      await db.deleteFrom('spec_previews').where('id', '=', p.id).execute();
+      await createEnvironments(req, server.id, body.environments);
+      await db.deleteFrom('spec_previews').where('id', '=', p.id).where('tenant_id', '=', tenantOf(req)).execute();
       reply.status(201);
-      return v.serverDetail(await c.servers.get(c.tenantId, server.id));
+      return v.serverDetail(await c.servers.get(tenantOf(req), server.id));
     }
-    if (await c.servers.bySlug(c.tenantId, body.slug)) throw AppError.conflict(`A server named "${body.slug}" already exists`);
+    if (await c.servers.bySlug(tenantOf(req), body.slug)) throw AppError.conflict(`A server named "${body.slug}" already exists`);
     const src = await specBytes(c, body.source);
     const r = await compileBytes(src.bytes, body.slug, body.format, body.graphql);
     assertCompiles(r);
     const { server, build } = await c.servers.create({
-      tenantId: c.tenantId,
+      tenantId: tenantOf(req),
       slug: body.slug,
       name: body.name,
       ...(body.description !== undefined ? { description: body.description } : {}),
@@ -223,15 +233,15 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
       specSource: { ...(src.sourceUrl ? { url: src.sourceUrl } : { upload: true }), ...(body.format ? { format: body.format } : {}), ...(body.graphql ? { graphql: body.graphql } : {}) },
       createdBy: u.id,
     });
-    await createEnvironments(server.id, body.environments);
-    const jobId = await c.jobs.start('server_import', { serverId: server.id }, u.id, async () => ({ serverId: server.id, buildId: build.build.id, status: build.build.status }));
-    return { server: await v.serverDetail(await c.servers.get(c.tenantId, server.id)), jobId };
+    await createEnvironments(req, server.id, body.environments);
+    const jobId = await c.jobs.start(tenantOf(req), 'server_import', { serverId: server.id }, u.id, async () => ({ serverId: server.id, buildId: build.build.id, status: build.build.status }));
+    return { server: await v.serverDetail(await c.servers.get(tenantOf(req), server.id)), jobId };
   });
 
-  route(app, 'servers.get', api.servers.get, async (req) => v.serverDetail(await serverOr404(c, req.params.id)));
+  route(app, 'servers.get', api.servers.get, async (req) => v.serverDetail(await serverOr404(c, req, req.params.id)));
 
   route(app, 'servers.update', api.servers.update, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const b = req.body;
     const touchesFile = b.name !== undefined || b.description !== undefined || b.exposure !== undefined || b.opsTools !== undefined || b.publicReport !== undefined;
     if (touchesFile) assertConsoleManaged(c.config, s, 'This server');
@@ -242,24 +252,24 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     if (b.opsTools) set.ops_tools = toJsonColumn({ ...parseOpsTools(s.ops_tools), ...b.opsTools });
     if (b.publicReport !== undefined) set.public_report = b.publicReport ? 1 : 0;
     if (b.status !== undefined) set.status = b.status;
-    await db.updateTable('servers').set(set).where('id', '=', s.id).execute();
+    await db.updateTable('servers').where('tenant_id', '=', tenantOf(req)).set(set).where('id', '=', s.id).execute();
     await c.coord.publish(CONFIG_CHANGED, { serverId: s.id });
-    return v.serverDetail(await serverOr404(c, s.id));
+    return v.serverDetail(await serverOr404(c, req, s.id));
   });
 
   route(app, 'servers.delete', api.servers.delete, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     assertConsoleManaged(c.config, s, 'This server');
     if (req.query.confirm !== s.slug) throw AppError.validation('Type the server slug to confirm', [{ path: ['confirm'], message: `must equal ${s.slug}`, code: 'confirm_mismatch' }]);
-    const builds = await db.selectFrom('builds').select('id').where('server_id', '=', s.id).execute();
+    const builds = await db.selectFrom('builds').where('tenant_id', '=', tenantOf(req)).select('id').where('server_id', '=', s.id).execute();
     for (const b of builds) await unindexBuildTools(db, c.dbs.main.dialect, b.id);
-    await db.deleteFrom('api_keys').where('server_id', '=', s.id).execute();
-    await db.deleteFrom('servers').where('id', '=', s.id).execute();
+    await db.deleteFrom('api_keys').where('tenant_id', '=', tenantOf(req)).where('server_id', '=', s.id).execute();
+    await db.deleteFrom('servers').where('tenant_id', '=', tenantOf(req)).where('id', '=', s.id).execute();
     await c.coord.publish(CONFIG_CHANGED, { serverId: s.id });
   });
 
   route(app, 'servers.connect', api.servers.connect, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const list = await c.servers.environments(s.id);
     const e = (req.query.environmentId ? list.find((x) => x.id === req.query.environmentId) : null) ?? list.find((x) => x.slug === 'mock') ?? list[0];
     if (!e) throw AppError.notFound('Environment');
@@ -269,11 +279,11 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   });
 
   /* ---------------------------------------------------------------- ops tools */
-  const opsRows = async (serverId: string) => {
-    const s = await serverOr404(c, serverId);
+  const opsRows = async (req: FastifyRequest, serverId: string) => {
+    const s = await serverOr404(c, req, serverId);
     const toggles = parseOpsTools(s.ops_tools);
     const since = c.clock.now() - 7 * 86_400_000;
-    const counts = await c.dbs.audit.db.selectFrom('audit_log').select(['tool_name', (eb) => eb.fn.countAll<number>().as('n')]).where('server_id', '=', s.id).where('kind', '=', 'ops_call').where('ts', '>=', since).groupBy('tool_name').execute();
+    const counts = await c.dbs.audit.db.selectFrom('audit_log').where('tenant_id', '=', tenantOf(req)).select(['tool_name', (eb) => eb.fn.countAll<number>().as('n')]).where('server_id', '=', s.id).where('kind', '=', 'ops_call').where('ts', '>=', since).groupBy('tool_name').execute();
     const byName = new Map(counts.map((r) => [r.tool_name, Number(r.n)]));
     const items = [...OPS_TOOLS, 'read_result' as const].map((op) => ({
       name: `neurouter_${op}`,
@@ -287,21 +297,21 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     }));
     return { items };
   };
-  route(app, 'opsTools.list', api.opsTools.list, async (req) => opsRows(req.params.id));
+  route(app, 'opsTools.list', api.opsTools.list, async (req) => opsRows(req, req.params.id));
   route(app, 'opsTools.set', api.opsTools.set, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     assertConsoleManaged(c.config, s, 'This server');
-    await db.updateTable('servers').set({ ops_tools: toJsonColumn({ ...parseOpsTools(s.ops_tools), ...req.body }), updated_at: c.clock.now() }).where('id', '=', s.id).execute();
+    await db.updateTable('servers').where('tenant_id', '=', tenantOf(req)).set({ ops_tools: toJsonColumn({ ...parseOpsTools(s.ops_tools), ...req.body }), updated_at: c.clock.now() }).where('id', '=', s.id).execute();
     await c.coord.publish(CONFIG_CHANGED, { serverId: s.id });
-    return opsRows(s.id);
+    return opsRows(req, s.id);
   });
 
   /* ---------------------------------------------------------------- specs */
   route(app, 'specs.list', api.specs.list, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
-    let qb = db.selectFrom('spec_revisions').selectAll().where('server_id', '=', s.id);
+    let qb = db.selectFrom('spec_revisions').where('tenant_id', '=', tenantOf(req)).selectAll().where('server_id', '=', s.id);
     if (key) qb = qb.where('rev', '<', Number(key[0]));
     const rows = await qb.orderBy('rev', 'desc').limit(limit + 1).execute();
     const page = toPage(rows, limit, (r) => r, (r) => [r.rev]);
@@ -310,24 +320,24 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
 
   route(app, 'specs.reimport', api.specs.reimport, async (req, reply) => {
     const u = requireUser(req);
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const src = parseJsonColumn<{ url?: string; path?: string; graphqlEndpoint?: string; headerRef?: GraphqlEndpointSource['headerRef'] }>(s.spec_source) ?? {};
     if (s.managed_by === 'file' && c.config.configMode !== 'console') assertConsoleManaged(c.config, s, 'This server\'s spec');
     let input: { bytes: Uint8Array; sourceUrl: string | null; contentType: string | null };
     if ('previewId' in req.body) {
-      const p = await db.selectFrom('spec_previews').selectAll().where('id', '=', req.body.previewId).executeTakeFirst();
+      const p = await db.selectFrom('spec_previews').where('tenant_id', '=', tenantOf(req)).selectAll().where('id', '=', req.body.previewId).executeTakeFirst();
       if (!p || !p.content || p.expires_at <= c.clock.now()) throw AppError.notFound('Spec preview');
       input = { bytes: p.content, sourceUrl: p.source_url, contentType: null };
     } else if (req.body.source) input = await specBytes(c, req.body.source);
     else if (src.url) input = await specBytes(c, { url: src.url });
-    else if (src.graphqlEndpoint) input = await introspectEndpoint(c, { url: src.graphqlEndpoint, ...(src.headerRef ? { headerRef: src.headerRef } : {}) });
+    else if (src.graphqlEndpoint) input = await introspectEndpoint(c, requireTenant(req).tenant, { url: src.graphqlEndpoint, ...(src.headerRef ? { headerRef: src.headerRef } : {}) });
     else throw AppError.validation('No stored URL to refetch; upload the spec instead', [{ path: ['source'], message: 'required', code: 'required' }]);
     const r = await compileBytes(input.bytes, s.slug);
     assertCompiles(r);
-    const out = await c.servers.reimport(c.tenantId, s.id, input, u.id);
-    const jobId = await c.jobs.start('spec_reimport', { serverId: s.id }, u.id, async () => {
-      const rev = await db.selectFrom('spec_revisions').selectAll().where('id', '=', out.revisionId).executeTakeFirstOrThrow();
-      const fresh = await serverOr404(c, s.id);
+    const out = await c.servers.reimport(tenantOf(req), s.id, input, u.id);
+    const jobId = await c.jobs.start(tenantOf(req), 'spec_reimport', { serverId: s.id }, u.id, async () => {
+      const rev = await db.selectFrom('spec_revisions').where('tenant_id', '=', tenantOf(req)).selectAll().where('id', '=', out.revisionId).executeTakeFirstOrThrow();
+      const fresh = await serverOr404(c, req, s.id);
       const b = await v.buildById(out.build?.build.id ?? fresh.latest_build_id);
       return { revision: await v.specRow(rev), build: b ? await v.buildRow(b) : null, summary: out.summary, unchanged: out.unchanged };
     });
@@ -336,20 +346,21 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   });
 
   route(app, 'specs.get', api.specs.get, async (req) => {
-    const r = await db.selectFrom('spec_revisions').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+    const r = await db.selectFrom('spec_revisions').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!r) throw AppError.notFound('Spec revision');
     const sum = parseJsonColumn<Record<string, unknown>>(r.summary) ?? {};
     return { ...(await v.specRow(r)), summary: { added: (sum.added as never) ?? [], removed: (sum.removed as never) ?? [], changed: (sum.changed as never) ?? [], orphanedOverlayKeys: (sum.orphanedOverlayKeys as never) ?? [] } };
   });
 
   route(app, 'specs.download', api.specs.download, async (req, reply) => {
-    const r = await db.selectFrom('spec_revisions').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+    const r = await db.selectFrom('spec_revisions').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!r) throw AppError.notFound('Spec revision');
     const ext = r.format.startsWith('graphql-sdl') ? 'graphql' : r.format === 'graphql-introspection' ? 'json' : 'yaml';
     return reply.header('content-type', r.content_type ?? (ext === 'json' ? 'application/json' : 'text/plain; charset=utf-8')).header('content-disposition', `attachment; filename="spec-rev${r.rev}.${ext}"`).send(gunzipSync(r.content));
   });
 
   const toolsOfRevision = async (revId: string): Promise<ToolDef[]> => {
+    // tenant-scope: child-of-scoped (spec revision of a tenant-scoped server)
     const b = await db.selectFrom('builds').select('id').where('spec_revision_id', '=', revId).where('status', '=', 'ok').orderBy('created_at', 'desc').limit(1).executeTakeFirst();
     return b ? (await v.buildTools(b.id)).map((t) => t.def) : [];
   };
@@ -361,8 +372,8 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
 
   /* ---------------------------------------------------------------- spec previews */
   const previewOut = (id: string, expiresAt: number, st: PreviewState): SpecPreview => ({ id, expiresAt: toIso(expiresAt), name: st.name, slug: st.slug, overlayDraftYaml: st.overlayYaml, ...st.result });
-  const previewRow = async (id: string) => {
-    const p = await db.selectFrom('spec_previews').selectAll().where('id', '=', id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+  const previewRow = async (req: FastifyRequest, id: string) => {
+    const p = await db.selectFrom('spec_previews').selectAll().where('id', '=', id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!p || p.expires_at <= c.clock.now()) throw AppError.notFound('Spec preview');
     return p;
   };
@@ -374,12 +385,12 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     const started = c.clock.now();
     const source = body.source;
     const endpoint: GraphqlEndpointSource | null = 'graphqlEndpoint' in source ? { url: source.graphqlEndpoint, ...(source.headerRef ? { headerRef: source.headerRef } : {}) } : null;
-    const src = endpoint ? await introspectEndpoint(c, endpoint, 'headers' in source ? source.headers : []) : await specBytes(c, source as SpecSourceIn);
+    const src = endpoint ? await introspectEndpoint(c, requireTenant(req).tenant, endpoint, 'headers' in source ? source.headers : []) : await specBytes(c, source as SpecSourceIn);
     const format = endpoint ? 'graphql-introspection' : body.format;
     const r = await compileBytes(src.bytes, 'preview', format, body.graphql);
     let diff: SpecPreview['diff'] = null;
     if (body.serverId) {
-      const s = await serverOr404(c, body.serverId);
+      const s = await serverOr404(c, req, body.serverId);
       const prev = s.latest_build_id ? (await v.buildTools(s.latest_build_id)).map((t) => t.def) : [];
       diff = diffSpecs(prev, r.tools, []) as never;
     }
@@ -389,23 +400,23 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     const st: PreviewState = { name: title || null, slug, ...(format ? { format } : {}), ...(endpoint ? { graphqlEndpoint: endpoint } : {}), ...(body.graphql ? { graphql: body.graphql } : {}), overlayYaml: '', result: previewFrom(r, slug, c.clock.now() - started, diff) };
     const id = newId();
     const expires = c.clock.now() + PREVIEW_TTL_MS;
-    await db.insertInto('spec_previews').values({ id, tenant_id: c.tenantId, server_id: body.serverId ?? null, status: st.result.status, content: Buffer.from(src.bytes), source_url: src.sourceUrl, state: toJsonColumn(st), created_by: u.id, created_at: c.clock.now(), expires_at: expires }).execute();
-    const jobId = await c.jobs.start('spec_preview', { previewId: id }, u.id, async () => previewOut(id, expires, st));
+    await db.insertInto('spec_previews').values({ id, tenant_id: tenantOf(req), server_id: body.serverId ?? null, status: st.result.status, content: Buffer.from(src.bytes), source_url: src.sourceUrl, state: toJsonColumn(st), created_by: u.id, created_at: c.clock.now(), expires_at: expires }).execute();
+    const jobId = await c.jobs.start(tenantOf(req), 'spec_preview', { previewId: id }, u.id, async () => previewOut(id, expires, st));
     reply.status(202);
     return { jobId, status: 'running' as const, previewId: id };
   });
 
   route(app, 'specs.draft', api.specs.draft, async (req) => {
-    const p = await previewRow(req.params.id);
+    const p = await previewRow(req, req.params.id);
     return previewOut(p.id, p.expires_at, parseJsonColumn<PreviewState>(p.state)!);
   });
 
   route(app, 'specs.draftUpdate', api.specs.draftUpdate, async (req) => {
-    const p = await previewRow(req.params.id);
+    const p = await previewRow(req, req.params.id);
     const st = parseJsonColumn<PreviewState>(p.state)!;
     const b = req.body;
     if (b.slug) {
-      if (await c.servers.bySlug(c.tenantId, b.slug)) throw AppError.conflict(`A server named "${b.slug}" already exists`);
+      if (await c.servers.bySlug(tenantOf(req), b.slug)) throw AppError.conflict(`A server named "${b.slug}" already exists`);
       st.slug = b.slug;
     }
     if (b.name) st.name = b.name;
@@ -422,43 +433,43 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
       const r = await compileBytes(p.content!, st.slug ?? 'preview', st.format, st.graphql, st.overlayYaml || undefined);
       st.result = previewFrom(r, st.result.suggestedSlug, c.clock.now() - t0, st.result.diff);
     }
-    await db.updateTable('spec_previews').set({ state: toJsonColumn(st), status: st.result.status }).where('id', '=', p.id).execute();
+    await db.updateTable('spec_previews').where('tenant_id', '=', tenantOf(req)).set({ state: toJsonColumn(st), status: st.result.status }).where('id', '=', p.id).execute();
     return previewOut(p.id, p.expires_at, st);
   });
 
   route(app, 'specs.cancelPreview', api.specs.cancelPreview, async (req) => {
-    await db.deleteFrom('spec_previews').where('id', '=', req.params.id).where('tenant_id', '=', c.tenantId).execute();
+    await db.deleteFrom('spec_previews').where('id', '=', req.params.id).where('tenant_id', '=', tenantOf(req)).execute();
   });
 
   /* ---------------------------------------------------------------- builds */
   route(app, 'builds.list', api.builds.list, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
-    let qb = db.selectFrom('builds').selectAll().where('server_id', '=', s.id).where('temporary', '=', 0);
+    let qb = db.selectFrom('builds').where('tenant_id', '=', tenantOf(req)).selectAll().where('server_id', '=', s.id).where('temporary', '=', 0);
     if (key) qb = qb.where((eb) => eb.or([eb('created_at', '<', Number(key[0])), eb.and([eb('created_at', '=', Number(key[0])), eb('id', '<', String(key[1]))])]));
     const rows = await qb.orderBy('created_at', 'desc').orderBy('id', 'desc').limit(limit + 1).execute();
     const page = toPage(rows, limit, (r) => r, (r) => [r.created_at, r.id]);
     return { items: await Promise.all(page.items.map((r) => v.buildRow(r))), nextCursor: page.nextCursor };
   });
 
-  const buildOr404 = async (id: string) => {
-    const b = await db.selectFrom('builds').selectAll().where('id', '=', id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+  const buildOr404 = async (req: FastifyRequest, id: string) => {
+    const b = await db.selectFrom('builds').selectAll().where('id', '=', id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!b) throw AppError.notFound('Build');
     return b;
   };
   route(app, 'builds.get', api.builds.get, async (req) => {
-    const b = await buildOr404(req.params.id);
+    const b = await buildOr404(req, req.params.id);
     return { ...(await v.buildRow(b)), diagnostics: c.builds.diagnostics(b), lint: v.lint(b), orphanedOverlayKeys: parseJsonColumn<string[]>(b.orphaned_overlay_keys) ?? [] };
   });
   route(app, 'builds.stubs', api.builds.stubs, async (req) => {
-    const b = await buildOr404(req.params.id);
+    const b = await buildOr404(req, req.params.id);
     return { namespaces: Object.entries(v.stubs(b)).map(([name, pyi]) => ({ name, pyi })) };
   });
 
   /* ---------------------------------------------------------------- readiness */
   route(app, 'readiness.get', api.readiness.get, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     return (await v.readiness(s)) ?? { score: 0, band: readinessBand(0), confidence: 'preliminary' as const, runId: null, measuredAt: null, recommendedMode: null, recommendation: null, modeScores: {}, breakdown: [] };
   });
 

@@ -1,7 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import { tenantOf } from '../../auth/guards.js';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { api, type OverviewKpis } from '@neurouter/shared';
 import { toIso } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
+import { liveIssue, notEvalOnlyGroup } from '../../traces/origin.js';
 import { TracesService } from '../../traces/traces.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
@@ -21,27 +23,27 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
   const adb = c.dbs.audit.db;
   const tr = new TracesService(c);
 
-  const calls = async (from: number, to: number, f: { serverId?: string | undefined; environmentId?: string | undefined; tool?: string | undefined }, kinds: Array<'tool_call' | 'script_run'> = ['tool_call']) => {
+  const calls = async (req: FastifyRequest, from: number, to: number, f: { serverId?: string | undefined; environmentId?: string | undefined; tool?: string | undefined }, kinds: Array<'tool_call' | 'script_run'> = ['tool_call']) => {
     await c.auditStore.flush().catch(() => {});
-    let qb = adb.selectFrom('audit_log').select(['ts', 'kind', 'status', 'decision', 'tool_name', 'server_id', 'environment_id', 'mode', 'latency_ms', 'error_code', 'error_id']).where('tenant_id', '=', c.tenantId).where('ts', '>=', from).where('ts', '<', to).where('kind', 'in', kinds);
+    let qb = adb.selectFrom('audit_log').select(['ts', 'kind', 'status', 'decision', 'tool_name', 'server_id', 'environment_id', 'mode', 'latency_ms', 'error_code', 'error_id']).where('tenant_id', '=', tenantOf(req)).where('ts', '>=', from).where('ts', '<', to).where('kind', 'in', kinds);
     if (f.serverId) qb = qb.where('server_id', '=', f.serverId);
     if (f.environmentId) qb = qb.where('environment_id', '=', f.environmentId);
     if (f.tool) qb = qb.where('tool_name', '=', f.tool);
     return qb.limit(ROW_CAP).execute();
   };
 
-  const kpis = async (from: number, to: number, f: { serverId?: string | undefined; environmentId?: string | undefined }): Promise<OverviewKpis> => {
-    const rows = await calls(from, to, f, ['tool_call', 'script_run']);
+  const kpis = async (req: FastifyRequest, from: number, to: number, f: { serverId?: string | undefined; environmentId?: string | undefined }): Promise<OverviewKpis> => {
+    const rows = await calls(req, from, to, f, ['tool_call', 'script_run']);
     const toolCalls = rows.filter((r) => r.kind === 'tool_call');
     const blocked = toolCalls.filter((r) => r.decision.startsWith('denied_')).length;
     const errors = toolCalls.filter((r) => r.status !== 'ok' && !r.decision.startsWith('denied_')).length;
-    let tq = db.selectFrom('tasks').select(['outcome', 'status']).where('tenant_id', '=', c.tenantId).where('started_at', '>=', from).where('started_at', '<', to);
+    let tq = db.selectFrom('tasks').select(['outcome', 'status']).where('tenant_id', '=', tenantOf(req)).where('origin', '=', 'live').where('started_at', '>=', from).where('started_at', '<', to);
     if (f.serverId) tq = tq.where('server_id', '=', f.serverId);
     if (f.environmentId) tq = tq.where('environment_id', '=', f.environmentId);
     const tasks = await tq.execute();
     const decided = tasks.filter((t) => t.outcome === 'success' || t.outcome === 'partial' || t.outcome === 'failure');
     const openCount = async (table: 'need_groups' | 'issues') => {
-      let qb = db.selectFrom(table).select((eb) => eb.fn.countAll<number>().as('n')).where('tenant_id', '=', c.tenantId).where('status', '=', 'open');
+      let qb = db.selectFrom(table).select((eb) => eb.fn.countAll<number>().as('n')).where('tenant_id', '=', tenantOf(req)).where('status', '=', 'open').where(table === 'need_groups' ? notEvalOnlyGroup(db, tenantOf(req)) : liveIssue(db, tenantOf(req)));
       if (f.serverId) qb = qb.where('server_id', '=', f.serverId);
       return Number((await qb.executeTakeFirst())?.n ?? 0);
     };
@@ -62,8 +64,8 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
     const { from, to } = range(q, c.clock.now());
     const f = { serverId: q.serverId, environmentId: q.environmentId };
     const span = to - from;
-    const [cur, prev] = await Promise.all([kpis(from, to, f), kpis(from - span, from, f)]);
-    const rows = await calls(from, to, f);
+    const [cur, prev] = await Promise.all([kpis(req, from, to, f), kpis(req, from - span, from, f)]);
+    const rows = await calls(req, from, to, f);
     const byTool = new Map<string, { tool: string; serverId: string; calls: number; errors: number; lat: number[] }>();
     const errs = new Map<string, number>();
     for (const r of rows) {
@@ -76,7 +78,7 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
       byTool.set(k, t);
       if (r.error_code) errs.set(r.error_code, (errs.get(r.error_code) ?? 0) + 1);
     }
-    let sq = db.selectFrom('servers').selectAll().where('tenant_id', '=', c.tenantId).where('status', '=', 'active');
+    let sq = db.selectFrom('servers').selectAll().where('tenant_id', '=', tenantOf(req)).where('status', '=', 'active');
     if (q.serverId) sq = sq.where('id', '=', q.serverId);
     const servers = await sq.execute();
     const readiness = [];
@@ -84,7 +86,7 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
       const r = await c.views.readiness(s);
       if (r) readiness.push({ ...r, serverId: s.id, serverSlug: s.slug, serverName: s.name });
     }
-    let rq = db.selectFrom('tasks').selectAll().where('tenant_id', '=', c.tenantId);
+    let rq = db.selectFrom('tasks').selectAll().where('tenant_id', '=', tenantOf(req)).where('origin', '=', 'live');
     if (q.serverId) rq = rq.where('server_id', '=', q.serverId);
     if (q.environmentId) rq = rq.where('environment_id', '=', q.environmentId);
     const recent = await rq.orderBy('started_at', 'desc').limit(5).execute();
@@ -119,7 +121,7 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
       return s[Math.min(n - 1, Math.max(0, Math.floor((t - start) / size)))]!;
     };
     if (q.metric === 'tasks' || q.metric === 'task_success') {
-      let tq = db.selectFrom('tasks').select(['started_at', 'outcome', 'environment_id']).where('tenant_id', '=', c.tenantId).where('started_at', '>=', from).where('started_at', '<', to);
+      let tq = db.selectFrom('tasks').select(['started_at', 'outcome', 'environment_id']).where('tenant_id', '=', tenantOf(req)).where('origin', '=', 'live').where('started_at', '>=', from).where('started_at', '<', to);
       if (q.serverId) tq = tq.where('server_id', '=', q.serverId);
       if (q.environmentId) tq = tq.where('environment_id', '=', q.environmentId);
       for (const t of await tq.execute()) {
@@ -130,7 +132,7 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
         if (t.outcome === 'success') s.ok++;
       }
     } else {
-      for (const r of await calls(from, to, { serverId: q.serverId, environmentId: q.environmentId })) {
+      for (const r of await calls(req, from, to, { serverId: q.serverId, environmentId: q.environmentId })) {
         const k = q.groupBy === 'mode' ? (r.mode ?? 'tool') : q.groupBy === 'environment' ? (r.environment_id ?? '') : q.groupBy === 'status' ? r.status : 'all';
         const s = slot(k, Number(r.ts));
         s.c++;
@@ -156,11 +158,11 @@ export async function metricsRoutes(app: FastifyInstance, c: ApiContext): Promis
   });
 
   route(app, 'metrics.toolUsage', api.metrics.toolUsage, async (req) => {
-    const t = await db.selectFrom('tools').select(['name', 'server_id']).where('id', '=', req.params.id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+    const t = await db.selectFrom('tools').select(['name', 'server_id']).where('id', '=', req.params.id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!t) throw AppError.notFound('Tool');
     const { from, to } = range(req.query, c.clock.now());
-    const rows = await calls(from, to, { serverId: t.server_id, environmentId: req.query.environmentId, tool: t.name });
-    const envs = await db.selectFrom('environments').select(['id', 'slug']).where('server_id', '=', t.server_id).execute();
+    const rows = await calls(req, from, to, { serverId: t.server_id, environmentId: req.query.environmentId, tool: t.name });
+    const envs = await db.selectFrom('environments').where('tenant_id', '=', tenantOf(req)).select(['id', 'slug']).where('server_id', '=', t.server_id).execute();
     const envSlug = new Map(envs.map((e) => [e.id, e.slug]));
     const byStatus: Record<string, number> = {};
     const byEnvironment: Record<string, number> = {};

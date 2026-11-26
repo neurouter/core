@@ -15,7 +15,7 @@ export interface TenantsTable {
 
 export interface UsersTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   email: string;
   name: Generated<string>;
   oidc_issuer: string | null;
@@ -62,7 +62,7 @@ export interface LocalLinksTable {
 }
 
 export interface SettingsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   key: string;
   value: string;
   updated_by: string | null;
@@ -80,7 +80,7 @@ export interface EncryptionKeysTable {
 
 export interface SecretsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   purpose: string;
   owner_type: 'environment' | 'settings' | 'oauth_client' | null;
   owner_id: string | null;
@@ -125,7 +125,7 @@ export interface CoordSignalsTable {
 
 export interface JobsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   kind: string;
   status: 'queued' | 'running' | 'ok' | 'error';
   params: string | null;
@@ -147,7 +147,7 @@ export interface RateLimitBucketsTable {
 
 export interface ServersTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   slug: string;
   name: string;
   description: Generated<string>;
@@ -171,7 +171,7 @@ export interface ServersTable {
 
 export interface SpecRevisionsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   server_id: string;
   rev: number;
   format: 'openapi-3.0' | 'openapi-3.1' | 'graphql-sdl' | 'graphql-introspection';
@@ -190,7 +190,7 @@ export interface SpecRevisionsTable {
 
 export interface OverlayRevisionsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   server_id: string;
   rev: number;
   yaml: string;
@@ -204,7 +204,7 @@ export interface OverlayRevisionsTable {
 
 export interface OverlayDraftsTable {
   server_id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   yaml: string;
   based_on_rev: number | null;
   change_count: Generated<number>;
@@ -215,7 +215,7 @@ export interface OverlayDraftsTable {
 
 export interface BuildsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   server_id: string;
   spec_revision_id: string;
   overlay_revision_id: string | null;
@@ -240,7 +240,7 @@ export interface BuildsTable {
 export interface ToolsTable {
   seq: Generated<number>;
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   build_id: string;
   server_id: string;
   key: string;
@@ -261,7 +261,7 @@ export interface ToolsTable {
 
 export interface ToolEmbeddingsTable {
   tool_id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   tool_seq: number;
   model_id: string;
   dims: number;
@@ -272,7 +272,7 @@ export interface ToolEmbeddingsTable {
 
 export interface EnvironmentsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   server_id: string;
   slug: string;
   name: string;
@@ -301,7 +301,7 @@ export interface EnvironmentsTable {
 
 export interface UpstreamTokensTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   environment_id: string;
   user_id: string;
   dek_id: string;
@@ -318,7 +318,7 @@ export interface UpstreamTokensTable {
 
 export interface UpstreamOauthStatesTable {
   state_hash: Buffer;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   user_id: string;
   environment_id: string;
   code_verifier_enc: Buffer;
@@ -328,7 +328,7 @@ export interface UpstreamOauthStatesTable {
 
 export interface SpecPreviewsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   server_id: string | null;
   status: 'compiling' | 'ready' | 'failed';
   content: Buffer | null;
@@ -341,7 +341,7 @@ export interface SpecPreviewsTable {
 
 export interface ApiKeysTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   key_id: string;
   secret_hash: Buffer;
   display_prefix: string;
@@ -384,7 +384,7 @@ export interface OauthClientsTable {
 
 export interface OauthAuthzRequestsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   client_id: string;
   params: string;
   user_id: string | null;
@@ -394,7 +394,7 @@ export interface OauthAuthzRequestsTable {
 
 export interface OauthConsentsTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   user_id: string;
   client_id: string;
   environment_id: string;
@@ -406,7 +406,7 @@ export interface OauthConsentsTable {
 
 export interface OauthCodesTable {
   code_hash: Buffer;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   client_id: string;
   user_id: string;
   server_id: string;
@@ -421,7 +421,7 @@ export interface OauthCodesTable {
 
 export interface OauthTokensTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   token_hash: Buffer;
   kind: 'access' | 'refresh';
   client_id: string;
@@ -439,7 +439,7 @@ export interface OauthTokensTable {
 }
 
 export interface TasksTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   server_id: string;
   environment_id: string;
@@ -468,10 +468,11 @@ export interface TasksTable {
   ops_count: Generated<number>;
   hinted: Generated<number>;
   trace_id: string | null;
+  origin: Generated<'live' | 'eval'>;
 }
 
 export interface ScriptRunsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   task_id: string | null;
   server_id: string;
@@ -497,7 +498,7 @@ export interface ScriptRunsTable {
 }
 
 export interface DecisionsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   task_id: string | null;
   ts: number;
@@ -508,7 +509,7 @@ export interface DecisionsTable {
 }
 
 export interface NeedGroupsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   server_id: string;
   label: string;
@@ -523,7 +524,7 @@ export interface NeedGroupsTable {
 }
 
 export interface UnmetNeedsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   group_id: string;
   server_id: string;
@@ -539,7 +540,7 @@ export interface UnmetNeedsTable {
 }
 
 export interface IssuesTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   server_id: string;
   environment_id: string;
@@ -555,7 +556,7 @@ export interface IssuesTable {
 }
 
 export interface ErrorEventsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   error_id: string;
   task_id: string | null;
   audit_id: string | null;
@@ -567,7 +568,7 @@ export interface ErrorEventsTable {
 }
 
 export interface ExamplesTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   server_id: string;
   tool_name: string;
@@ -582,7 +583,7 @@ export interface ExamplesTable {
 }
 
 export interface ResultPagesTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   handle: string;
   credential_key: string;
   content: Buffer;
@@ -592,7 +593,7 @@ export interface ResultPagesTable {
 }
 
 export interface UsageDailyTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   server_id: string;
   environment_id: string;
   tool_name: string;
@@ -603,7 +604,7 @@ export interface UsageDailyTable {
 }
 
 export interface KillSwitchesTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   scope: 'global' | 'server' | 'environment' | 'tool';
   target: string;
   kind: 'all' | 'writes' | 'code_mode';
@@ -622,7 +623,7 @@ export interface ConfigStateTable {
 }
 
 export interface EvalSuitesTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   server_id: string;
   version: number;
@@ -636,7 +637,7 @@ export interface EvalSuitesTable {
 }
 
 export interface EvalTasksTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   suite_id: string;
   key: string;
@@ -652,7 +653,7 @@ export interface EvalTasksTable {
 }
 
 export interface EvalRunsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   server_id: string;
   suite_id: string;
@@ -681,7 +682,7 @@ export interface EvalRunsTable {
 }
 
 export interface EvalTaskRunsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   run_id: string;
   task_id: string;
@@ -706,7 +707,7 @@ export interface EvalTaskRunsTable {
 }
 
 export interface SuggestionsTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   id: string;
   run_id: string;
   server_id: string;
@@ -722,6 +723,49 @@ export interface SuggestionsTable {
   verify_run_id: string | null;
   verified_delta: number | null;
   created_at: number;
+  updated_at: number;
+}
+
+export interface OauthClientBlocksTable {
+  tenant_id: string;
+  client_id: string;
+  created_by: string | null;
+  created_at: number;
+}
+
+export interface MockNamespacesTable {
+  tenant_id: string;
+  environment_id: string;
+  namespace: string;
+  seed: number;
+  kind: 'env' | 'eval' | 'gen';
+  created_at: number;
+  last_used_at: number;
+  expires_at: number | null;
+}
+
+export interface MockCollectionsTable {
+  tenant_id: string;
+  environment_id: string;
+  namespace: string;
+  collection_key: string;
+  seed: number;
+  next_id: number;
+  item_count: number;
+  bytes: number;
+  created_at: number;
+  last_used_at: number;
+}
+
+export interface MockItemsTable {
+  tenant_id: string;
+  environment_id: string;
+  namespace: string;
+  collection_key: string;
+  item_id: string;
+  ord: number;
+  body: string;
+  bytes: number;
   updated_at: number;
 }
 
@@ -800,7 +844,7 @@ export interface AuditSinkCursorsTable {
 }
 
 export interface RollupMinuteTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   bucket: number;
   server_id: Generated<string>;
   environment_id: Generated<string>;
@@ -835,7 +879,7 @@ export interface RollupMinuteTable {
 }
 
 export interface RollupHourTable {
-  tenant_id: Generated<string>;
+  tenant_id: string;
   bucket: number;
   server_id: Generated<string>;
   environment_id: Generated<string>;
@@ -917,6 +961,10 @@ export interface MainDB {
   eval_runs: EvalRunsTable;
   eval_task_runs: EvalTaskRunsTable;
   suggestions: SuggestionsTable;
+  oauth_client_blocks: OauthClientBlocksTable;
+  mock_namespaces: MockNamespacesTable;
+  mock_collections: MockCollectionsTable;
+  mock_items: MockItemsTable;
 }
 
 export interface AuditDB {
@@ -961,7 +1009,7 @@ export const MAIN_TABLE_COLUMNS = {
   oauth_consents: ['id', 'tenant_id', 'user_id', 'client_id', 'environment_id', 'scopes', 'redirect_uri', 'created_at', 'revoked_at'],
   oauth_codes: ['code_hash', 'tenant_id', 'client_id', 'user_id', 'server_id', 'environment_id', 'redirect_uri', 'code_challenge', 'scopes', 'resource', 'expires_at', 'consumed_at'],
   oauth_tokens: ['id', 'tenant_id', 'token_hash', 'kind', 'client_id', 'user_id', 'server_id', 'environment_id', 'scopes', 'resource', 'family_id', 'parent_id', 'expires_at', 'revoked_at', 'last_used_at', 'created_at'],
-  tasks: ['tenant_id', 'id', 'server_id', 'environment_id', 'user_id', 'api_key_id', 'oauth_client_id', 'principal_type', 'credential_key', 'client_name', 'client_version', 'goal', 'outcome', 'notes', 'framing', 'inferred_label', 'status', 'started_at', 'last_activity_at', 'ended_at', 'call_count', 'error_count', 'write_count', 'blocked_count', 'script_count', 'decision_count', 'ops_count', 'hinted', 'trace_id'],
+  tasks: ['tenant_id', 'id', 'server_id', 'environment_id', 'user_id', 'api_key_id', 'oauth_client_id', 'principal_type', 'credential_key', 'client_name', 'client_version', 'goal', 'outcome', 'notes', 'framing', 'inferred_label', 'status', 'started_at', 'last_activity_at', 'ended_at', 'call_count', 'error_count', 'write_count', 'blocked_count', 'script_count', 'decision_count', 'ops_count', 'hinted', 'trace_id', 'origin'],
   script_runs: ['tenant_id', 'id', 'task_id', 'server_id', 'environment_id', 'user_id', 'credential_key', 'code', 'code_hash', 'mode', 'status', 'error', 'result_preview', 'result_bytes', 'result_handle', 'planned_changes', 'stats', 'phases', 'stdout', 'audit_id', 'trace_id', 'started_at', 'ended_at'],
   decisions: ['tenant_id', 'id', 'task_id', 'ts', 'choice', 'reason', 'alternatives', 'audit_id'],
   need_groups: ['tenant_id', 'id', 'server_id', 'label', 'intent_norm_hash', 'count', 'distinct_principals', 'first_seen_at', 'last_seen_at', 'status', 'note', 'centroid'],
@@ -978,6 +1026,10 @@ export const MAIN_TABLE_COLUMNS = {
   eval_runs: ['tenant_id', 'id', 'server_id', 'suite_id', 'environment_id', 'build_id', 'overlay_revision_id', 'models', 'modes', 'repeats', 'task_keys', 'status', 'progress', 'score', 'headline', 'recommended_mode', 'confidence', 'usage', 'error', 'trigger', 'base_run_id', 'job_id', 'created_by', 'created_at', 'started_at', 'ended_at'],
   eval_task_runs: ['tenant_id', 'id', 'run_id', 'task_id', 'model', 'mode', 'attempt', 'passed', 'assertion_results', 'judge', 'failure_cause', 'framing_ok', 'tool_calls', 'scripts', 'input_tokens', 'output_tokens', 'latency_ms', 'served_by_model', 'fallback_used', 'task_id_neurouter', 'transcript', 'created_at'],
   suggestions: ['tenant_id', 'id', 'run_id', 'server_id', 'cause', 'kind', 'tools', 'affected_task_ids', 'overlay_patch', 'spec_patch', 'rationale', 'predicted_delta', 'status', 'verify_run_id', 'verified_delta', 'created_at', 'updated_at'],
+  oauth_client_blocks: ['tenant_id', 'client_id', 'created_by', 'created_at'],
+  mock_namespaces: ['tenant_id', 'environment_id', 'namespace', 'seed', 'kind', 'created_at', 'last_used_at', 'expires_at'],
+  mock_collections: ['tenant_id', 'environment_id', 'namespace', 'collection_key', 'seed', 'next_id', 'item_count', 'bytes', 'created_at', 'last_used_at'],
+  mock_items: ['tenant_id', 'environment_id', 'namespace', 'collection_key', 'item_id', 'ord', 'body', 'bytes', 'updated_at'],
 } as const satisfies { [T in keyof MainDB]: readonly (keyof MainDB[T])[] };
 
 export const AUDIT_TABLE_COLUMNS = {

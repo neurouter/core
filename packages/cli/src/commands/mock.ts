@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { compile, handleMockRequest, MockStore } from '@neurouter/compiler';
+import { compile, handleMockRequest, MemoryMockStateStore } from '@neurouter/compiler';
 import { readSpec } from './common.js';
 
 /** `npx neurouter mock`: the in-process mock handler (§16) over HTTP. */
@@ -8,7 +8,7 @@ export async function cmdMock(o: { spec: string; port: string; seed: string }): 
   const r = await compile({ spec: { bytes }, namespace: 'api' });
   const model = r.mockModel;
   if (!model) throw new Error('this spec has no mockable operations');
-  const store = new MockStore({ seed: Number(o.seed) });
+  const store = new MemoryMockStateStore({ seed: Number(o.seed) });
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));

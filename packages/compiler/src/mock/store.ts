@@ -1,14 +1,106 @@
 /**
- * In-memory mock state (backend spec §16): `Map<namespace, …>` with LRU eviction and idle TTL.
+ * Mock state (backend spec §16, multi-tenancy spec §7.2). `MockStateStore` is the async interface the
+ * handler goes through; `MemoryMockStateStore` keeps it in process memory (`MockStore`: LRU eviction
+ * and idle TTL), the server's `DbMockStateStore` keeps it in the database so every instance sees it.
  * Collections are seeded lazily and deterministically per (namespace seed, resource, scope).
  */
 import type { JsonSchema } from '@neurouter/shared';
-import { isObj, type Obj } from '../util.js';
+import { isObj, sha256Hex, type Obj } from '../util.js';
 import { generateValue, hashSeed, SEED_ITEMS, seededFaker } from './generate.js';
 import type { MockResource, OpenApiMockModel } from './model.js';
 
 export { SEED_ITEMS };
 export const DEFAULT_SEED = 42;
+/** Max items per collection (create beyond it → 507 `mock_collection_full`). */
+export const MOCK_MAX_ITEMS = 1000;
+/** Max JSON size of one item (→ 413 `mock_item_too_large`). */
+export const MOCK_MAX_ITEM_BYTES = 64 * 1024;
+
+/**
+ * A mock state namespace, bound to a tenant and an environment. `name` is `env` (the environment's
+ * shared state), `eval:<runId>:<taskRun>` (one eval attempt) or `gen:…` (eval generation / previews).
+ * Standalone use (CLI) leaves `tenantId`/`environmentId` empty.
+ */
+export interface MockNs {
+  tenantId: string;
+  environmentId: string;
+  name: string;
+}
+
+export type MockScope = Record<string, string>;
+
+/** The async state store behind the mock handler (spec §7.2). Item ids are `String(item[resource.idField])`. */
+export interface MockStateStore {
+  /** Clock for server-generated timestamps (`created_at`, `updated_at`). */
+  now(): number;
+  /** Items in insertion order; the collection is seeded lazily (deterministic per seed, resource, scope). */
+  list(ns: MockNs, r: MockResource, scope: MockScope): Promise<Obj[]>;
+  get(ns: MockNs, r: MockResource, scope: MockScope, id: string): Promise<Obj | null>;
+  /** Allocates the next id and stores `make(id)`. Throws `MockLimitError` when the collection is full or the item too large. */
+  create(ns: MockNs, r: MockResource, scope: MockScope, make: (id: number) => Obj): Promise<Obj>;
+  /** Replaces an item (last writer wins); false = not found. */
+  put(ns: MockNs, r: MockResource, scope: MockScope, id: string, next: Obj): Promise<boolean>;
+  /** false = not found. */
+  remove(ns: MockNs, r: MockResource, scope: MockScope, id: string): Promise<boolean>;
+  /** Drops the namespace; it is reseeded on next use (with `seed`, default the store seed). */
+  reset(ns: MockNs, seed?: number): Promise<void>;
+}
+
+/** A store limit was hit (§7.5); the handler answers with a problem JSON. */
+export class MockLimitError extends Error {
+  constructor(
+    readonly status: 413 | 507,
+    readonly code: 'mock_collection_full' | 'mock_item_too_large',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'MockLimitError';
+  }
+}
+
+export function collectionFull(r: MockResource): MockLimitError {
+  return new MockLimitError(507, 'mock_collection_full', `The mock ${r.name} collection is full (${MOCK_MAX_ITEMS} items); reset the mock state or delete items`);
+}
+
+/** Serialized item and its size; throws when over `MOCK_MAX_ITEM_BYTES`. */
+export function itemJson(r: MockResource, item: Obj): { json: string; bytes: number } {
+  const json = JSON.stringify(item);
+  const bytes = Buffer.byteLength(json, 'utf8');
+  if (bytes > MOCK_MAX_ITEM_BYTES) throw new MockLimitError(413, 'mock_item_too_large', `A mock ${r.name} item is limited to ${MOCK_MAX_ITEM_BYTES} bytes of JSON (got ${bytes})`);
+  return { json, bytes };
+}
+
+/** `name=value&…` over the resource's scope params (the collection's partition key). */
+export function scopeKeyOf(r: MockResource, scope: MockScope): string {
+  return r.scopeParams.map((p) => `${p}=${scope[p] ?? ''}`).join('&');
+}
+
+/** `<resource.key>|<scopeKey>`, or its sha256 hex when longer than 200 chars (DB key column). */
+export function collectionKeyOf(r: MockResource, scope: MockScope): string {
+  const key = `${r.key}|${scopeKeyOf(r, scope)}`;
+  return key.length > 200 ? sha256Hex(key) : key;
+}
+
+/**
+ * The string the handler derives per-namespace seeds from (created items, action responses). The
+ * environment namespace keeps its historical `env:<environmentId>` so outputs don't change.
+ */
+export function mockSeedKey(ns: MockNs): string {
+  return ns.name === 'env' && ns.environmentId ? `env:${ns.environmentId}` : ns.name;
+}
+
+/** A bare namespace string (CLI, older callers) as a `MockNs` without tenant or environment. */
+export function toMockNs(ns: MockNs | string): MockNs {
+  return typeof ns === 'string' ? { tenantId: '', environmentId: '', name: ns } : ns;
+}
+
+/** The 20 seed items of a collection (exactly what both stores hold before any write). */
+export function seedItems(r: MockResource, scope: MockScope, nsSeed: number): Obj[] {
+  const seed = hashSeed(nsSeed, r.key, scopeKeyOf(r, scope));
+  const items: Obj[] = [];
+  for (let i = 1; i <= SEED_ITEMS; i++) items.push(newItem(r, hashSeed(seed, i), i, scope));
+  return items;
+}
 
 export interface Collection {
   items: Obj[];
@@ -73,15 +165,92 @@ export class MockStore {
   /** The (lazily seeded) collection for a resource and scope. */
   collection(namespace: string, resource: MockResource, scope: Record<string, string>): Collection {
     const s = this.state(namespace);
-    const scopeKey = resource.scopeParams.map((p) => `${p}=${scope[p] ?? ''}`).join('&');
-    const key = `${resource.key}|${scopeKey}`;
+    const key = `${resource.key}|${scopeKeyOf(resource, scope)}`;
     let c = s.collections.get(key);
     if (!c) {
-      c = seedCollection(resource, scope, hashSeed(s.seed, resource.key, scopeKey));
+      c = { items: seedItems(resource, scope, s.seed), nextId: SEED_ITEMS + 1 };
       s.collections.set(key, c);
     }
     return c;
   }
+}
+
+/**
+ * `MockStore` behind the async `MockStateStore` interface (CLI `mock`, CLI `eval --spec`, and the
+ * server with `NEUROUTER_MOCK_STORE=memory`). Namespaces are keyed by tenant + environment + name;
+ * a `MockNs` without tenant and environment uses the bare name (so `MockStore.resetNamespace(name)` works).
+ */
+export class MemoryMockStateStore implements MockStateStore {
+  readonly store: MockStore;
+
+  constructor(opts: MockStoreOptions | MockStore = {}) {
+    this.store = opts instanceof MockStore ? opts : new MockStore(opts);
+  }
+
+  static key(ns: MockNs): string {
+    return ns.tenantId || ns.environmentId ? `${ns.tenantId}/${ns.environmentId}/${ns.name}` : ns.name;
+  }
+
+  now(): number {
+    return this.store.now();
+  }
+
+  private coll(ns: MockNs, r: MockResource, scope: MockScope): Collection {
+    return this.store.collection(MemoryMockStateStore.key(ns), r, scope);
+  }
+
+  private index(c: Collection, r: MockResource, id: string): number {
+    return c.items.findIndex((it) => String(it[r.idField]) === id);
+  }
+
+  async list(ns: MockNs, r: MockResource, scope: MockScope): Promise<Obj[]> {
+    return [...this.coll(ns, r, scope).items];
+  }
+
+  async get(ns: MockNs, r: MockResource, scope: MockScope, id: string): Promise<Obj | null> {
+    const c = this.coll(ns, r, scope);
+    return c.items[this.index(c, r, id)] ?? null;
+  }
+
+  async create(ns: MockNs, r: MockResource, scope: MockScope, make: (id: number) => Obj): Promise<Obj> {
+    const c = this.coll(ns, r, scope);
+    if (c.items.length >= MOCK_MAX_ITEMS) throw collectionFull(r);
+    const item = make(c.nextId);
+    itemJson(r, item);
+    c.nextId++;
+    c.items.push(item);
+    return item;
+  }
+
+  async put(ns: MockNs, r: MockResource, scope: MockScope, id: string, next: Obj): Promise<boolean> {
+    const c = this.coll(ns, r, scope);
+    const i = this.index(c, r, id);
+    if (i < 0) return false;
+    itemJson(r, next);
+    c.items[i] = next;
+    return true;
+  }
+
+  async remove(ns: MockNs, r: MockResource, scope: MockScope, id: string): Promise<boolean> {
+    const c = this.coll(ns, r, scope);
+    const i = this.index(c, r, id);
+    if (i < 0) return false;
+    c.items.splice(i, 1);
+    return true;
+  }
+
+  async reset(ns: MockNs, seed?: number): Promise<void> {
+    this.store.resetNamespace(MemoryMockStateStore.key(ns), seed);
+  }
+}
+
+const wrappers = new WeakMap<MockStore, MemoryMockStateStore>();
+/** Accepts a bare `MockStore` (older callers) wherever a `MockStateStore` is expected. */
+export function asStateStore(store: MockStateStore | MockStore): MockStateStore {
+  if (!(store instanceof MockStore)) return store;
+  let w = wrappers.get(store);
+  if (!w) wrappers.set(store, (w = new MemoryMockStateStore(store)));
+  return w;
 }
 
 export function newItem(resource: MockResource, seed: number, index: number, scope: Record<string, string>): Obj {
@@ -95,16 +264,14 @@ export function newItem(resource: MockResource, seed: number, index: number, sco
   return item;
 }
 
-function seedCollection(resource: MockResource, scope: Record<string, string>, seed: number): Collection {
-  const items: Obj[] = [];
-  for (let i = 1; i <= SEED_ITEMS; i++) items.push(newItem(resource, hashSeed(seed, i), i, scope));
-  return { items, nextId: SEED_ITEMS + 1 };
-}
-
 /** Up to `n` sample entities per resource in the default scope (for eval task generation). */
-export function sampleEntities(model: OpenApiMockModel, store: MockStore, namespace: string, n = 3): Array<{ resource: string; name: string; scope: Record<string, string>; idField: string; items: Obj[] }> {
-  return Object.values(model.resources).map((r) => {
+export async function sampleEntities(model: OpenApiMockModel, store: MockStateStore | MockStore, namespace: MockNs | string, n = 3): Promise<Array<{ resource: string; name: string; scope: Record<string, string>; idField: string; items: Obj[] }>> {
+  const s = asStateStore(store);
+  const ns = toMockNs(namespace);
+  const out = [];
+  for (const r of Object.values(model.resources)) {
     const scope = Object.fromEntries(r.scopeParams.map((p) => [p, defaultScopeValue(p, r)]));
-    return { resource: r.key, name: r.name, scope, idField: r.idField, items: store.collection(namespace, r, scope).items.slice(0, n) };
-  });
+    out.push({ resource: r.key, name: r.name, scope, idField: r.idField, items: (await s.list(ns, r, scope)).slice(0, n) });
+  }
+  return out;
 }

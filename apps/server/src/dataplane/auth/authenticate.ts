@@ -1,3 +1,4 @@
+import { isClientBlocked } from '../../kernel/tenancy/client-blocks.js';
 import type { Kysely } from 'kysely';
 import { OAUTH_SCOPE_MAP, Scope, type OAuthScope } from '@neurouter/shared';
 import type { CoordinationStore } from '../../kernel/coordination/types.js';
@@ -50,7 +51,7 @@ export class McpAuthenticator {
   constructor(
     private readonly db: Kysely<MainDB>,
     private readonly clock: Clock,
-    private readonly opts: { pepper: string; cacheTtlMs?: number; external?: ExternalJwtVerifier | null },
+    private readonly opts: { pepper: string; cacheTtlMs?: number; external?: ExternalJwtVerifier | null; resourceBase?: { publicUrl: string; aliases?: readonly string[] } },
     coord?: CoordinationStore,
   ) {
     coord?.subscribe(AUTH_REVOKED_CHANNEL, () => this.cache.clear());
@@ -65,7 +66,7 @@ export class McpAuthenticator {
     const m = /^Bearer\s+(\S+)\s*$/i.exec(authorization);
     if (!m) return { ok: false, error: 'invalid_token', reason: 'not a Bearer token' };
     const token = m[1]!;
-    const key = `${target.environmentId}|${sha256(token).toString('base64url')}`;
+    const key = `${target.tenantId}|${target.environmentId}|${sha256(token).toString('base64url')}`;
     const now = this.clock.now();
     const hit = this.cache.get(key);
     let outcome: AuthOutcome;
@@ -86,6 +87,7 @@ export class McpAuthenticator {
   private async apiKey(token: string, t: AuthTarget, now: number): Promise<AuthOutcome> {
     const parsed = parseApiKey(token);
     if (!parsed) return { ok: false, error: 'invalid_token', reason: 'malformed api key' };
+    // tenant-scope: by-secret-hash (API key by key id + secret hash; the key's tenant must equal the endpoint's tenant)
     const k = await this.db
       .selectFrom('api_keys as k')
       .innerJoin('users as u', 'u.id', 'k.owner_user_id')
@@ -107,21 +109,24 @@ export class McpAuthenticator {
   }
 
   private async oauthToken(token: string, t: AuthTarget, now: number): Promise<AuthOutcome> {
+    // tenant-scope: by-secret-hash (token by hash; the token's tenant must equal the endpoint's tenant)
     const row = await this.db
       .selectFrom('oauth_tokens as t')
       .innerJoin('users as u', 'u.id', 't.user_id')
-      .select(['t.id', 't.revoked_at', 't.expires_at', 't.resource', 't.environment_id', 't.scopes', 't.client_id', 't.user_id', 't.family_id', 'u.status as ustatus', 'u.email'])
+      .select(['t.id', 't.tenant_id', 't.revoked_at', 't.expires_at', 't.resource', 't.environment_id', 't.scopes', 't.client_id', 't.user_id', 't.family_id', 'u.status as ustatus', 'u.email'])
       .where('t.token_hash', '=', hmacSha256(this.opts.pepper, token))
       .where('t.kind', '=', 'access')
       .executeTakeFirst();
     if (!row || row.revoked_at !== null || row.expires_at <= now) return { ok: false, error: 'invalid_token', reason: 'unknown, revoked or expired token' };
     if (row.ustatus !== 'active') return { ok: false, error: 'invalid_token', reason: 'user disabled' };
-    if (row.environment_id !== t.environmentId || !sameResource(row.resource, t.resourceUri)) return { ok: false, error: 'invalid_token', reason: 'token audience mismatch' };
+    // the token's tenant must be the endpoint's tenant (spec §3.2), then environment + RFC 8707 resource
+    if (row.tenant_id !== t.tenantId || row.environment_id !== t.environmentId || !sameResource(row.resource, t.resourceUri, this.opts.resourceBase)) return { ok: false, error: 'invalid_token', reason: 'token audience mismatch' };
     const raw = row.scopes.split(/\s+/).filter(Boolean);
     const scopes = [...new Set(raw.map((s) => OAUTH_SCOPE_MAP[s as OAuthScope]).filter(Boolean))];
     if (!scopes.includes('tools:read')) return { ok: false, error: 'insufficient_scope', reason: 'missing scope mcp:tools' };
     const client = await this.db.selectFrom('oauth_clients').select(['status', 'client_name']).where('id', '=', row.client_id).executeTakeFirst();
     if (client?.status === 'blocked') return { ok: false, error: 'invalid_token', reason: 'client blocked' };
+    if (await isClientBlocked(this.db, row.tenant_id, row.client_id)) return { ok: false, error: 'invalid_token', reason: 'client blocked in this organization' };
     return { ok: true, credentialKey: row.family_id, principal: { type: 'user', userId: row.user_id, oauthTokenId: row.id, oauthClientId: row.client_id, scopes, familyId: row.family_id, name: row.email } };
   }
 
@@ -133,13 +138,23 @@ export class McpAuthenticator {
     if (now - last < 60_000) return;
     this.lastTouched.set(id, now);
     if (this.lastTouched.size > 50_000) this.lastTouched.clear();
+    // tenant-scope: child-of-scoped (the credential just authenticated for this endpoint)
     const work = p.type === 'api_key' ? this.db.updateTable('api_keys').set({ last_used_at: now, last_used_ip: ip }).where('id', '=', id).execute() : this.db.updateTable('oauth_tokens').set({ last_used_at: now }).where('id', '=', id).execute();
     void work.catch(() => {});
   }
 }
 
-/** RFC 8707 audience check; tolerate a differently-cased host. */
-export function sameResource(a: string, b: string): boolean {
+/** RFC 8707 audience check; tolerate a differently-cased host; former base URLs (`NEUROUTER_RESOURCE_ALIASES`) count as the current one. */
+export function sameResource(a0: string, b0: string, base?: { publicUrl: string; aliases?: readonly string[] }): boolean {
+  const canon = (r: string) => {
+    for (const al of base?.aliases ?? []) {
+      const root = al.replace(/\/+$/, '');
+      if (r.toLowerCase().startsWith(`${root.toLowerCase()}/mcp/`)) return `${base!.publicUrl}${r.slice(root.length)}`;
+    }
+    return r;
+  };
+  const a = canon(a0);
+  const b = canon(b0);
   if (a === b) return true;
   try {
     const x = new URL(a);

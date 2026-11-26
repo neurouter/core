@@ -8,6 +8,25 @@ export const DURATION_BUCKETS_S = LATENCY_BUCKETS_MS.filter((b) => Number.isFini
 /** Label names that must never appear on /metrics (Hub FORBIDDEN_LABELS + Neurouter ids). */
 export const FORBIDDEN_LABELS = ['user', 'user_id', 'agent', 'agent_id', 'session', 'session_id', 'key', 'api_key_id', 'task', 'task_id'];
 
+/** Rewrites `server`/`environment` label values to '' on every labelled call of a metric. */
+function blankServerLabels(metric: object): void {
+  const m = metric as Record<string, unknown>;
+  for (const fn of ['inc', 'dec', 'set', 'observe', 'labels', 'startTimer']) {
+    const orig = m[fn];
+    if (typeof orig !== 'function') continue;
+    m[fn] = function (this: unknown, ...args: unknown[]) {
+      const first = args[0];
+      if (first && typeof first === 'object' && !Array.isArray(first)) {
+        const l = { ...(first as Record<string, unknown>) };
+        if ('server' in l) l.server = '';
+        if ('environment' in l) l.environment = '';
+        args[0] = l;
+      }
+      return (orig as (...a: unknown[]) => unknown).apply(metric, args);
+    };
+  }
+}
+
 export type AuthFailureMethod = 'api_key' | 'oauth' | 'external' | 'web';
 
 /**
@@ -43,7 +62,8 @@ export class Metrics {
   toolLabel = true;
   beforeRender: (() => Promise<void>) | null = null;
 
-  constructor(opts: { defaultMetrics?: boolean } = {}) {
+  /** `perServerLabels: false` (`METRICS_PER_SERVER_LABELS=false`, spec §12.1): `server`/`environment` label values are blanked (slugs repeat across tenants). */
+  constructor(opts: { defaultMetrics?: boolean; perServerLabels?: boolean } = {}) {
     const registers = [this.registry];
     if (opts.defaultMetrics ?? true) collectDefaultMetrics({ register: this.registry, prefix: 'neurouter_' });
     this.mcpRequests = new Counter({ name: 'neurouter_mcp_requests_total', help: 'MCP requests by method, protocol era and outcome', labelNames: ['method', 'era', 'outcome'], registers });
@@ -69,6 +89,7 @@ export class Metrics {
     this.auditFlush = new Histogram({ name: 'neurouter_audit_flush_seconds', help: 'Audit batch flush time', buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5], registers });
     this.authFailures = new Counter({ name: 'neurouter_auth_failures_total', help: 'Authentication failures', labelNames: ['method', 'reason'], registers });
     this.embeddingStatus = new Gauge({ name: 'neurouter_embedding_model_ready', help: '1 when the embedding model is ready', labelNames: ['status'], registers });
+    if (opts.perServerLabels === false) for (const m of [this.toolCalls, this.toolCallDuration, this.upstreamDuration, this.circuitOpen, this.scriptRuns, this.tasksTotal, this.unmetNeeds, this.issues]) blankServerLabels(m);
   }
 
   toolCall(server: string, environment: string, tool: string, via: string, decision: string, status: string, seconds: number): void {

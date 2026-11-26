@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RunningServer } from '../../server.js';
 import { bootServer, keyFor, mcpClient, resetPg } from '../fakes/server.js';
@@ -48,7 +49,7 @@ describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('tool-mode da
   it('read-only environment: denied_read_only with an error_id that explain_error resolves', async () => {
     // prod has writes enabled with confirm; make an environment read-only via the db and invalidate
     const svc = s.services;
-    const srv = (await svc.servers.bySlug(svc.tenantId, 'petstore'))!;
+    const srv = (await svc.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!;
     const dev = (await svc.servers.environments(srv.id)).find((e) => e.slug === 'dev')!;
     await svc.dbs.main.db.updateTable('environments').set({ writes: JSON.stringify({ enabled: false, tools: null, confirm: 'none' }) }).where('id', '=', dev.id).execute();
     svc.runtime.invalidate();

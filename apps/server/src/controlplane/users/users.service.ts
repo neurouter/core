@@ -18,7 +18,15 @@ export class UsersService {
     private readonly clock: Clock,
     private readonly audit: AuditRecorder,
     private readonly config: Config,
+    /** The tenant new users join until memberships exist (P1): the deployment's default tenant. */
+    private readonly homeTenant: () => Promise<string | null>,
   ) {}
+
+  private async home(): Promise<string> {
+    const t = await this.homeTenant();
+    if (!t) throw new Error('this deployment has no default tenant for new users');
+    return t;
+  }
 
   bootstrapEmail(): string {
     return (this.config.env.BOOTSTRAP_ADMIN_EMAIL ?? LOCAL_ADMIN_EMAIL).toLowerCase();
@@ -34,7 +42,7 @@ export class UsersService {
     }
     const now = this.clock.now();
     const id = newId();
-    await this.db.insertInto('users').values({ id, email, name: email === LOCAL_ADMIN_EMAIL ? 'Local admin' : email.split('@')[0]!, role: 'admin', role_source: 'bootstrap', created_at: now, updated_at: now }).execute();
+    await this.db.insertInto('users').values({ id, tenant_id: await this.home(), email, name: email === LOCAL_ADMIN_EMAIL ? 'Local admin' : email.split('@')[0]!, role: 'admin', role_source: 'bootstrap', created_at: now, updated_at: now }).execute();
     return (await this.db.selectFrom('users').selectAll().where('id', '=', id).executeTakeFirst())!;
   }
 
@@ -55,22 +63,30 @@ export class UsersService {
       return this.get(existing.id);
     }
     const id = newId();
-    await this.db.insertInto('users').values({ id, email, name: p.name, oidc_issuer: p.issuer, oidc_subject: p.subject, role, role_source: email === this.bootstrapEmail() ? 'bootstrap' : 'oidc', last_login_at: now, created_at: now, updated_at: now }).execute();
+    await this.db.insertInto('users').values({ id, tenant_id: await this.home(), email, name: p.name, oidc_issuer: p.issuer, oidc_subject: p.subject, role, role_source: email === this.bootstrapEmail() ? 'bootstrap' : 'oidc', last_login_at: now, created_at: now, updated_at: now }).execute();
     return this.get(id);
   }
 
-  async list(): Promise<UserRowDb[]> {
-    return this.db.selectFrom('users').selectAll().orderBy('email').execute();
+  /** Users of one tenant (spec §4.9 G7: never every tenant's users). */
+  async list(tenantId: string): Promise<UserRowDb[]> {
+    return this.db.selectFrom('users').selectAll().where('tenant_id', '=', tenantId).orderBy('email').execute();
   }
 
-  async update(id: string, patch: { role?: Role; status?: 'active' | 'disabled' }, by: string | null): Promise<UserRowDb> {
-    const u = await this.get(id);
+  /** A user of `tenantId` (another tenant's user id reads as not found). */
+  async getIn(tenantId: string, id: string): Promise<UserRowDb> {
+    const u = await this.db.selectFrom('users').selectAll().where('id', '=', id).where('tenant_id', '=', tenantId).executeTakeFirst();
+    if (!u) throw AppError.notFound('User');
+    return u;
+  }
+
+  async update(tenantId: string, id: string, patch: { role?: Role; status?: 'active' | 'disabled' }, by: string | null): Promise<UserRowDb> {
+    const u = await this.getIn(tenantId, id);
     if ((patch.role === 'viewer' || patch.status === 'disabled') && u.role === 'admin') {
-      const admins = await this.db.selectFrom('users').select((eb) => eb.fn.countAll<number>().as('n')).where('role', '=', 'admin').where('status', '=', 'active').executeTakeFirst();
+      const admins = await this.db.selectFrom('users').select((eb) => eb.fn.countAll<number>().as('n')).where('tenant_id', '=', tenantId).where('role', '=', 'admin').where('status', '=', 'active').executeTakeFirst();
       if (Number(admins?.n ?? 0) <= 1) throw AppError.conflict('Cannot remove the last admin');
     }
-    await this.db.updateTable('users').set({ ...(patch.role ? { role: patch.role, role_source: 'local' as const } : {}), ...(patch.status ? { status: patch.status } : {}), updated_at: this.clock.now() }).where('id', '=', id).execute();
-    this.audit.admin({ actorUserId: by, action: 'user.update', targetType: 'user', targetId: id, before: { role: u.role, status: u.status }, after: patch });
+    await this.db.updateTable('users').set({ ...(patch.role ? { role: patch.role, role_source: 'local' as const } : {}), ...(patch.status ? { status: patch.status } : {}), updated_at: this.clock.now() }).where('id', '=', id).where('tenant_id', '=', tenantId).execute();
+    this.audit.admin({ tenantId, actorUserId: by, action: 'user.update', targetType: 'user', targetId: id, before: { role: u.role, status: u.status }, after: patch });
     return this.get(id);
   }
 }

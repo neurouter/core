@@ -1,13 +1,15 @@
+import type { TenantResolver } from '../../kernel/tenancy/types.js';
 import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createMcpHandler, inputRequired, inputResponse, ProtocolError, Server, type McpHttpHandler, type McpRequestContext, type ServerContext, type ServerEventBus } from '@modelcontextprotocol/server';
-import { DEFAULT_TENANT_ID, HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_TASK_ID } from '@neurouter/shared';
+import { HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_TASK_ID } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { Keyring } from '../../kernel/secrets/keyring.js';
 import type { RuntimeBundle, RuntimeConfigSource } from '../../kernel/runtime-config.js';
 import type { McpAuthenticator } from '../auth/authenticate.js';
-import { RC_KEY, traceIdOf, type ClientInfo, type Principal, type RunContext } from '../pipeline/context.js';
+import type { MockNamespaceBinder } from '../mock/namespace.js';
+import { originOf, RC_KEY, traceIdOf, type ClientInfo, type Principal, type RunContext, type TrafficOrigin } from '../pipeline/context.js';
 import type { Confirmer, ConfirmOutcome, Pipeline } from '../pipeline/pipeline.js';
 import type { TaskTracker } from '../tasks/tracker.js';
 import { startCallTrace } from '../../kernel/observability/tracing.js';
@@ -46,6 +48,12 @@ export interface McpRouteDeps {
   onAuthFailure?: (reason: string, method: 'api_key' | 'oauth' | 'external') => void;
   inflight?: InflightCalls;
   legacyClients?: LegacyClientInfo;
+  /** Request → tenant (spec §3.2). */
+  tenancy: Pick<TenantResolver, 'forMcp'>;
+  /** `NEUROUTER_MAINTENANCE`: 503 on every MCP request. */
+  maintenance?: () => boolean;
+  /** Accepts the eval mock-state header only when bound to this tenant/environment/run (G13). */
+  mockNamespaces: MockNamespaceBinder;
 }
 
 /** What the HTTP layer hands the SDK factory (per HTTP request). */
@@ -53,6 +61,7 @@ interface RequestCtx {
   bundle: RuntimeBundle;
   principal: Principal;
   credentialKey: string;
+  origin: TrafficOrigin;
   ip: string;
   userAgent: string | null;
   traceparent: string | null;
@@ -101,6 +110,7 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
     apiKeyId: p.type === 'api_key' ? p.apiKeyId : null,
     oauthClientId: p.type === 'user' ? p.oauthClientId : null,
     traceId: traceIdOf(tp),
+    origin: rc.origin,
   };
   const task = await d.tracker.resolve(owner, metaTask, { create: createTask });
   return {
@@ -109,11 +119,12 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
     environment: { id: b.environment.id, slug: b.environment.slug, kind: b.environment.kind },
     principal: p,
     credentialKey: rc.credentialKey,
+    origin: rc.origin,
     client,
     bundle: b,
     taskId: task.taskId,
     framing: task.framing,
-    via: p.type === 'api_key' && p.purpose === 'eval' ? 'eval' : 'direct',
+    via: rc.origin === 'eval' ? 'eval' : 'direct',
     mode: 'tool',
     traceparent: tp,
     ip: rc.ip,
@@ -173,6 +184,7 @@ export function buildServerFactory(d: McpRouteDeps) {
       environment: { id: b.environment.id, slug: b.environment.slug, kind: b.environment.kind },
       principal: rc.principal,
       credentialKey: rc.credentialKey,
+      origin: rc.origin,
       client: { name: rc.legacyClient?.name ?? null, version: null, protocolVersion: null, era: mctx.era, caps: null },
       bundle: b,
       taskId: null,
@@ -264,7 +276,11 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
       }
       const challenge = (error?: 'invalid_token' | 'insufficient_scope') => bearerChallenge(d.publicUrl, serverSlug, envSlug, error);
       const authz = header(req, 'authorization');
-      const bundle = await d.runtime.get(DEFAULT_TENANT_ID, serverSlug, envSlug);
+      // maintenance window (spec §11 M3): no MCP traffic while the database is being moved
+      if (d.maintenance?.()) return reply.status(503).header('retry-after', '120').type('application/json').send({ error: 'maintenance', error_description: 'Neurouter is in maintenance; retry shortly' });
+      // the tenant comes from the resolver (legacy 2-segment route: the deployment's default tenant), never a constant (spec §3.2)
+      const tenant = await d.tenancy.forMcp({ tenantSlug: null, serverSlug, envSlug });
+      const bundle = tenant ? await d.runtime.get(tenant.id, serverSlug, envSlug) : null;
       if (!bundle) {
         if (!authz) return reply.status(401).header('www-authenticate', challenge()).type('application/json').send({ error: 'unauthorized', error_description: 'Authentication required' });
         return reply.status(404).type('application/json').send({ error: 'not_found' });
@@ -288,8 +304,9 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
       const rpc = inspectJsonRpc(body);
       if (rpc.initialize) legacyClients.remember(auth.credentialKey, sessionId, rpc.initialize);
       for (const id of rpc.cancels) void inflight.cancel(auth.credentialKey, id).catch(() => {});
-      const isEval = auth.principal.type === 'api_key' && auth.principal.purpose === 'eval';
-      const mockNs = isEval ? header(req, HEADER_MOCK_STATE) : undefined;
+      const origin = originOf(auth.principal);
+      const isEval = origin === 'eval';
+      const mockNs = await d.mockNamespaces.bind(header(req, HEADER_MOCK_STATE), { tenantId: bundle.tenantId, environmentId: bundle.environment.id, principal: auth.principal });
       // any credential may narrow its own surface (console "code mode only" snippets); code still needs
       // code mode to be available (env codeMode, code:run scope, kill switches, executor), see effectiveMode
       const exp = header(req, HEADER_EXPOSURE)?.trim().toLowerCase();
@@ -300,11 +317,12 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
         bundle: effective,
         principal: auth.principal,
         credentialKey: auth.credentialKey,
+        origin,
         ip: req.ip,
         userAgent: ua ? ua.slice(0, 512) : null,
         traceparent: header(req, 'traceparent') ?? null,
         legacyClient: legacyClients.get(auth.credentialKey, sessionId),
-        ...(mockNs && /^eval:[A-Za-z0-9:_-]{1,200}$/.test(mockNs) ? { mockNamespace: mockNs } : {}),
+        ...(mockNs !== 'env' ? { mockNamespace: mockNs } : {}),
         ...(exp === 'tools' || exp === 'code' ? { exposureOverride: exp } : {}),
       };
       const abort = new AbortController();

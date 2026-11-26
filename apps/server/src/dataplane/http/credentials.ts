@@ -1,10 +1,10 @@
 import type { UpstreamAuthDescriptor } from '../../kernel/runtime-config.js';
 
 /** Resolves a secret reference (`env:NAME` | `secret:NAME`) at call time; null when missing. */
-export type SecretResolver = (ref: string, scope: { environmentId: string }) => Promise<string | null>;
+export type SecretResolver = (ref: string, scope: { tenantId: string; environmentId: string }) => Promise<string | null>;
 
 /** Returns the end user's delegated upstream token for an `oauth_passthrough` environment (broker mode). */
-export type UpstreamTokenSource = (environmentId: string, userId: string) => Promise<string | null>;
+export type UpstreamTokenSource = (tenantId: string, environmentId: string, userId: string) => Promise<string | null>;
 
 export type CredentialOutcome =
   | { ok: true; headers: Record<string, string>; query: Record<string, string>; required: boolean }
@@ -12,6 +12,7 @@ export type CredentialOutcome =
   | { ok: false; code: 'upstream_auth_required'; connectUrl: string };
 
 export interface CredentialContext {
+  tenantId: string;
   environmentId: string;
   userId: string | null;
   /** Inbound external-AS bearer and its audiences (forwardInboundToken, §13.4). */
@@ -49,7 +50,7 @@ export class CredentialResolver {
   ) {}
 
   async resolve(auth: UpstreamAuthDescriptor, ctx: CredentialContext): Promise<CredentialOutcome> {
-    const sec = async (ref: string | undefined): Promise<string | null> => (ref ? this.secrets(ref, { environmentId: ctx.environmentId }) : null);
+    const sec = async (ref: string | undefined): Promise<string | null> => (ref ? this.secrets(ref, { tenantId: ctx.tenantId, environmentId: ctx.environmentId }) : null);
     const missing = (ref: string | undefined): CredentialOutcome => ({ ok: false, code: 'credential_missing', ref: ref ?? '(none)' });
     switch (auth.type) {
       case 'none':
@@ -85,7 +86,7 @@ export class CredentialResolver {
           if (auth.upstreamAudience && ctx.inbound.audiences.includes(auth.upstreamAudience)) return { ok: true, headers: { authorization: `Bearer ${ctx.inbound.bearer}` }, query: {}, required: true };
           return { ok: false, code: 'upstream_auth_required', connectUrl: `${ctx.publicUrl}/oauth/upstream/${ctx.environmentId}/connect` };
         }
-        const token = ctx.userId && this.opts.upstreamTokens ? await this.opts.upstreamTokens(ctx.environmentId, ctx.userId) : null;
+        const token = ctx.userId && this.opts.upstreamTokens ? await this.opts.upstreamTokens(ctx.tenantId, ctx.environmentId, ctx.userId) : null;
         if (!token) return { ok: false, code: 'upstream_auth_required', connectUrl: `${ctx.publicUrl}/oauth/upstream/${ctx.environmentId}/connect` };
         return { ok: true, headers: { authorization: `Bearer ${token}` }, query: {}, required: true };
       }
@@ -93,11 +94,11 @@ export class CredentialResolver {
   }
 
   /** Credential presence for environment health / console (`ok | missing | not_required`). */
-  async presence(auth: UpstreamAuthDescriptor, environmentId: string): Promise<'ok' | 'missing' | 'not_required'> {
+  async presence(auth: UpstreamAuthDescriptor, environmentId: string, tenantId: string): Promise<'ok' | 'missing' | 'not_required'> {
     if (auth.type === 'none') return 'not_required';
     if (auth.type === 'oauth_passthrough') return 'ok';
     const ref = auth.type === 'header' ? (auth.header?.secret ?? auth.secret) : auth.type === 'query' ? (auth.query?.secret ?? auth.secret) : auth.type === 'oauth_client_credentials' ? auth.clientSecret : auth.secret;
     if (!ref) return 'missing';
-    return (await this.secrets(ref, { environmentId })) ? 'ok' : 'missing';
+    return (await this.secrets(ref, { tenantId, environmentId })) ? 'ok' : 'missing';
   }
 }

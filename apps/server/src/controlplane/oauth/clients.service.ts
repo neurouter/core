@@ -201,7 +201,8 @@ export class OAuthClientsService {
         updated_at: now,
       })
       .execute();
-    this.audit.auth({ userId: null, action: 'oauth.client.register', decision: 'allowed', reason: `${name} (${clientId}) → ${(body.redirect_uris as string[]).join(' ')}`.slice(0, 500), ip: meta.ip, userAgent: meta.userAgent });
+    // client registration is global (platform event, spec §3.4)
+    this.audit.auth({ tenantId: null, userId: null, action: 'oauth.client.register', decision: 'allowed', reason: `${name} (${clientId}) → ${(body.redirect_uris as string[]).join(' ')}`.slice(0, 500), ip: meta.ip, userAgent: meta.userAgent });
     return {
       client_id: clientId,
       client_id_issued_at: Math.floor(now / 1000),
@@ -246,8 +247,11 @@ export class OAuthClientsService {
     const ids = rows.map((r) => r.id);
     const now = this.clock.now();
     const [users, used, envs] = await Promise.all([
+      // tenant-scope: global-table (platform-level client view, not served to tenants)
       this.db.selectFrom('oauth_consents').select(['client_id', sql<number>`count(distinct user_id)`.as('n')]).where('client_id', 'in', ids).where('revoked_at', 'is', null).groupBy('client_id').execute(),
+      // tenant-scope: global-table (platform-level client view, not served to tenants)
       this.db.selectFrom('oauth_tokens').select(['client_id', sql<number>`max(last_used_at)`.as('last')]).where('client_id', 'in', ids).groupBy('client_id').execute(),
+      // tenant-scope: global-table (platform-level client view, not served to tenants)
       this.db
         .selectFrom('oauth_tokens as t')
         .innerJoin('environments as e', 'e.id', 't.environment_id')
@@ -273,17 +277,18 @@ export class OAuthClientsService {
     }));
   }
 
-  /** Block / unblock. Blocking revokes every live token of the client on all replicas. */
+  /** Platform-level block / unblock (every tenant). Tenant admins block per tenant (`oauth_client_blocks`, G14). */
   async update(id: string, status: 'active' | 'blocked', admin: { id: string }): Promise<OAuthClientRow> {
     const row = await this.byRowId(id);
     if (!row) throw AppError.notFound('OAuth client');
     const now = this.clock.now();
     await this.db.updateTable('oauth_clients').set({ status, updated_at: now }).where('id', '=', id).execute();
     if (status === 'blocked') {
+      // tenant-scope: global-table (platform block revokes the client everywhere)
       await this.db.updateTable('oauth_tokens').set({ revoked_at: now }).where('client_id', '=', id).where('revoked_at', 'is', null).execute();
       await this.coord.publish(AUTH_REVOKED_CHANNEL, { oauthClientId: id });
     }
-    this.audit.admin({ actorUserId: admin.id, action: status === 'blocked' ? 'oauth_client.block' : 'oauth_client.unblock', targetType: 'oauth_client', targetId: id, before: { status: row.status }, after: { status } });
+    this.audit.admin({ tenantId: null, actorUserId: admin.id, action: status === 'blocked' ? 'oauth_client.block' : 'oauth_client.unblock', targetType: 'oauth_client', targetId: id, before: { status: row.status }, after: { status } });
     return (await this.toRows([(await this.byRowId(id))!]))[0]!;
   }
 }

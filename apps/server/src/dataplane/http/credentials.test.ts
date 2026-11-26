@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { ClientCredentialsCache, CredentialResolver, type SecretResolver } from './credentials.js';
 
 const secrets: SecretResolver = async (ref) => ({ 'env:TOKEN': 't0k', 'secret:KEY': 'k3y', 'env:CS': 'cs' })[ref] ?? null;
-const ctx = { environmentId: 'e1', userId: 'u1', publicUrl: 'https://nr.test' };
+const ctx = { tenantId: 't1', environmentId: 'e1', userId: 'u1', publicUrl: 'https://nr.test' };
 
 describe('upstream credentials per environment (§13.5)', () => {
   const r = new CredentialResolver(secrets, {
-    upstreamTokens: async (env, user) => (env === 'e1' && user === 'u1' ? 'delegated' : null),
+    upstreamTokens: async (_t, env, user) => (env === 'e1' && user === 'u1' ? 'delegated' : null),
     clientCredentials: new ClientCredentialsCache(async (_d, secret) => ({ access_token: `cc-${secret}`, expires_in: 3600 })),
   });
 
@@ -36,8 +36,8 @@ describe('upstream credentials per environment (§13.5)', () => {
   });
 
   it('presence: ok / missing / not_required', async () => {
-    expect(await r.presence({ type: 'none' }, 'e1')).toBe('not_required');
-    expect(await r.presence({ type: 'bearer', secret: 'env:TOKEN' }, 'e1')).toBe('ok');
-    expect(await r.presence({ type: 'bearer', secret: 'env:NOPE' }, 'e1')).toBe('missing');
+    expect(await r.presence({ type: 'none' }, 'e1', 't1')).toBe('not_required');
+    expect(await r.presence({ type: 'bearer', secret: 'env:TOKEN' }, 'e1', 't1')).toBe('ok');
+    expect(await r.presence({ type: 'bearer', secret: 'env:NOPE' }, 'e1', 't1')).toBe('missing');
   });
 });

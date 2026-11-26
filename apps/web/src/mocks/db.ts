@@ -768,6 +768,11 @@ export function taskResults(run: RunState): TaskResultRow[] {
         model: c.model, mode: c.mode, passes, attempts, flaky: passes > 0 && passes < attempts,
         failureCause: passes === attempts ? null : t.category === 'impossible' ? ('missing_capability' as const) : i % 3 === 0 ? ('wrong_tool' as const) : ('bad_arguments' as const),
         avgTokens: Math.round(c.avgTokens * (0.7 + r() * 0.6)), avgCalls: Math.round(c.avgCalls * (0.6 + r() * 0.8) * 10) / 10, taskRunIds: [`trun.${run.row.id}.${t.key}.${c.model}.${c.mode}`],
+        // every attempt links to a generated task trace, except an impossible task's tool-less attempts
+        runs: Array.from({ length: attempts }, (_, k) => {
+          const traced = !(t.category === 'impossible' && k === 0 && passes < attempts);
+          return { id: `trun.${run.row.id}.${t.key}.${c.model}.${c.mode}`, attempt: k + 1, passed: k < passes, taskId: traced ? 'task_flag_unpaid' : null, trace: traced ? ('recorded' as const) : ('none' as const) };
+        }),
       };
     }),
   }));

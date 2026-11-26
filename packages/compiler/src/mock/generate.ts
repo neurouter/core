@@ -72,7 +72,8 @@ function stringFor(name: string, schema: JsonSchema, ctx: GenCtx): string {
   if (typeof schema.pattern === 'string' || schema.minLength !== undefined || schema.maxLength !== undefined) {
     const min = Number(schema.minLength ?? 1);
     const max = Math.max(min, Number(schema.maxLength ?? 12));
-    return f.string.alphanumeric({ length: { min, max: Math.min(max, 24) } });
+    // cap long strings at 24 characters, but never below minLength (faker throws when max < min)
+    return f.string.alphanumeric({ length: { min, max: Math.max(min, Math.min(max, 24)) } });
   }
   return f.lorem.word();
 }

@@ -24,20 +24,20 @@ export class JobsService {
   ) {}
 
   /** Creates the job row and starts `fn` in the background. Returns the job id immediately. */
-  async start<T>(kind: JobKind, params: unknown, createdBy: string | null, fn: (progress: (p: number) => Promise<void>) => Promise<T>): Promise<string> {
+  async start<T>(tenantId: string, kind: JobKind, params: unknown, createdBy: string | null, fn: (progress: (p: number) => Promise<void>) => Promise<T>): Promise<string> {
     const id = newId();
-    await this.db.insertInto('jobs').values({ id, kind, status: 'running', params: toJsonColumn(params ?? null), progress: 0, result: null, error: null, created_by: createdBy, created_at: this.clock.now(), finished_at: null }).execute();
+    await this.db.insertInto('jobs').values({ id, tenant_id: tenantId, kind, status: 'running', params: toJsonColumn(params ?? null), progress: 0, result: null, error: null, created_by: createdBy, created_at: this.clock.now(), finished_at: null }).execute();
     const progress = async (p: number) => {
-      await this.db.updateTable('jobs').set({ progress: Math.max(0, Math.min(1, p)) }).where('id', '=', id).execute();
+      await this.db.updateTable('jobs').set({ progress: Math.max(0, Math.min(1, p)) }).where('id', '=', id).where('tenant_id', '=', tenantId).execute();
     };
     const p = (async () => {
       try {
         const result = await fn(progress);
-        await this.db.updateTable('jobs').set({ status: 'ok', progress: 1, result: toJsonColumn(result ?? null), finished_at: this.clock.now() }).where('id', '=', id).execute();
+        await this.db.updateTable('jobs').set({ status: 'ok', progress: 1, result: toJsonColumn(result ?? null), finished_at: this.clock.now() }).where('id', '=', id).where('tenant_id', '=', tenantId).execute();
       } catch (err) {
         this.log.warn({ err, jobId: id, kind }, 'job failed');
         const problem = isAppError(err) ? { code: err.code, status: err.status, title: err.title, detail: err.message, ...(err.extensions ?? {}), ...(err.fieldErrors ? { errors: err.fieldErrors } : {}) } : null;
-        await this.db.updateTable('jobs').set({ status: 'error', error: (err as Error).message.slice(0, 1000), result: problem ? toJsonColumn({ problem }) : null, finished_at: this.clock.now() }).where('id', '=', id).execute().catch(() => {});
+        await this.db.updateTable('jobs').set({ status: 'error', error: (err as Error).message.slice(0, 1000), result: problem ? toJsonColumn({ problem }) : null, finished_at: this.clock.now() }).where('id', '=', id).where('tenant_id', '=', tenantId).execute().catch(() => {});
       }
     })();
     this.running.add(p);
@@ -50,8 +50,9 @@ export class JobsService {
     while (this.running.size) await Promise.all([...this.running]);
   }
 
-  async get(id: string, viewer: ConsoleUser): Promise<Job> {
-    const row = await this.db.selectFrom('jobs').selectAll().where('id', '=', id).executeTakeFirst();
+  /** A job of `tenantId` (spec §4.9 G10: another tenant's job id reads as not found). */
+  async get(tenantId: string, id: string, viewer: ConsoleUser): Promise<Job> {
+    const row = await this.db.selectFrom('jobs').selectAll().where('id', '=', id).where('tenant_id', '=', tenantId).executeTakeFirst();
     if (!row || (row.created_by !== viewer.id && !isAdmin(viewer) && viewer.role !== 'viewer')) throw AppError.notFound('Job');
     return {
       id: row.id,

@@ -42,7 +42,7 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
     oidcProvider,
   );
   const links = new LocalLinkService(s.dbs.main.db, s.clock, s.users, s.audit, config.publicUrl);
-  const views = new Views(s.dbs.main.db, config.publicUrl, s.namedSecrets, s.tenantId);
+  const views = new Views(s.dbs.main.db, config.publicUrl, s.namedSecrets, s.envRefs);
 
   const adminCtx = (bundle: RuntimeBundle, userId: string): RunContext => ({
     tenantId: bundle.tenantId,
@@ -50,6 +50,7 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
     environment: { id: bundle.environment.id, slug: bundle.environment.slug, kind: bundle.environment.kind },
     principal: { type: 'user', userId, oauthTokenId: '', oauthClientId: '', scopes: ['tools:read', 'tools:write', 'code:run'], familyId: `console:${userId}`, name: 'console' },
     credentialKey: `console:${userId}`,
+    origin: 'live',
     client: { name: 'neurouter-console', version: s.version, protocolVersion: null, era: 'modern', caps: null },
     bundle,
     taskId: null,
@@ -60,27 +61,27 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
     userAgent: null,
     requestId: newId(),
   });
-  const bundleOf = async (environmentId: string) => {
-    const b = await s.runtime.getByEnvironmentId(s.tenantId, environmentId);
+  const bundleOf = async (tenantId: string, environmentId: string) => {
+    const b = await s.runtime.getByEnvironmentId(tenantId, environmentId);
     if (!b) throw new Error('environment has no active build');
     return b;
   };
 
   const ports: ConsolePorts = {
-    async searchTools(environmentId, q, format, limit) {
-      const ctx = adminCtx(await bundleOf(environmentId), 'console');
+    async searchTools(tenantId, environmentId, q, format, limit) {
+      const ctx = adminCtx(await bundleOf(tenantId, environmentId), 'console');
       const res = await s.dispatcher.search(ctx, q, limit, format, true);
       return { tools: res.tools as unknown as Array<Record<string, unknown>>, totalVisible: res.totalVisible, mode: res.mode, ...(res.tools.length ? {} : { hint: 'No tool matches. If the user needs something this API cannot do, call neurouter_report_unmet_need.' }) };
     },
-    async agentEntry(tool: ToolDef, environmentId) {
+    async agentEntry(tenantId, tool: ToolDef, environmentId) {
       if (!environmentId) return { name: tool.name, title: tool.title, description: tool.description, inputSchema: tool.inputSchema };
-      const ctx = adminCtx(await bundleOf(environmentId), 'console');
+      const ctx = adminCtx(await bundleOf(tenantId, environmentId), 'console');
       return apiToolEntry(ctx, tool) as unknown as Record<string, unknown>;
     },
-    async testEnvironment(environmentId, toolName, args, userId) {
-      const bundle = await bundleOf(environmentId);
+    async testEnvironment(tenantId, environmentId, toolName, args, userId) {
+      const bundle = await bundleOf(tenantId, environmentId);
       const env = bundle.environment;
-      const credential = await s.credentials.presence(env.auth, env.id);
+      const credential = await s.credentials.presence(env.auth, env.id, tenantId);
       if (!toolName) {
         if (env.isMock) return { ok: true, latencyMs: 0, credential: 'not_required' };
         const t0 = s.clock.now();
@@ -99,11 +100,12 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
       const status = out.error?.code === 'upstream_auth' ? 'rejected' : credential;
       return { ok: out.ok, latencyMs: s.clock.now() - t0, credential: status, ...(out.ok ? { result: out.value } : { detail: out.error?.message ?? out.status }) };
     },
-    resetMock(environmentId, seed) {
-      s.mock.reset(`env:${environmentId}`, seed);
+    async resetMock(tenantId, environmentId, seed) {
+      // the environment's shared namespace, in the store every instance reads (multi-tenancy spec §7.4)
+      await s.mockStore.reset({ tenantId, environmentId, name: 'env' }, seed);
     },
-    async mockSample(environmentId, tool) {
-      const bundle = await bundleOf(environmentId);
+    async mockSample(tenantId, environmentId, tool) {
+      const bundle = await bundleOf(tenantId, environmentId);
       if (!bundle.environment.isMock || tool.risk.write) return null;
       const args = tool.examples[0]?.arguments ?? {};
       const out = await s.pipeline.invoke({ ...adminCtx(bundle, 'console'), mockNamespace: `preview:${environmentId}` }, tool.name, args);
@@ -121,7 +123,10 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
     clock: s.clock,
     dbs: s.dbs,
     coord: s.coord,
-    tenantId: s.tenantId,
+    tenancy: s.tenancy,
+    envRefs: s.envRefs,
+    modelKeys: s.modelKeys,
+    features: s.extensions.features ?? (async () => ({})),
     version: s.version,
     settings: s.settings,
     audit: s.audit,

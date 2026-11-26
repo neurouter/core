@@ -105,14 +105,14 @@ export class ServersService {
     let overlayRevId: string | null = null;
     if (input.overlay) overlayRevId = await this.insertOverlayRevision(input.tenantId, id, input.overlay.yaml, input.overlay.source, input.overlay.message, input.createdBy, null);
     const build = await this.builds.build(id, rev.id, overlayRevId);
-    await this.db.updateTable('servers').set({ current_spec_revision_id: rev.id, published_overlay_revision_id: overlayRevId }).where('id', '=', id).execute();
-    await this.db.updateTable('spec_revisions').set({ title: build.result.title, api_version: build.result.apiVersion, operation_count: build.result.operationCount }).where('id', '=', rev.id).execute();
-    this.audit.admin({ actorUserId: input.createdBy, action: 'server.create', targetType: 'server', targetId: id, serverId: id, after: { slug: input.slug, name: input.name, managedBy: input.managedBy ?? 'console' } });
+    await this.db.updateTable('servers').where('tenant_id', '=', input.tenantId).set({ current_spec_revision_id: rev.id, published_overlay_revision_id: overlayRevId }).where('id', '=', id).execute();
+    await this.db.updateTable('spec_revisions').where('tenant_id', '=', input.tenantId).set({ title: build.result.title, api_version: build.result.apiVersion, operation_count: build.result.operationCount }).where('id', '=', rev.id).execute();
+    this.audit.admin({ tenantId: input.tenantId, actorUserId: input.createdBy, action: 'server.create', targetType: 'server', targetId: id, serverId: id, after: { slug: input.slug, name: input.name, managedBy: input.managedBy ?? 'console' } });
     return { server: await this.get(input.tenantId, id), build };
   }
 
   async ensureMockEnv(tenantId: string, serverId: string): Promise<void> {
-    const has = await this.db.selectFrom('environments').select('id').where('server_id', '=', serverId).where('slug', '=', 'mock').executeTakeFirst();
+    const has = await this.db.selectFrom('environments').where('tenant_id', '=', tenantId).select('id').where('server_id', '=', serverId).where('slug', '=', 'mock').executeTakeFirst();
     if (has) return;
     const now = this.clock.now();
     await this.db
@@ -122,7 +122,7 @@ export class ServersService {
   }
 
   private async insertSpecRevision(tenantId: string, serverId: string, spec: SpecInput, format: SpecFormat, createdBy: string | null, summary: unknown): Promise<{ id: string; rev: number }> {
-    const last = await this.db.selectFrom('spec_revisions').select((eb) => eb.fn.max('rev').as('m')).where('server_id', '=', serverId).executeTakeFirst();
+    const last = await this.db.selectFrom('spec_revisions').where('tenant_id', '=', tenantId).select((eb) => eb.fn.max('rev').as('m')).where('server_id', '=', serverId).executeTakeFirst();
     const rev = Number(last?.m ?? 0) + 1;
     const id = newId();
     await this.db
@@ -133,7 +133,7 @@ export class ServersService {
   }
 
   async insertOverlayRevision(tenantId: string, serverId: string, yaml: string, source: OverlaySource, message: string, createdBy: string | null, basedOnRev: number | null): Promise<string> {
-    const last = await this.db.selectFrom('overlay_revisions').select((eb) => eb.fn.max('rev').as('m')).where('server_id', '=', serverId).executeTakeFirst();
+    const last = await this.db.selectFrom('overlay_revisions').where('tenant_id', '=', tenantId).select((eb) => eb.fn.max('rev').as('m')).where('server_id', '=', serverId).executeTakeFirst();
     const rev = Number(last?.m ?? 0) + 1;
     const id = newId();
     await this.db.insertInto('overlay_revisions').values({ id, tenant_id: tenantId, server_id: serverId, rev, yaml, hash: sha256Hex(yaml), message: message.slice(0, 500), source, based_on_rev: basedOnRev, created_by: createdBy, created_at: this.clock.now() }).execute();
@@ -145,7 +145,7 @@ export class ServersService {
     const s = await this.get(tenantId, serverId);
     const hash = contentHash(spec.bytes);
     if (s.current_spec_revision_id) {
-      const cur = await this.db.selectFrom('spec_revisions').select(['content_hash']).where('id', '=', s.current_spec_revision_id).executeTakeFirst();
+      const cur = await this.db.selectFrom('spec_revisions').where('tenant_id', '=', tenantId).select(['content_hash']).where('id', '=', s.current_spec_revision_id).executeTakeFirst();
       if (cur?.content_hash === hash) return { revisionId: s.current_spec_revision_id, build: null, unchanged: true, summary: { added: [], removed: [], changed: [], orphanedOverlayKeys: [] } };
     }
     const format = detectFormat(spec.bytes, spec.formatHint);
@@ -154,9 +154,9 @@ export class ServersService {
     const build = await this.builds.build(serverId, rev.id, s.published_overlay_revision_id);
     const overlayKeys = await this.overlayKeys(s.published_overlay_revision_id);
     const summary = await this.builds.summaryVs(prevBuild, build.result, overlayKeys);
-    await this.db.updateTable('spec_revisions').set({ summary: toJsonColumn(summary), title: build.result.title, api_version: build.result.apiVersion, operation_count: build.result.operationCount }).where('id', '=', rev.id).execute();
-    if (build.build.status === 'ok') await this.db.updateTable('servers').set({ current_spec_revision_id: rev.id, updated_at: this.clock.now() }).where('id', '=', serverId).execute();
-    this.audit.admin({ actorUserId: createdBy, action: 'spec.reimport', targetType: 'server', targetId: serverId, serverId, after: { rev: rev.rev, build: build.build.id } });
+    await this.db.updateTable('spec_revisions').where('tenant_id', '=', tenantId).set({ summary: toJsonColumn(summary), title: build.result.title, api_version: build.result.apiVersion, operation_count: build.result.operationCount }).where('id', '=', rev.id).execute();
+    if (build.build.status === 'ok') await this.db.updateTable('servers').where('tenant_id', '=', tenantId).set({ current_spec_revision_id: rev.id, updated_at: this.clock.now() }).where('id', '=', serverId).execute();
+    this.audit.admin({ tenantId, actorUserId: createdBy, action: 'spec.reimport', targetType: 'server', targetId: serverId, serverId, after: { rev: rev.rev, build: build.build.id } });
     return { revisionId: rev.id, build, unchanged: false, summary };
   }
 
@@ -177,13 +177,14 @@ export class ServersService {
     if (!result.ok) throw new AppError('build_failed', 'The overlay does not compile', { extensions: { diagnostics: result.diagnostics.filter((d) => d.severity === 'error') } });
     const revisionId = await this.insertOverlayRevision(tenantId, serverId, yaml, opts.source, opts.message, opts.createdBy, opts.basedOnRev);
     const build = await this.builds.build(serverId, s.current_spec_revision_id, revisionId, { overlayYaml: yaml });
-    await this.db.updateTable('servers').set({ published_overlay_revision_id: revisionId, updated_at: this.clock.now() }).where('id', '=', serverId).execute();
+    await this.db.updateTable('servers').where('tenant_id', '=', tenantId).set({ published_overlay_revision_id: revisionId, updated_at: this.clock.now() }).where('id', '=', serverId).execute();
     if (opts.pinTo?.length) for (const envId of opts.pinTo) await this.builds.pin(envId, build.build.id);
     await this.coord.publish(CONFIG_CHANGED, { serverId });
     return { revisionId, build, result };
   }
 
   async environments(serverId: string): Promise<EnvironmentRowDb[]> {
+    // tenant-scope: child-of-scoped (server id from a tenant-scoped guard)
     return this.db.selectFrom('environments').selectAll().where('server_id', '=', serverId).orderBy('created_at').execute();
   }
 

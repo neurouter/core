@@ -15,6 +15,18 @@ export interface ClientInfo {
   caps: Record<string, unknown> | null;
 }
 
+/**
+ * Where the traffic comes from: `eval` for the eval runner's per-attempt keys (`api_keys.purpose = 'eval'`),
+ * `live` for everything else. Derived once at authentication (`originOf`). Eval traffic gets the same
+ * agent-facing behaviour, but never feeds product signals: no inbox rows (unmet needs, issues, need
+ * groups), no ops/task metrics, no `usage_daily`; tasks carry `tasks.origin`.
+ */
+export type TrafficOrigin = 'live' | 'eval';
+
+export function originOf(p: Principal): TrafficOrigin {
+  return p.type === 'api_key' && p.purpose === 'eval' ? 'eval' : 'live';
+}
+
 /** Fixed at authentication; never taken from tool arguments (§9.2). */
 export interface RunContext {
   tenantId: string;
@@ -23,6 +35,8 @@ export interface RunContext {
   principal: Principal;
   /** api_key id | oauth token family id | `ext:${iss}|${sub}` */
   credentialKey: string;
+  /** Fixed at authentication from the principal (`originOf`). */
+  origin: TrafficOrigin;
   client: ClientInfo;
   bundle: RuntimeBundle;
   taskId: string | null;
@@ -41,7 +55,7 @@ export interface RunContext {
   trace?: CallTrace;
   ip: string | null;
   userAgent: string | null;
-  /** Eval-only: mock state namespace (`X-Neurouter-Mock-State`). */
+  /** Mock state namespace name (`MockNs.name`) when not `env`: an accepted eval/gen `X-Neurouter-Mock-State` (G13), or a console preview. */
   mockNamespace?: string;
   /** Exposure override (`X-Neurouter-Exposure: tools|code`), any credential; code falls back to tools when unavailable. */
   exposureOverride?: 'tools' | 'code';
