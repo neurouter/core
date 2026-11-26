@@ -31,7 +31,7 @@ import {
   type SuggestTool,
   type TaskRunResult,
 } from '@neurouter/evals';
-import { HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, HEADER_REFERENCE, PROVIDER_ENV_KEYS, type EvalCategory, type ToolDef } from '@neurouter/shared';
+import { DETERMINISTIC_JUDGE_MODEL, HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, HEADER_REFERENCE, PROVIDER_ENV_KEYS, type EvalCategory, type ToolDef } from '@neurouter/shared';
 import type { ModelKeyPolicy, TenantResolver } from '../../kernel/tenancy/types.js';
 import type { AuditStore } from '../../kernel/audit/store.js';
 import type { EvalRunsTable, EvalSuitesTable, EvalTasksTable, MainDB, SuggestionsTable } from '../../kernel/db/schema.js';
@@ -45,7 +45,7 @@ import type { SettingsService } from '../../kernel/settings/settings.service.js'
 import type { Metrics } from '../../kernel/observability/metrics.js';
 import type { ApiKeysService } from '../keys/api-keys.service.js';
 import type { BuildsService } from '../servers/builds.service.js';
-import { providerKeys } from './model-keys.js';
+import { hasProviderKey, providerKeys } from './model-keys.js';
 import type { ServersService } from '../servers/servers.service.js';
 
 export type EvalRunRowDb = Selectable<EvalRunsTable>;
@@ -159,6 +159,15 @@ export class EvalsService {
    * stored, encrypted keys); stub/fake per env. With `models`, 412 unless each model's provider has
    * a key.
    */
+  /** The judge model: the `judgeModel` setting, else the deterministic Gemini judge when a Gemini key is available, else `fallback`. */
+  async judgeModel(tenantId: string, fallback: string): Promise<string> {
+    const set = await this.d.settings.get('judgeModel', tenantId);
+    if (set) return set;
+    const t = await this.d.tenancy.byId(tenantId);
+    if (t && (await hasProviderKey({ env: this.d.env, settings: this.d.settings, tenantId, allowEnvKeys: this.d.modelKeys.allowEnvKeys(t) }, 'gemini'))) return DETERMINISTIC_JUDGE_MODEL;
+    return fallback;
+  }
+
   async llm(tenantId: string, models?: string[]): Promise<LlmClient> {
     const testLlm = this.d.env.NEUROUTER_EVAL_LLM || this.d.env.NEUROUTER_EVAL_FAKE_LLM;
     const t = await this.d.tenancy.byId(tenantId);
@@ -474,7 +483,7 @@ export class EvalsService {
     // 412 early when a run model's (or the judge's) provider has no key
     const stubLlm = !this.d.env.NEUROUTER_EVAL_FAKE_LLM && this.d.env.NEUROUTER_EVAL_LLM === 'stub';
     const runModels = input.models?.length ? input.models : [await this.model(tenantId)];
-    await this.llm(tenantId, stubLlm ? [] : [...runModels, (await this.d.settings.get('judgeModel', tenantId)) ?? runModels[0]!]);
+    await this.llm(tenantId, stubLlm ? [] : [...runModels, await this.judgeModel(tenantId, runModels[0]!)]);
     let suiteId = input.suiteId ?? null;
     if (!suiteId) {
       const latest = await this.d.db.selectFrom('eval_suites').select(['id', 'task_count']).where('tenant_id', '=', tenantId).where('server_id', '=', input.serverId).orderBy('version', 'desc').executeTakeFirst();
@@ -568,7 +577,7 @@ export class EvalsService {
       const llm = await this.llm(tenantId);
       const effort = await this.d.settings.get('evalEffort', tenantId);
       const fallbacks = await this.d.settings.get('evalFallbacks', tenantId);
-      const judgeModel = (await this.d.settings.get('judgeModel', tenantId)) ?? models[0]!;
+      const judgeModel = await this.judgeModel(tenantId, models[0]!);
       const total = tasks.length * models.length * modes.length * run.repeats;
       const existing = new Set((await db.selectFrom('eval_task_runs').where('tenant_id', '=', tenantId).select(['task_id', 'model', 'mode', 'attempt']).where('run_id', '=', runId).execute()).map((r) => `${r.task_id}|${r.model}|${r.mode}|${r.attempt}`));
       const taskIds = new Map((await this.suiteTasks(tenantId, run.suite_id)).map((t) => [t.key, t.id]));

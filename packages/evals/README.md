@@ -88,6 +88,11 @@ vote is kept (`judgeVotes`) and counted in the judge usage. Judge calls ask for 
 provider takes it (Gemini: temperature 0, fixed seed; OpenAI reasoning models and Anthropic with effort take
 neither).
 
+**Default judge.** When no judge model is set (Settings › Models or `settings.evals.judgeModel`) and a Gemini key
+is available, the judge is `gemini-3.5-flash-lite` (temperature 0, fixed seed), because its verdicts reproduce. On the
+12 disputed ambiguous attempts from the P6 A/B it gave identical verdicts in two runs, where the OpenAI judge
+flipped even with voting. Without a Gemini key the judge is the eval model, with the voting above.
+
 A `called {tool, args}` check also passes on an **equivalent path**: the agent called the tool successfully with
 none of the required values contradicted (it listed everything, or every page, and filtered client-side) and every
 answer check passed on ground-truth values. A call with another value for a required argument never qualifies.

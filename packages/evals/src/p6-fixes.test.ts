@@ -256,9 +256,9 @@ describe('ambiguous tasks: the clarification must address the ambiguity, not ask
     const { check } = await gradeAttempt(t, rec('amb_pkg_org_plus_optional_type'), { llm, judgeModel: 'judge', equivalenceJudge: false });
     expect(check.passed).toBe(false);
     expect(check.judgeVotes?.rubric).toHaveLength(2);
-    expect(promptOf(llm.requests[0]!)).toContain('asking for, or ignoring, information the prompt already gives is not a valid clarification');
+    expect(promptOf(llm.requests[0]!)).toContain('Asking for, or ignoring, information the prompt already gives is not a valid clarification on its own');
     expect(promptOf(llm.requests[0]!)).toContain('must address the ambiguity the rubric names');
-    expect(promptOf(llm.requests[0]!)).toContain('fail such an answer even when it also mentions the real choice');
+    expect(promptOf(llm.requests[0]!)).toContain('passes only if it also clearly asks about');
   });
 
   it('#3 github_ambiguous_org_package_type (tool c2-r2): "Which GitHub organization…? I can look across all supported types" fails', async () => {

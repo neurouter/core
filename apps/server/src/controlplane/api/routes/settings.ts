@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { stringify } from 'yaml';
 import { createLlmClient } from '@neurouter/evals';
-import { api, clampCodeLimits, DEFAULT_CODE_LIMITS, parseSecretRef, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type AuditExport, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
+import { api, clampCodeLimits, DEFAULT_CODE_LIMITS, DETERMINISTIC_JUDGE_MODEL, parseSecretRef, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type AuditExport, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
 import type { CommittedAuditRow } from '../../../kernel/audit/writer.js';
 import { pingDatabase } from '../../../kernel/db/index.js';
 import { toIso, toIsoOrNull } from '../../../kernel/lib/clock.js';
@@ -103,7 +103,7 @@ async function settingsView(c: ApiContext, t: TenantRef): Promise<Settings> {
       anthropicKey: keys.anthropic,
       keys,
       evalModel,
-      judgeModel: (await s.get('judgeModel', tid)) ?? evalModel,
+      judgeModel: (await s.get('judgeModel', tid)) ?? (keys.gemini.configured ? DETERMINISTIC_JUDGE_MODEL : evalModel),
       generatorModel: (await s.get('generatorModel', tid)) ?? evalModel,
       effort: await s.get('evalEffort', tid),
       fallbacks: await s.get('evalFallbacks', tid),

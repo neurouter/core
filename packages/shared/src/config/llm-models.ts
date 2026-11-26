@@ -21,6 +21,14 @@ export const OPENAI_MODELS = ['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6.1
 export const ANTHROPIC_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'] as const;
 export const GEMINI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'] as const;
 
+/**
+ * Default judge when no judge model is set and a Gemini key is available: Gemini accepts temperature 0 and a fixed
+ * seed, so verdicts are reproducible (2026-11-27: 12/12 identical verdicts across two runs on the disputed P6
+ * ambiguous attempts, where the unpinnable OpenAI judge flipped even with best-of-3 voting). Without a Gemini key
+ * the judge falls back to the eval model with borderline voting.
+ */
+export const DETERMINISTIC_JUDGE_MODEL = 'gemini-3.5-flash-lite';
+
 export const PROVIDER_MODELS: Record<LlmProviderKind, readonly string[]> = { openai: OPENAI_MODELS, anthropic: ANTHROPIC_MODELS, gemini: GEMINI_MODELS };
 
 export const PROVIDER_LABELS: Record<LlmProviderKind, string> = { openai: 'OpenAI', anthropic: 'Anthropic', gemini: 'Gemini' };
