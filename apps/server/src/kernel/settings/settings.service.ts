@@ -4,6 +4,7 @@ import type { CoordinationStore } from '../coordination/types.js';
 import type { MainDB } from '../db/schema.js';
 import type { Clock } from '../lib/clock.js';
 import { parseJsonColumn, toJsonColumn } from '../lib/json.js';
+import { INSTANCE_SCOPE_ID } from '../tenancy/index.js';
 
 /** Runtime settings stored in the `settings` table (backend §14.13) with their defaults. */
 export interface SettingValues {
@@ -94,59 +95,115 @@ export const SETTING_DEFAULTS: SettingValues = {
   firstAdminSignedIn: false,
 };
 
+/**
+ * Instance keys (multi-tenancy spec §4.6): stored once under `INSTANCE_SCOPE_ID` and shared by all
+ * tenants. Every other key is a tenant key, stored per tenant. Reading a tenant key needs a tenant id
+ * (enforced by the types of `get`/`set`).
+ */
+export const INSTANCE_SETTING_KEYS = [
+  'installId',
+  'auditFailClosed',
+  'auditFtsEnabled',
+  'metricsToolLabel',
+  'codeLimitsCap',
+  'auditFullOutputMaxBytes',
+  'auditRetentionDays',
+  'metricsRetention',
+  'cimdPolicy',
+  'dcrEnabled',
+  'nativeSearchClients',
+  'firstAdminSignedIn',
+] as const satisfies readonly SettingKey[];
+
+export type InstanceSettingKey = (typeof INSTANCE_SETTING_KEYS)[number];
+export type TenantSettingKey = Exclude<SettingKey, InstanceSettingKey>;
+
+const INSTANCE_KEYS = new Set<string>(INSTANCE_SETTING_KEYS);
+export const isInstanceSettingKey = (k: string): k is InstanceSettingKey => INSTANCE_KEYS.has(k);
+
 export const SETTINGS_CHANNEL = 'settings.changed';
 
-/** Typed access to DB settings with an in-process cache invalidated across replicas. */
+/** Cached scopes (instance + recently used tenants). */
+const CACHE_MAX = 1000;
+
+/**
+ * Typed access to DB settings with a per-scope in-process cache (LRU, 1,000 scopes) invalidated
+ * across replicas on `settings.changed {scope}` (spec §4.6, G5: no process-wide merge of every
+ * tenant's rows).
+ */
 export class SettingsService {
-  private cache: Partial<SettingValues> | null = null;
+  private readonly cache = new Map<string, Partial<SettingValues>>();
 
   constructor(
     private readonly db: Kysely<MainDB>,
     private readonly clock: Clock,
     private readonly coord?: CoordinationStore,
   ) {
-    coord?.subscribe(SETTINGS_CHANNEL, () => {
-      this.cache = null;
+    coord?.subscribe(SETTINGS_CHANNEL, (payload) => {
+      const scope = (payload as { scope?: unknown } | null)?.scope;
+      if (typeof scope === 'string') this.cache.delete(scope);
+      else this.cache.clear();
     });
   }
 
-  private async load(): Promise<Partial<SettingValues>> {
-    if (this.cache) return this.cache;
-    const rows = await this.db.selectFrom('settings').select(['key', 'value']).execute();
+  private async load(scope: string): Promise<Partial<SettingValues>> {
+    const hit = this.cache.get(scope);
+    if (hit) {
+      this.cache.delete(scope);
+      this.cache.set(scope, hit);
+      return hit;
+    }
+    const rows = await this.db.selectFrom('settings').select(['key', 'value']).where('tenant_id', '=', scope).execute();
     const out: Record<string, unknown> = {};
-    for (const r of rows) out[r.key] = parseJsonColumn(r.value);
-    this.cache = out as Partial<SettingValues>;
-    return this.cache;
+    const instance = scope === INSTANCE_SCOPE_ID;
+    // a scope only holds its own kind of keys (stale copies left by the 0008 migration are ignored)
+    for (const r of rows) if (isInstanceSettingKey(r.key) === instance) out[r.key] = parseJsonColumn(r.value);
+    this.cache.set(scope, out as Partial<SettingValues>);
+    while (this.cache.size > CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
+    return out as Partial<SettingValues>;
   }
 
-  async get<K extends SettingKey>(key: K): Promise<SettingValues[K]> {
-    const all = await this.load();
+  private scopeOf(key: SettingKey, tenantId: string | undefined): string {
+    if (isInstanceSettingKey(key)) return INSTANCE_SCOPE_ID;
+    if (!tenantId) throw new Error(`setting ${key} is tenant-scoped; a tenant id is required`);
+    return tenantId;
+  }
+
+  get<K extends InstanceSettingKey>(key: K): Promise<SettingValues[K]>;
+  get<K extends TenantSettingKey>(key: K, tenantId: string): Promise<SettingValues[K]>;
+  async get<K extends SettingKey>(key: K, tenantId?: string): Promise<SettingValues[K]> {
+    const all = await this.load(this.scopeOf(key, tenantId));
     return (key in all ? all[key] : SETTING_DEFAULTS[key]) as SettingValues[K];
   }
 
-  async has(key: SettingKey): Promise<boolean> {
-    return key in (await this.load());
+  has(key: InstanceSettingKey): Promise<boolean>;
+  has(key: TenantSettingKey, tenantId: string): Promise<boolean>;
+  async has(key: SettingKey, tenantId?: string): Promise<boolean> {
+    return key in (await this.load(this.scopeOf(key, tenantId)));
   }
 
-  async set<K extends SettingKey>(key: K, value: SettingValues[K], updatedBy: string | null = null): Promise<void> {
+  set<K extends InstanceSettingKey>(key: K, value: SettingValues[K], updatedBy?: string | null): Promise<void>;
+  set<K extends TenantSettingKey>(key: K, value: SettingValues[K], updatedBy: string | null, tenantId: string): Promise<void>;
+  async set<K extends SettingKey>(key: K, value: SettingValues[K], updatedBy: string | null = null, tenantId?: string): Promise<void> {
+    const scope = this.scopeOf(key, tenantId);
     const now = this.clock.now();
     await this.db
       .insertInto('settings')
-      .values({ key, value: toJsonColumn(value), updated_by: updatedBy, updated_at: now })
+      .values({ tenant_id: scope, key, value: toJsonColumn(value), updated_by: updatedBy, updated_at: now })
       .onConflict((oc) => oc.columns(['tenant_id', 'key']).doUpdateSet({ value: toJsonColumn(value), updated_by: updatedBy, updated_at: now }))
       .execute();
-    this.cache = null;
-    await this.coord?.publish(SETTINGS_CHANNEL, { key });
+    this.cache.delete(scope);
+    await this.coord?.publish(SETTINGS_CHANNEL, { key, scope });
   }
 
-  /** Writes the value only when the key is absent (first-boot values shared by all replicas); returns the stored value. */
-  async setIfAbsent<K extends SettingKey>(key: K, value: SettingValues[K]): Promise<SettingValues[K]> {
+  /** Writes an instance value only when the key is absent (first-boot values shared by all replicas); returns the stored value. */
+  async setIfAbsent<K extends InstanceSettingKey>(key: K, value: SettingValues[K]): Promise<SettingValues[K]> {
     await this.db
       .insertInto('settings')
-      .values({ key, value: toJsonColumn(value), updated_by: null, updated_at: this.clock.now() })
+      .values({ tenant_id: INSTANCE_SCOPE_ID, key, value: toJsonColumn(value), updated_by: null, updated_at: this.clock.now() })
       .onConflict((oc) => oc.columns(['tenant_id', 'key']).doNothing())
       .execute();
-    this.cache = null;
+    this.cache.delete(INSTANCE_SCOPE_ID);
     return this.get(key);
   }
 }

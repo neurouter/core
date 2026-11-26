@@ -27,7 +27,8 @@ type Q = SelectQueryBuilder<AuditDB, 'audit_log', object>;
 /** Applies every filter. The time range always applies first (partition pruning on PG). */
 export function applyFilters<O>(qb: SelectQueryBuilder<AuditDB, 'audit_log', O>, q: Omit<AuditQuery, 'limit' | 'cursorSeq' | 'order'>, dialect: Dialect, ftsEnabled = true): SelectQueryBuilder<AuditDB, 'audit_log', O> {
   if (!(q.to > q.from)) throw AppError.validation('`to` must be after `from`', [{ path: ['to'], message: 'Must be after from', code: 'invalid_range' }]);
-  let x = qb.where('audit_log.ts', '>=', q.from).where('audit_log.ts', '<', q.to);
+  if (!q.tenantId) throw new Error('audit queries require a tenantId');
+  let x = qb.where('audit_log.tenant_id', '=', q.tenantId).where('audit_log.ts', '>=', q.from).where('audit_log.ts', '<', q.to);
   if (q.serverIds !== undefined) x = q.serverIds.length ? x.where('audit_log.server_id', 'in', [...q.serverIds]) : x.where(sql<SqlBool>`1 = 0`);
   if (q.userId) x = x.where('audit_log.user_id', '=', q.userId);
   if (q.toolId) x = x.where('audit_log.tool_id', '=', q.toolId);

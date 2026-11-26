@@ -383,6 +383,7 @@ export class Pipeline {
         upstream = await this.callMock(ctx, tool, specArgs);
       } else {
         const cred = await this.d.credentials.resolve(env.auth, {
+          tenantId: ctx.tenantId,
           environmentId: env.id,
           userId: principalUserId(ctx.principal),
           inbound: ctx.principal.type === 'external' ? { bearer: ctx.principal.bearer, audiences: ((ctx.principal as unknown as { audiences?: string[] }).audiences ?? []) } : null,

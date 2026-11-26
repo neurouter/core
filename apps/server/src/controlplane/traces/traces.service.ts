@@ -149,7 +149,7 @@ export class TracesService {
       const detail = parseJsonColumn<Record<string, unknown>>(ev?.detail) ?? {};
       error = cat ? { code, title: cat.title, explanation: fillTemplate(cat.explanation, detail) } : { code, title: code, explanation: a.error_message ?? '' };
     } else if (a.error_code) error = { code: a.error_code, title: ERROR_CATALOG[a.error_code as ErrorCode]?.title ?? a.error_code, explanation: a.error_message ?? '' };
-    const storeOutputs = await this.c.settings.get('auditStoreFullOutput');
+    const storeOutputs = await this.c.settings.get('auditStoreFullOutput', a.tenant_id);
     return {
       auditId: a.id,
       ts: toIso(Number(a.ts)),

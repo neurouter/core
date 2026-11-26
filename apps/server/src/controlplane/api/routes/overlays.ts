@@ -6,7 +6,7 @@ import { sha256Hex } from '../../../kernel/lib/crypto.js';
 import { AppError } from '../../../kernel/lib/errors.js';
 import { parseJsonColumn, toJsonColumn } from '../../../kernel/lib/json.js';
 import { clampLimit, decodeCursor, toPage } from '../../../kernel/lib/pagination.js';
-import { requireUser } from '../../auth/guards.js';
+import { requireUser, tenantOf } from '../../auth/guards.js';
 import type { ServerRowDb } from '../../servers/servers.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
@@ -74,7 +74,7 @@ export class OverlayDrafts {
     const pub = await this.published(s);
     const changes = diffOverlays(pub.yaml, yaml);
     const row = { yaml, based_on_rev: basedOnRev, change_count: changes.length, changes: toJsonColumn(changes), updated_by: userId, updated_at: this.c.clock.now() };
-    await this.c.dbs.main.db.insertInto('overlay_drafts').values({ server_id: s.id, tenant_id: this.c.tenantId, ...row }).onConflict((oc) => oc.column('server_id').doUpdateSet(row)).execute();
+    await this.c.dbs.main.db.insertInto('overlay_drafts').values({ server_id: s.id, tenant_id: s.tenant_id, ...row }).onConflict((oc) => oc.column('server_id').doUpdateSet(row)).execute();
   }
 }
 
@@ -100,11 +100,11 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
     return out;
   };
 
-  route(app, 'overlays.getDraft', api.overlays.getDraft, async (req, reply) => withEtag(reply, await serverOr404(c, req.params.id)));
+  route(app, 'overlays.getDraft', api.overlays.getDraft, async (req, reply) => withEtag(reply, await serverOr404(c, req, req.params.id)));
 
   route(app, 'overlays.updateDraft', api.overlays.updateDraft, async (req, reply) => {
     const u = requireUser(req);
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const cur = await drafts.current(s);
     drafts.checkIfMatch(req, drafts.etag(cur.yaml, cur.basedOnRev));
     let yaml: string;
@@ -123,13 +123,13 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
   });
 
   route(app, 'overlays.discardDraft', api.overlays.discardDraft, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     await db.deleteFrom('overlay_drafts').where('server_id', '=', s.id).execute();
   });
 
   route(app, 'overlays.publish', api.overlays.publish, async (req) => {
     const u = requireUser(req);
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     fileOverlayGuard(s);
     const cur = await drafts.current(s);
     drafts.checkIfMatch(req, drafts.etag(cur.yaml, cur.basedOnRev));
@@ -137,13 +137,13 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
       const own = await db.selectFrom('environments').select('id').where('server_id', '=', s.id).where('id', 'in', req.body.pinTo.length ? req.body.pinTo : ['-']).execute();
       if (own.length !== req.body.pinTo.length) throw AppError.validation('pinTo contains environments of another server', [{ path: ['pinTo'], message: 'unknown environment', code: 'environment_mismatch' }]);
     }
-    const out = await c.servers.publishOverlay(c.tenantId, s.id, cur.yaml, { message: req.body.message, source: 'console', createdBy: u.id, basedOnRev: cur.basedOnRev, ...(req.body.pinTo ? { pinTo: req.body.pinTo } : {}) });
+    const out = await c.servers.publishOverlay(tenantOf(req), s.id, cur.yaml, { message: req.body.message, source: 'console', createdBy: u.id, basedOnRev: cur.basedOnRev, ...(req.body.pinTo ? { pinTo: req.body.pinTo } : {}) });
     await db.deleteFrom('overlay_drafts').where('server_id', '=', s.id).execute();
     return publishResult(c, out.revisionId, out.build.build.id, req.body.pinTo);
   });
 
   route(app, 'overlays.versions', api.overlays.versions, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
     let qb = db.selectFrom('overlay_revisions').selectAll().where('server_id', '=', s.id);
@@ -154,7 +154,7 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
   });
 
   route(app, 'overlays.getVersion', api.overlays.getVersion, async (req) => {
-    const r = await db.selectFrom('overlay_revisions').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+    const r = await db.selectFrom('overlay_revisions').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!r) throw AppError.notFound('Overlay revision');
     return { ...(await c.views.overlayRow(r)), yaml: r.yaml };
   });
@@ -168,7 +168,7 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
   };
 
   route(app, 'overlays.diff', api.overlays.diff, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const [fromYaml, toYaml] = await Promise.all([yamlAt(s, req.query.from), yamlAt(s, req.query.to)]);
     const [a, b] = await Promise.all([c.builds.compileWith(s.id, fromYaml), c.builds.compileWith(s.id, toYaml)]);
     const before = new Map(a.tools.map((t) => [t.key, t]));
@@ -188,30 +188,30 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
 
   route(app, 'overlays.revert', api.overlays.revert, async (req) => {
     const u = requireUser(req);
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     fileOverlayGuard(s);
     const yaml = await yamlAt(s, req.body.toRev);
     const cur = await drafts.published(s);
-    const out = await c.servers.publishOverlay(c.tenantId, s.id, yaml, { message: req.body.message ?? `Revert to v${req.body.toRev}`, source: 'revert', createdBy: u.id, basedOnRev: cur.rev });
+    const out = await c.servers.publishOverlay(tenantOf(req), s.id, yaml, { message: req.body.message ?? `Revert to v${req.body.toRev}`, source: 'revert', createdBy: u.id, basedOnRev: cur.rev });
     await db.deleteFrom('overlay_drafts').where('server_id', '=', s.id).execute();
     return publishResult(c, out.revisionId, out.build.build.id, undefined);
   });
 
   route(app, 'overlays.download', api.overlays.download, async (req, reply) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const yaml = req.query.rev ? await yamlAt(s, req.query.rev) : (await drafts.published(s)).yaml;
     return reply.header('content-type', 'text/yaml; charset=utf-8').header('content-disposition', `attachment; filename="${s.slug}.overlay.yaml"`).send(yaml);
   });
 
   route(app, 'overlays.validate', api.overlays.validate, async (req) => {
-    await serverOr404(c, req.body.serverId);
+    await serverOr404(c, req, req.body.serverId);
     const v = await drafts.validate(req.body.serverId, req.body.yaml || EMPTY);
     const r = v.result;
     return { ok: v.ok, diagnostics: v.diagnostics, preview: r ? { toolCount: r.tools.length, visibleCount: r.tools.filter((t) => !t.hidden).length, lintScore: r.lint.score } : null };
   });
 
   route(app, 'overlays.preview', api.overlays.preview, async (req) => {
-    const s = await serverOr404(c, req.params.id);
+    const s = await serverOr404(c, req, req.params.id);
     const cur = await drafts.current(s);
     let yaml = cur.yaml;
     const diagnostics: Diagnostic[] = [];
@@ -228,17 +228,17 @@ export async function overlayRoutes(app: FastifyInstance, c: ApiContext): Promis
     const after: ToolDef | undefined = r.tools.find((t) => t.name === req.body.toolName) ?? r.tools.find((t) => baseTools.find((b) => b.name === req.body.toolName)?.key === t.key);
     if (!after) throw AppError.notFound(`Tool ${req.body.toolName}`);
     const before = baseTools.find((t) => t.key === after.key) ?? after;
-    const envId = s.latest_build_id ? await viewEnvironment(c, s.id, s.latest_build_id) : null;
+    const envId = s.latest_build_id ? await viewEnvironment(c, tenantOf(req), s.id, s.latest_build_id) : null;
     let sample: unknown = null;
     let source: 'mock' | 'example' = 'example';
     if (envId) {
-      sample = await c.ports.mockSample(envId, { ...before, shaping: {} } as ToolDef).catch(() => null);
+      sample = await c.ports.mockSample(tenantOf(req), envId, { ...before, shaping: {} } as ToolDef).catch(() => null);
       if (sample !== null) source = 'mock';
     }
     if (sample === null) sample = before.examples[0]?.arguments ?? null;
     const shapedBefore = source === 'mock' ? shapeResponse(sample, before.shaping).value : sample;
     const shapedAfter = source === 'mock' ? shapeResponse(sample, after.shaping).value : sample;
-    const view = await agentView(c, s.slug, s.id, s.latest_build_id ?? '', after);
+    const view = await agentView(c, tenantOf(req), s.slug, s.id, s.latest_build_id ?? '', after);
     return { agentView: view, sample: { before: shapedBefore, after: shapedAfter, source }, tokens: { definition: tokens(view.mcp), sampleBefore: tokens(shapedBefore), sampleAfter: tokens(shapedAfter), estimated: true as const }, diagnostics };
   });
   void parseJsonColumn;

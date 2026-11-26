@@ -16,10 +16,26 @@ export function denyCidrs(config: Pick<Config, 'env'>): string[] {
   return [...new Set([...METADATA_DENY_CIDRS, ...own])];
 }
 
+/**
+ * Hosts upstreams may never target (spec §9.1): `NEUROUTER_DENY_HOSTS`, default the gateway's own
+ * origin (`PUBLIC_URL` host:port, no loops or amplification through the gateway); `none` disables.
+ */
+export function denyHosts(config: Pick<Config, 'env'> & { publicUrl?: string }): string[] {
+  const own = config.env.NEUROUTER_DENY_HOSTS;
+  if (own && own.length) return own.some((h) => h.toLowerCase() === 'none') ? [] : [...own];
+  if (!config.publicUrl) return [];
+  try {
+    const u = new URL(config.publicUrl);
+    return [`${u.hostname}:${u.port || (u.protocol === 'https:' ? '443' : '80')}`];
+  } catch {
+    return [];
+  }
+}
+
 /** Policy for calls to an environment's API (private networks per UPSTREAM_ALLOW_PRIVATE_NETWORKS). */
-export function upstreamPolicy(config: Pick<Config, 'env'>, allowHttp = false): NetPolicy {
+export function upstreamPolicy(config: Pick<Config, 'env'> & { publicUrl?: string }, allowHttp = false): NetPolicy {
   const allowPrivate = config.env.UPSTREAM_ALLOW_PRIVATE_NETWORKS;
-  return { allowPrivate, denyCidrs: denyCidrs(config), allowHttp: allowHttp || allowPrivate ? 'always' : config.env.OUTBOUND_ALLOW_HTTP_LOOPBACK ? 'loopback' : 'never' };
+  return { allowPrivate, denyCidrs: denyCidrs(config), allowHttp: allowHttp || allowPrivate ? 'always' : config.env.OUTBOUND_ALLOW_HTTP_LOOPBACK ? 'loopback' : 'never', denyHosts: denyHosts(config) };
 }
 
 /** Policy for other outbound fetches (spec URLs, OIDC, JWKS, webhooks). */

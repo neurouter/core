@@ -7,7 +7,6 @@ import { toJsonColumn } from '../lib/json.js';
 import { genesisPrev, hashRow } from './chain.js';
 import { paramsText, Redactor } from './redact.js';
 import type { AuditEventInput } from './types.js';
-import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 
 /** Max bytes of the redacted output preview kept outside the chain (§17.1, A21). */
 export const OUTPUT_PREVIEW_MAX_BYTES = 8192;
@@ -53,6 +52,8 @@ export interface AuditWriterOptions {
   clock: Clock;
   log: { warn(o: object, m: string): void; error(o: object, m: string): void };
   context: () => Promise<AuditWriteContext>;
+  /** Tenant-scoped settings (spec §4.6) that override the instance context for that tenant's rows. */
+  tenantContext?: (tenantId: string) => Promise<Pick<AuditWriteContext, 'searchParamKeys' | 'storeFullOutput'>>;
   /** Fills derived fields before redaction (e.g. server_id of admin events on tools/grants). */
   enrich?: (events: AuditEventInput[]) => Promise<void>;
   failClosed: () => boolean;
@@ -201,7 +202,7 @@ export class AuditWriter {
       ts: e.ts,
       kind: e.kind,
       request_id: e.requestId ?? null,
-      tenant_id: e.tenantId ?? DEFAULT_TENANT_ID,
+      tenant_id: e.tenantId,
       user_id: e.userId ?? null,
       api_key_id: e.apiKeyId ?? null,
       principal_type: e.principalType ?? null,
@@ -255,7 +256,9 @@ export class AuditWriter {
     const started = performance.now();
     if (this.o.enrich) await this.o.enrich(batch);
     const ctx = await this.o.context();
-    const prepared = batch.map((e) => this.prepare(e, ctx));
+    const perTenant = new Map<string, AuditWriteContext>();
+    if (this.o.tenantContext) for (const t of new Set(batch.map((e) => e.tenantId))) perTenant.set(t, { ...ctx, ...(await this.o.tenantContext(t)) });
+    const prepared = batch.map((e) => this.prepare(e, perTenant.get(e.tenantId) ?? ctx));
     const committed: AuditLogTable[] = [];
     await this.o.db.transaction().execute(async (trx) => {
       if (this.o.dialect === 'postgres') await sql`select pg_advisory_xact_lock(${sql.lit(AUDIT_LOCK_ID.toString())}::bigint)`.execute(trx);

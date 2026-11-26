@@ -107,7 +107,7 @@ export class ServersService {
     const build = await this.builds.build(id, rev.id, overlayRevId);
     await this.db.updateTable('servers').set({ current_spec_revision_id: rev.id, published_overlay_revision_id: overlayRevId }).where('id', '=', id).execute();
     await this.db.updateTable('spec_revisions').set({ title: build.result.title, api_version: build.result.apiVersion, operation_count: build.result.operationCount }).where('id', '=', rev.id).execute();
-    this.audit.admin({ actorUserId: input.createdBy, action: 'server.create', targetType: 'server', targetId: id, serverId: id, after: { slug: input.slug, name: input.name, managedBy: input.managedBy ?? 'console' } });
+    this.audit.admin({ tenantId: input.tenantId, actorUserId: input.createdBy, action: 'server.create', targetType: 'server', targetId: id, serverId: id, after: { slug: input.slug, name: input.name, managedBy: input.managedBy ?? 'console' } });
     return { server: await this.get(input.tenantId, id), build };
   }
 
@@ -156,7 +156,7 @@ export class ServersService {
     const summary = await this.builds.summaryVs(prevBuild, build.result, overlayKeys);
     await this.db.updateTable('spec_revisions').set({ summary: toJsonColumn(summary), title: build.result.title, api_version: build.result.apiVersion, operation_count: build.result.operationCount }).where('id', '=', rev.id).execute();
     if (build.build.status === 'ok') await this.db.updateTable('servers').set({ current_spec_revision_id: rev.id, updated_at: this.clock.now() }).where('id', '=', serverId).execute();
-    this.audit.admin({ actorUserId: createdBy, action: 'spec.reimport', targetType: 'server', targetId: serverId, serverId, after: { rev: rev.rev, build: build.build.id } });
+    this.audit.admin({ tenantId, actorUserId: createdBy, action: 'spec.reimport', targetType: 'server', targetId: serverId, serverId, after: { rev: rev.rev, build: build.build.id } });
     return { revisionId: rev.id, build, unchanged: false, summary };
   }
 

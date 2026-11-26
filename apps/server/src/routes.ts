@@ -43,6 +43,8 @@ export function routePlugins(s: Services, extra: Array<(app: FastifyInstance) =>
         externalIssuer: s.config.externalAs?.issuer ?? null,
         now: () => s.clock.now(),
         onAuthFailure: (reason, method) => s.metrics.authFailure(method, reason),
+        tenancy: s.tenancy,
+        maintenance: () => s.config.env.NEUROUTER_MAINTENANCE,
       });
     },
     async (app) => {
@@ -59,6 +61,8 @@ export function routePlugins(s: Services, extra: Array<(app: FastifyInstance) =>
       });
     },
     consolePlugin(s),
+    // extension routes (spec §1.4) get the core services
+    ...(s.extensions.routes ?? []).map((r) => (app: FastifyInstance) => r(app, s)),
     ...extra,
   ];
 }

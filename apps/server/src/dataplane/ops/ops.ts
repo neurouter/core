@@ -126,7 +126,7 @@ export interface OpsDeps {
   log: { warn: (o: object, m: string) => void };
   /** Optional embedding similarity for need grouping (≥ 0.88 cosine to a group centroid). */
   embed?: (text: string) => Promise<Float32Array | null>;
-  onInboxChanged?: () => void;
+  onInboxChanged?: (tenantId: string) => void;
 }
 
 const cap = (s: unknown, n = TEXT_CAP): string => (typeof s === 'string' ? s : s === undefined || s === null ? '' : JSON.stringify(s)).slice(0, n);
@@ -235,7 +235,7 @@ export class OpsTools {
         const agg = await db.selectFrom('unmet_needs').select([(eb) => eb.fn.countAll<number>().as('n'), (eb) => eb.fn.count<number>('credential_key').distinct().as('p')]).where('group_id', '=', groupId).executeTakeFirst();
         await db.updateTable('need_groups').set({ count: Number(agg?.n ?? 1), distinct_principals: Number(agg?.p ?? 1), last_seen_at: now }).where('id', '=', groupId).execute();
         this.d.metrics?.unmetNeeds.inc({ server: ctx.server.slug });
-        this.d.onInboxChanged?.();
+        this.d.onInboxChanged?.(ctx.tenantId);
         return { recorded: true, group_id: groupId, similar_reports: Math.max(0, Number(agg?.n ?? 1) - 1) };
       }
       case 'report_issue': {
@@ -252,7 +252,7 @@ export class OpsTools {
         const id = newId();
         await db.insertInto('issues').values({ id, tenant_id: ctx.tenantId, server_id: ctx.server.id, environment_id: ctx.environment.id, task_id: ctx.taskId, tool_name: tool, problem, evidence: evidence === null ? null : toJsonColumn(evidence), related_audit_id: related, status: 'open', note: null, created_at: now, updated_at: now }).execute();
         this.d.metrics?.issues.inc({ server: ctx.server.slug });
-        this.d.onInboxChanged?.();
+        this.d.onInboxChanged?.(ctx.tenantId);
         return { recorded: true, issue_id: id };
       }
       case 'explain_error': {

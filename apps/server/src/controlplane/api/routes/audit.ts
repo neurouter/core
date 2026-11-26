@@ -7,7 +7,7 @@ import { fromIso, toIso } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
 import { parseJsonColumn } from '../../../kernel/lib/json.js';
 import { clampLimit, decodeCursor, encodeCursor } from '../../../kernel/lib/pagination.js';
-import { requireUser } from '../../auth/guards.js';
+import { requireUser, tenantOf } from '../../auth/guards.js';
 import { TracesService } from '../../traces/traces.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
@@ -22,9 +22,10 @@ const asObj = (v: unknown): Record<string, unknown> | null => (v === null || v =
 /** `audit.*` (§14.12; ADAPT Hub audit.service.ts). */
 export async function auditRoutes(app: FastifyInstance, c: ApiContext): Promise<void> {
   const tr = new TracesService(c);
-  const toQuery = (f: Filters): Omit<AuditQuery, 'limit' | 'cursorSeq'> => {
+  const toQuery = (tenantId: string, f: Filters): Omit<AuditQuery, 'limit' | 'cursorSeq'> => {
     const { from, to } = range(f, c.clock.now());
     return {
+      tenantId,
       from,
       to,
       ...(f.serverId ? { serverIds: [f.serverId] } : {}),
@@ -75,14 +76,14 @@ export async function auditRoutes(app: FastifyInstance, c: ApiContext): Promise<
     await c.auditStore.flush().catch(() => {});
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
-    const { rows, nextSeq } = await c.auditStore.query({ ...toQuery(req.query), limit, cursorSeq: key ? Number(key[0]) : null });
+    const { rows, nextSeq } = await c.auditStore.query({ ...toQuery(tenantOf(req), req.query), limit, cursorSeq: key ? Number(key[0]) : null });
     return { items: await Promise.all(rows.map(row)), nextCursor: nextSeq === null ? null : encodeCursor([nextSeq]) };
   });
 
   route(app, 'audit.get', api.audit.get, async (req) => {
     await c.auditStore.flush().catch(() => {});
-    const r = await c.auditStore.get(req.params.id);
-    if (!r || r.tenant_id !== c.tenantId) throw AppError.notFound('Audit event');
+    const r = await c.auditStore.get(tenantOf(req), req.params.id);
+    if (!r) throw AppError.notFound('Audit event');
     const changes = parseJsonColumn<{ before?: unknown; after?: unknown }>(r.changes);
     return {
       ...(await row(r)),
@@ -106,10 +107,10 @@ export async function auditRoutes(app: FastifyInstance, c: ApiContext): Promise<
   route(app, 'audit.export', api.audit.export, async (req, reply) => {
     const u = requireUser(req);
     await c.auditStore.flush().catch(() => {});
-    const query = toQuery(req.query);
+    const query = toQuery(tenantOf(req), req.query);
     const total = await c.auditStore.count(query, AUDIT_EXPORT_ROW_CAP);
     const truncated = total > AUDIT_EXPORT_ROW_CAP;
-    c.audit.admin({ actorUserId: u.id, action: 'audit.export', targetType: 'audit', targetId: null, after: { format: req.query.format, rows: Math.min(total, AUDIT_EXPORT_ROW_CAP), truncated } });
+    c.audit.admin({ tenantId: tenantOf(req), actorUserId: u.id, action: 'audit.export', targetType: 'audit', targetId: null, after: { format: req.query.format, rows: Math.min(total, AUDIT_EXPORT_ROW_CAP), truncated } });
     const csv = req.query.format === 'csv';
     const stamp = new Date(c.clock.now()).toISOString().replace(/[:.]/g, '-');
     reply
@@ -130,12 +131,12 @@ export async function auditRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const from = req.body.from ? fromIso(req.body.from) : undefined;
     const to = req.body.to ? fromIso(req.body.to) : undefined;
     if (from !== undefined && to !== undefined && to <= from) throw AppError.validation('`to` must be after `from`', [{ path: ['to'], message: 'Must be after from', code: 'invalid_range' }]);
-    const jobId = await c.jobs.start('audit_verify', { from: req.body.from ?? null, to: req.body.to ?? null }, u.id, async (): Promise<AuditVerifyResult> => {
+    const jobId = await c.jobs.start(tenantOf(req), 'audit_verify', { from: req.body.from ?? null, to: req.body.to ?? null }, u.id, async (): Promise<AuditVerifyResult> => {
       await c.auditStore.flush();
       const rangeSeq = from !== undefined || to !== undefined ? await c.auditStore.seqRange(from, to) : {};
       if (rangeSeq === null) return { ok: true, checked: 0, fromSeq: null, toSeq: null, checkpointsVerified: 0, firstBrokenSeq: null, reason: null };
       const out = await c.auditStore.verify(rangeSeq);
-      c.audit.system('audit.verify', { reason: out.ok ? 'ok' : (out.brokenAt?.reason ?? 'broken') });
+      c.audit.system(tenantOf(req), 'audit.verify', { reason: out.ok ? 'ok' : (out.brokenAt?.reason ?? 'broken') });
       return { ok: out.ok, checked: out.checked, fromSeq: out.firstSeq, toSeq: out.lastSeq, checkpointsVerified: out.checkpointsVerified, firstBrokenSeq: out.brokenAt?.seq ?? null, reason: out.brokenAt?.reason ?? null };
     });
     reply.status(202);

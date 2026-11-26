@@ -1,7 +1,8 @@
+import type { TenantResolver } from '../../kernel/tenancy/types.js';
 import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createMcpHandler, inputRequired, inputResponse, ProtocolError, Server, type McpHttpHandler, type McpRequestContext, type ServerContext, type ServerEventBus } from '@modelcontextprotocol/server';
-import { DEFAULT_TENANT_ID, HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_TASK_ID } from '@neurouter/shared';
+import { HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_TASK_ID } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { Keyring } from '../../kernel/secrets/keyring.js';
@@ -46,6 +47,10 @@ export interface McpRouteDeps {
   onAuthFailure?: (reason: string, method: 'api_key' | 'oauth' | 'external') => void;
   inflight?: InflightCalls;
   legacyClients?: LegacyClientInfo;
+  /** Request → tenant (spec §3.2). */
+  tenancy: Pick<TenantResolver, 'forMcp'>;
+  /** `NEUROUTER_MAINTENANCE`: 503 on every MCP request. */
+  maintenance?: () => boolean;
 }
 
 /** What the HTTP layer hands the SDK factory (per HTTP request). */
@@ -264,7 +269,11 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
       }
       const challenge = (error?: 'invalid_token' | 'insufficient_scope') => bearerChallenge(d.publicUrl, serverSlug, envSlug, error);
       const authz = header(req, 'authorization');
-      const bundle = await d.runtime.get(DEFAULT_TENANT_ID, serverSlug, envSlug);
+      // maintenance window (spec §11 M3): no MCP traffic while the database is being moved
+      if (d.maintenance?.()) return reply.status(503).header('retry-after', '120').type('application/json').send({ error: 'maintenance', error_description: 'Neurouter is in maintenance; retry shortly' });
+      // the tenant comes from the resolver (legacy 2-segment route: the deployment's default tenant), never a constant (spec §3.2)
+      const tenant = await d.tenancy.forMcp({ tenantSlug: null, serverSlug, envSlug });
+      const bundle = tenant ? await d.runtime.get(tenant.id, serverSlug, envSlug) : null;
       if (!bundle) {
         if (!authz) return reply.status(401).header('www-authenticate', challenge()).type('application/json').send({ error: 'unauthorized', error_description: 'Authentication required' });
         return reply.status(404).type('application/json').send({ error: 'not_found' });

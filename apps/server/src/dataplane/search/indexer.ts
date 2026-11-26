@@ -71,13 +71,14 @@ export class SearchIndexer {
   private async pass(opts: { force?: boolean; progress?: (p: number) => Promise<void> }): Promise<IndexRunResult> {
     const { embedder, vectors } = this.d;
     const modelId = embedder.modelId;
-    const tools = await this.d.db.selectFrom('tools').select(['id', 'seq', 'name', 'title', 'description', 'search_text']).where('hidden', '=', 0).orderBy('seq').execute();
+    // tenant-scope: system-job (indexes every tenant's tools; each vector row keeps its tool's tenant_id)
+    const tools = await this.d.db.selectFrom('tools').select(['id', 'tenant_id', 'seq', 'name', 'title', 'description', 'search_text']).where('hidden', '=', 0).orderBy('seq').execute();
     const stored = opts.force ? new Map<string, string>() : await vectors.hashes(modelId);
-    const todo: Array<{ id: string; seq: number; doc: string; hash: string }> = [];
+    const todo: Array<{ id: string; tenantId: string; seq: number; doc: string; hash: string }> = [];
     for (const t of tools) {
       const doc = toolDocument({ exposedName: t.name, title: t.title, description: t.description, inputSchema: null, extra: t.search_text });
       const hash = textHash(doc, modelId);
-      if (stored.get(t.id) !== hash) todo.push({ id: t.id, seq: Number(t.seq), doc, hash });
+      if (stored.get(t.id) !== hash) todo.push({ id: t.id, tenantId: t.tenant_id, seq: Number(t.seq), doc, hash });
     }
     const size = this.d.batchSize ?? EMBED_BATCH_SIZE;
     let embedded = 0;
@@ -87,7 +88,7 @@ export class SearchIndexer {
       try {
         const vecs = await embedder.embedDocuments(batch.map((b) => b.doc));
         await vectors.upsert(
-          batch.map((b, j) => ({ toolId: b.id, toolSeq: b.seq, modelId, textHash: b.hash, vector: vecs[j]! })),
+          batch.map((b, j) => ({ tenantId: b.tenantId, toolId: b.id, toolSeq: b.seq, modelId, textHash: b.hash, vector: vecs[j]! })),
           this.d.clock.now(),
         );
         embedded += batch.length;

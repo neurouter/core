@@ -10,7 +10,8 @@ import { parseJsonColumn } from '../../kernel/lib/json.js';
 import { OAuthError } from './cimd.js';
 import { AUTH_REVOKED_CHANNEL, type ClientRow } from './clients.service.js';
 import { verifyPkceS256 } from './pkce.js';
-import { sameResource } from './resource.js';
+import { sameResource, type ResourceBase } from './resource.js';
+import { isClientBlocked } from '../../kernel/tenancy/client-blocks.js';
 
 export const CODE_TTL_MS = 60_000;
 export const ACCESS_PREFIX = 'nrk_at_';
@@ -56,7 +57,7 @@ export class OAuthTokensService {
     private readonly clock: Clock,
     private readonly coord: CoordinationStore,
     private readonly audit: AuditRecorder,
-    private readonly o: { pepper: string; accessTtlSec: number; refreshTtlDays: number },
+    private readonly o: { pepper: string; accessTtlSec: number; refreshTtlDays: number; resourceBase?: ResourceBase },
   ) {}
 
   private hash(token: string): Buffer {
@@ -86,12 +87,12 @@ export class OAuthTokensService {
     return { access_token: access, token_type: 'Bearer', expires_in: this.o.accessTtlSec, ...(refresh ? { refresh_token: refresh } : {}), scope: input.scopes };
   }
 
-  async revokeFamily(familyId: string, reason: string): Promise<number> {
-    const res = await this.db.updateTable('oauth_tokens').set({ revoked_at: this.clock.now() }).where('family_id', '=', familyId).where('revoked_at', 'is', null).executeTakeFirst();
+  async revokeFamily(familyId: string, tenantId: string, reason: string): Promise<number> {
+    const res = await this.db.updateTable('oauth_tokens').set({ revoked_at: this.clock.now() }).where('family_id', '=', familyId).where('tenant_id', '=', tenantId).where('revoked_at', 'is', null).executeTakeFirst();
     const n = Number(res.numUpdatedRows);
     if (n) {
-      await this.coord.publish(AUTH_REVOKED_CHANNEL, { oauthFamilyId: familyId });
-      this.audit.auth({ userId: null, action: 'oauth.token_family.revoke', reason: `${familyId}: ${reason}` });
+      await this.coord.publish(AUTH_REVOKED_CHANNEL, { oauthFamilyId: familyId, tenantId });
+      this.audit.auth({ tenantId, userId: null, action: 'oauth.token_family.revoke', reason: `${familyId}: ${reason}` });
     }
     return n;
   }
@@ -106,18 +107,19 @@ export class OAuthTokensService {
     const row = await this.db.selectFrom('oauth_codes').selectAll().where('code_hash', '=', codeHash).executeTakeFirst();
     if (!row) throw new OAuthError('invalid_grant', 'Unknown authorization code');
     if (!Number(claimed.numUpdatedRows)) {
-      await this.revokeFamily(familyId, 'authorization code reused');
+      await this.revokeFamily(familyId, row.tenant_id, 'authorization code reused');
       throw new OAuthError('invalid_grant', 'Authorization code already used');
     }
     if (Number(row.expires_at) <= now) throw new OAuthError('invalid_grant', 'Authorization code expired');
     if (row.client_id !== client.id) throw new OAuthError('invalid_grant', 'Authorization code was issued to another client');
+    if (await isClientBlocked(this.db, row.tenant_id, client.id)) throw new OAuthError('invalid_grant', 'This client is blocked in this organization');
     if (!p.redirectUri || p.redirectUri !== row.redirect_uri) throw new OAuthError('invalid_grant', 'redirect_uri does not match the authorization request');
     if (!verifyPkceS256(p.codeVerifier, row.code_challenge)) throw new OAuthError('invalid_grant', 'PKCE verification failed');
     if (!p.resource) throw new OAuthError('invalid_target', 'resource is required (RFC 8707)');
-    if (!sameResource(p.resource, row.resource)) throw new OAuthError('invalid_target', 'resource does not match the authorization request');
+    if (!sameResource(p.resource, row.resource, this.o.resourceBase)) throw new OAuthError('invalid_target', 'resource does not match the authorization request');
     const grants = parseJsonColumn<string[]>(client.grant_types) ?? ['authorization_code'];
     const out = await this.mint({ tenantId: row.tenant_id, clientRowId: client.id, userId: row.user_id, serverId: row.server_id, environmentId: row.environment_id, scopes: row.scopes, resource: row.resource, familyId, parentId: null, withRefresh: grants.includes('refresh_token') });
-    this.audit.auth({ userId: row.user_id, action: 'oauth.token.issue', reason: `client ${client.client_id} → ${row.resource}` });
+    this.audit.auth({ tenantId: row.tenant_id, userId: row.user_id, action: 'oauth.token.issue', reason: `client ${client.client_id} → ${row.resource}` });
     return out;
   }
 
@@ -128,13 +130,14 @@ export class OAuthTokensService {
     const t = await this.db.selectFrom('oauth_tokens').selectAll().where('token_hash', '=', this.hash(p.refreshToken)).where('kind', '=', 'refresh').executeTakeFirst();
     if (!t) throw new OAuthError('invalid_grant', 'Unknown refresh token');
     if (t.client_id !== client.id) throw new OAuthError('invalid_grant', 'Refresh token was issued to another client');
+    if (await isClientBlocked(this.db, t.tenant_id, client.id)) throw new OAuthError('invalid_grant', 'This client is blocked in this organization');
     if (t.revoked_at !== null) {
       const rotated = await this.db.selectFrom('oauth_tokens').select('id').where('parent_id', '=', t.id).limit(1).executeTakeFirst();
-      if (rotated) await this.revokeFamily(t.family_id, 'rotated refresh token reused');
+      if (rotated) await this.revokeFamily(t.family_id, t.tenant_id, 'rotated refresh token reused');
       throw new OAuthError('invalid_grant', 'Refresh token is no longer valid');
     }
     if (Number(t.expires_at) <= now) throw new OAuthError('invalid_grant', 'Refresh token expired');
-    if (p.resource && !sameResource(p.resource, t.resource)) throw new OAuthError('invalid_target', 'A refresh token cannot be used for another environment');
+    if (p.resource && !sameResource(p.resource, t.resource, this.o.resourceBase)) throw new OAuthError('invalid_target', 'A refresh token cannot be used for another environment');
     if (p.scope) {
       const asked = p.scope.split(/\s+/).filter(Boolean);
       const had = t.scopes.split(/\s+/);
@@ -143,12 +146,12 @@ export class OAuthTokensService {
     const consent = await this.db.selectFrom('oauth_consents').select('id').where('user_id', '=', t.user_id).where('client_id', '=', t.client_id).where('environment_id', '=', t.environment_id).where('revoked_at', 'is', null).executeTakeFirst();
     const user = await this.db.selectFrom('users').select('status').where('id', '=', t.user_id).executeTakeFirst();
     if (!consent || user?.status !== 'active') {
-      await this.revokeFamily(t.family_id, 'consent or user no longer active');
+      await this.revokeFamily(t.family_id, t.tenant_id, 'consent or user no longer active');
       throw new OAuthError('invalid_grant', 'The authorization was revoked');
     }
     const res = await this.db.updateTable('oauth_tokens').set({ revoked_at: now, last_used_at: now }).where('id', '=', t.id).where('revoked_at', 'is', null).executeTakeFirst();
     if (!Number(res.numUpdatedRows)) {
-      await this.revokeFamily(t.family_id, 'concurrent refresh token reuse');
+      await this.revokeFamily(t.family_id, t.tenant_id, 'concurrent refresh token reuse');
       throw new OAuthError('invalid_grant', 'Refresh token is no longer valid');
     }
     const scopes = p.scope ? [...new Set(['mcp:tools', ...p.scope.split(/\s+/).filter(Boolean)])].join(' ') : t.scopes;
@@ -161,7 +164,7 @@ export class OAuthTokensService {
     const t = await this.db.selectFrom('oauth_tokens').selectAll().where('token_hash', '=', this.hash(token)).executeTakeFirst();
     if (!t || t.client_id !== client.id) return;
     if (t.kind === 'refresh') {
-      await this.revokeFamily(t.family_id, 'revoked by client');
+      await this.revokeFamily(t.family_id, t.tenant_id, 'revoked by client');
       return;
     }
     await this.db.updateTable('oauth_tokens').set({ revoked_at: this.clock.now() }).where('id', '=', t.id).where('revoked_at', 'is', null).execute();
@@ -198,16 +201,16 @@ export class OAuthTokensService {
   }
 
   /** Revokes a consent and every token for (user, client, environment). */
-  async revokeGrant(id: string, by: { id: string } | null): Promise<void> {
-    const c = await this.db.selectFrom('oauth_consents').selectAll().where('id', '=', id).executeTakeFirst();
+  async revokeGrant(tenantId: string, id: string, by: { id: string } | null): Promise<void> {
+    const c = await this.db.selectFrom('oauth_consents').selectAll().where('id', '=', id).where('tenant_id', '=', tenantId).executeTakeFirst();
     if (!c || c.revoked_at !== null) throw AppError.notFound('OAuth grant');
     const now = this.clock.now();
     await this.db.transaction().execute(async (trx) => {
-      await trx.updateTable('oauth_consents').set({ revoked_at: now }).where('id', '=', id).execute();
-      await trx.updateTable('oauth_tokens').set({ revoked_at: now }).where('user_id', '=', c.user_id).where('client_id', '=', c.client_id).where('environment_id', '=', c.environment_id).where('revoked_at', 'is', null).execute();
+      await trx.updateTable('oauth_consents').set({ revoked_at: now }).where('id', '=', id).where('tenant_id', '=', tenantId).execute();
+      await trx.updateTable('oauth_tokens').set({ revoked_at: now }).where('tenant_id', '=', tenantId).where('user_id', '=', c.user_id).where('client_id', '=', c.client_id).where('environment_id', '=', c.environment_id).where('revoked_at', 'is', null).execute();
     });
     await this.coord.publish(AUTH_REVOKED_CHANNEL, { oauthConsentId: id });
-    this.audit.auth({ userId: by?.id ?? null, action: 'oauth.grant.revoke', reason: `consent ${id} client ${c.client_id} environment ${c.environment_id}` });
+    this.audit.auth({ tenantId, userId: by?.id ?? null, action: 'oauth.grant.revoke', reason: `consent ${id} client ${c.client_id} environment ${c.environment_id}` });
   }
 
   /** Housekeeping: expired codes, authorization requests, long-dead tokens. */

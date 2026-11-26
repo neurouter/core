@@ -4,6 +4,8 @@ import type { MainDB } from '../../kernel/db/schema.js';
 import type { Dialect } from '../../kernel/db/url.js';
 
 export interface VectorRow {
+  /** The tool's tenant (stored with the vector; spec §4.7). */
+  tenantId: string;
   toolId: string;
   toolSeq: number;
   modelId: string;
@@ -43,7 +45,7 @@ abstract class BaseVectorIndex implements VectorIndex {
 
   async upsert(rows: readonly VectorRow[], now: number): Promise<void> {
     if (!rows.length) return;
-    const values = rows.map((r) => ({ tool_id: r.toolId, tool_seq: r.toolSeq, model_id: r.modelId, dims: r.vector.length, text_hash: r.textHash, embedding: this.encode(r.vector), updated_at: now }));
+    const values = rows.map((r) => ({ tenant_id: r.tenantId, tool_id: r.toolId, tool_seq: r.toolSeq, model_id: r.modelId, dims: r.vector.length, text_hash: r.textHash, embedding: this.encode(r.vector), updated_at: now }));
     await this.db
       .insertInto('tool_embeddings')
       .values(values)

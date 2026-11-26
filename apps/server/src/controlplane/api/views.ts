@@ -1,3 +1,4 @@
+import type { EnvRefGate } from '../../kernel/secrets/env-refs.js';
 import { gunzipSync } from 'node:zlib';
 import type { Kysely, Selectable } from 'kysely';
 import {
@@ -48,7 +49,8 @@ export class Views {
     private readonly db: Kysely<MainDB>,
     private readonly publicUrl: string,
     private readonly secrets: NamedSecrets,
-    private readonly tenantId: string,
+    /** `env:NAME` presence is revealed only for references the env's tenant may use (G12: no oracle on gateway variables). */
+    private readonly envRefs: Pick<EnvRefGate, 'read'>,
   ) {}
 
   async userRef(id: string | null): Promise<{ id: string; name: string } | null> {
@@ -202,9 +204,9 @@ export class Views {
     const ref = a.type === 'header' ? (a.header?.secret ?? a.secret) : a.type === 'query' ? (a.query?.secret ?? a.secret) : a.type === 'oauth_client_credentials' || a.type === 'oauth_passthrough' ? a.clientSecret : a.secret;
     let state: { hasSecret: boolean; secretUpdatedAt: string | null } = { hasSecret: false, secretUpdatedAt: null };
     if (ref?.startsWith('secret:')) {
-      const m = await this.secrets.meta(this.tenantId, 'environment', e.id, ref.slice(7));
+      const m = await this.secrets.meta(e.tenant_id, 'environment', e.id, ref.slice(7));
       state = { hasSecret: Boolean(m), secretUpdatedAt: m ? toIso(m.updatedAt) : null };
-    } else if (ref?.startsWith('env:')) state = { hasSecret: Boolean(process.env[ref.slice(4)]), secretUpdatedAt: null };
+    } else if (ref?.startsWith('env:')) state = { hasSecret: Boolean(await this.envRefs.read(e.tenant_id, ref.slice(4))), secretUpdatedAt: null };
     const r = (x: string | undefined) => mask(x ?? '', anonymous);
     switch (a.type) {
       case 'none':

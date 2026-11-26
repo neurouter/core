@@ -1,4 +1,5 @@
-import type { FastifyInstance } from 'fastify';
+import { tenantOf } from '../../auth/guards.js';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Selectable } from 'kysely';
 import { api, type NeedGroupRow } from '@neurouter/shared';
 import type { AuditLogTable, IssuesTable, NeedGroupsTable } from '../../../kernel/db/schema.js';
@@ -29,8 +30,8 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const agg = await db.selectFrom('unmet_needs').select([(eb) => eb.fn.countAll<number>().as('n'), (eb) => eb.fn.count<number>('credential_key').distinct().as('p'), (eb) => eb.fn.min('created_at').as('f'), (eb) => eb.fn.max('created_at').as('l')]).where('group_id', '=', groupId).executeTakeFirst();
     await db.updateTable('need_groups').set({ count: Number(agg?.n ?? 0), distinct_principals: Number(agg?.p ?? 0), ...(agg?.f !== null && agg?.f !== undefined ? { first_seen_at: Number(agg.f), last_seen_at: Number(agg.l) } : {}) }).where('id', '=', groupId).execute();
   };
-  const groupOr404 = async (id: string) => {
-    const g = await db.selectFrom('need_groups').selectAll().where('id', '=', id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+  const groupOr404 = async (req: FastifyRequest, id: string) => {
+    const g = await db.selectFrom('need_groups').selectAll().where('id', '=', id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!g) throw AppError.notFound('Need group');
     return g;
   };
@@ -38,8 +39,8 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const r = await tr.refs(i.server_id, i.environment_id);
     return { id: i.id, tool: i.tool_name, problem: i.problem, server: r.server!, environment: r.environment!, taskId: i.task_id, status: i.status, createdAt: toIso(i.created_at), updatedAt: toIso(i.updated_at), hasFailingCall: Boolean(i.related_audit_id) };
   };
-  const issueOr404 = async (id: string) => {
-    const i = await db.selectFrom('issues').selectAll().where('id', '=', id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+  const issueOr404 = async (req: FastifyRequest, id: string) => {
+    const i = await db.selectFrom('issues').selectAll().where('id', '=', id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!i) throw AppError.notFound('Issue');
     return i;
   };
@@ -48,7 +49,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const since = c.clock.now() - 7 * DAY;
     const sid = req.query.serverId;
     const count = async (table: 'need_groups' | 'issues', open: boolean) => {
-      let qb = db.selectFrom(table).select((eb) => eb.fn.countAll<number>().as('n')).where('tenant_id', '=', c.tenantId);
+      let qb = db.selectFrom(table).select((eb) => eb.fn.countAll<number>().as('n')).where('tenant_id', '=', tenantOf(req));
       if (sid) qb = qb.where('server_id', '=', sid);
       qb = open ? qb.where('status', '=', 'open') : table === 'need_groups' ? qb.where('first_seen_at', '>=', since) : qb.where('created_at', '>=', since);
       return Number((await qb.executeTakeFirst())?.n ?? 0);
@@ -59,9 +60,9 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
   route(app, 'inbox.list', api.inbox.list, async (req) => {
     const q = req.query;
     const limit = clampLimit(q.limit);
-    let nq = db.selectFrom('unmet_needs as n').innerJoin('need_groups as g', 'g.id', 'n.group_id').select(['n.id', 'n.intent', 'n.created_at', 'g.status', 'g.id as gid', 'n.attempted']).where('n.tenant_id', '=', c.tenantId);
+    let nq = db.selectFrom('unmet_needs as n').innerJoin('need_groups as g', 'g.id', 'n.group_id').select(['n.id', 'n.intent', 'n.created_at', 'g.status', 'g.id as gid', 'n.attempted']).where('n.tenant_id', '=', tenantOf(req));
     if (q.serverId) nq = nq.where('n.server_id', '=', q.serverId);
-    let iq = db.selectFrom('issues').selectAll().where('tenant_id', '=', c.tenantId);
+    let iq = db.selectFrom('issues').selectAll().where('tenant_id', '=', tenantOf(req));
     if (q.serverId) iq = iq.where('server_id', '=', q.serverId);
     if (q.toolName) iq = iq.where('tool_name', '=', q.toolName);
     const needs = (await nq.orderBy('n.created_at', 'desc').limit(500).execute()).filter((n) => !q.toolName || (parseJsonColumn<string[]>(n.attempted) ?? []).includes(q.toolName));
@@ -82,7 +83,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const limit = clampLimit(q.limit);
     const key = decodeCursor(q.cursor);
     const offset = key ? Number(key[0]) : 0;
-    let qb = db.selectFrom('need_groups').selectAll().where('tenant_id', '=', c.tenantId);
+    let qb = db.selectFrom('need_groups').selectAll().where('tenant_id', '=', tenantOf(req));
     if (q.serverId) qb = qb.where('server_id', '=', q.serverId);
     if (q.status?.length) qb = qb.where('status', 'in', q.status);
     if (q.q) qb = qb.where('label', 'like', `%${q.q}%`);
@@ -93,7 +94,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
   });
 
   route(app, 'inbox.needGroup', api.inbox.needGroup, async (req) => {
-    const g = await groupOr404(req.params.groupId);
+    const g = await groupOr404(req, req.params.groupId);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
     let qb = db.selectFrom('unmet_needs').selectAll().where('group_id', '=', g.id);
@@ -126,29 +127,29 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
   });
 
   route(app, 'inbox.triageNeedGroup', api.inbox.triageNeedGroup, async (req) => {
-    const g = await groupOr404(req.params.groupId);
+    const g = await groupOr404(req, req.params.groupId);
     await db.updateTable('need_groups').set({ ...(req.body.status ? { status: req.body.status } : {}), ...(req.body.note !== undefined ? { note: req.body.note } : {}) }).where('id', '=', g.id).execute();
     inboxChanged();
-    return groupRow(await groupOr404(g.id));
+    return groupRow(await groupOr404(req, g.id));
   });
 
   route(app, 'inbox.mergeNeedGroups', api.inbox.mergeNeedGroups, async (req) => {
-    const from = await groupOr404(req.params.groupId);
-    const into = await groupOr404(req.body.intoGroupId);
+    const from = await groupOr404(req, req.params.groupId);
+    const into = await groupOr404(req, req.body.intoGroupId);
     if (from.id === into.id) throw AppError.validation('Cannot merge a group into itself', [{ path: ['intoGroupId'], message: 'same group', code: 'same_group' }]);
     if (from.server_id !== into.server_id) throw AppError.validation('Groups of different servers cannot be merged', [{ path: ['intoGroupId'], message: 'other server', code: 'server_mismatch' }]);
     await db.updateTable('unmet_needs').set({ group_id: into.id }).where('group_id', '=', from.id).execute();
     await db.deleteFrom('need_groups').where('id', '=', from.id).execute();
     await recount(into.id);
     inboxChanged();
-    return groupRow(await groupOr404(into.id));
+    return groupRow(await groupOr404(req, into.id));
   });
 
   route(app, 'inbox.splitNeed', api.inbox.splitNeed, async (req) => {
-    const n = await db.selectFrom('unmet_needs').selectAll().where('id', '=', req.params.reportId).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+    const n = await db.selectFrom('unmet_needs').selectAll().where('id', '=', req.params.reportId).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!n) throw AppError.notFound('Report');
     const id = newId();
-    await db.insertInto('need_groups').values({ id, tenant_id: c.tenantId, server_id: n.server_id, label: n.intent.slice(0, 200), intent_norm_hash: `split:${sha256Hex(`${n.id}:${id}`)}`, count: 0, distinct_principals: 0, first_seen_at: n.created_at, last_seen_at: n.created_at, status: 'open', note: null, centroid: null }).execute();
+    await db.insertInto('need_groups').values({ id, tenant_id: tenantOf(req), server_id: n.server_id, label: n.intent.slice(0, 200), intent_norm_hash: `split:${sha256Hex(`${n.id}:${id}`)}`, count: 0, distinct_principals: 0, first_seen_at: n.created_at, last_seen_at: n.created_at, status: 'open', note: null, centroid: null }).execute();
     const old = n.group_id;
     await db.updateTable('unmet_needs').set({ group_id: id }).where('id', '=', n.id).execute();
     await recount(id);
@@ -156,14 +157,14 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const left = await db.selectFrom('unmet_needs').select('id').where('group_id', '=', old).limit(1).executeTakeFirst();
     if (!left) await db.deleteFrom('need_groups').where('id', '=', old).execute();
     inboxChanged();
-    return groupRow(await groupOr404(id));
+    return groupRow(await groupOr404(req, id));
   });
 
   route(app, 'inbox.issues', api.inbox.issues, async (req) => {
     const q = req.query;
     const limit = clampLimit(q.limit);
     const key = decodeCursor(q.cursor);
-    let qb = db.selectFrom('issues').selectAll().where('tenant_id', '=', c.tenantId);
+    let qb = db.selectFrom('issues').selectAll().where('tenant_id', '=', tenantOf(req));
     if (q.serverId) qb = qb.where('server_id', '=', q.serverId);
     if (q.status?.length) qb = qb.where('status', 'in', q.status);
     if (q.tool) qb = qb.where('tool_name', '=', q.tool);
@@ -175,12 +176,12 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
   });
 
   route(app, 'inbox.issue', api.inbox.issue, async (req) => {
-    const i = await issueOr404(req.params.id);
+    const i = await issueOr404(req, req.params.id);
     let failing = null;
     let errorId: string | null = null;
     if (i.related_audit_id) {
       await c.auditStore.flush().catch(() => {});
-      const a = (await c.auditStore.get(i.related_audit_id)) as AuditLogTable | null;
+      const a = (await c.auditStore.get(tenantOf(req), i.related_audit_id)) as AuditLogTable | null;
       if (a) {
         failing = await tr.callDetail(a);
         errorId = a.error_id;
@@ -191,14 +192,14 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
   });
 
   route(app, 'inbox.triageIssue', api.inbox.triageIssue, async (req) => {
-    const i = await issueOr404(req.params.id);
+    const i = await issueOr404(req, req.params.id);
     await db.updateTable('issues').set({ ...(req.body.status ? { status: req.body.status } : {}), ...(req.body.note !== undefined ? { note: req.body.note } : {}), updated_at: c.clock.now() }).where('id', '=', i.id).execute();
     inboxChanged();
-    return issueRow(await issueOr404(i.id));
+    return issueRow(await issueOr404(req, i.id));
   });
 
   route(app, 'inbox.exportNeedMarkdown', api.inbox.exportNeedMarkdown, async (req) => {
-    const g = await groupRow(await groupOr404(req.params.groupId));
+    const g = await groupRow(await groupOr404(req, req.params.groupId));
     const reports = await db.selectFrom('unmet_needs').select(['intent', 'created_at', 'attempted']).where('group_id', '=', g.id).orderBy('created_at', 'desc').limit(20).execute();
     const md = [
       `## Unmet need: ${g.label}`,
@@ -215,7 +216,7 @@ export async function inboxRoutes(app: FastifyInstance, c: ApiContext): Promise<
   });
 
   route(app, 'inbox.exportIssueMarkdown', api.inbox.exportIssueMarkdown, async (req) => {
-    const i = await issueOr404(req.params.id);
+    const i = await issueOr404(req, req.params.id);
     const r = await issueRow(i);
     const ev = parseJsonColumn(i.evidence);
     const md = [`## Tool issue: \`${i.tool_name}\``, '', i.problem, '', `- Server: ${r.server.name} · environment: ${r.environment.slug}`, `- Reported: ${r.createdAt} · status: ${i.status}`, ...(i.note ? [`- Note: ${i.note}`] : []), ...(ev ? ['', '```json', JSON.stringify(ev, null, 2), '```'] : [])].join('\n');

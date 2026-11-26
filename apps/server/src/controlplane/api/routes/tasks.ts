@@ -1,4 +1,5 @@
-import type { FastifyInstance } from 'fastify';
+import { tenantOf } from '../../auth/guards.js';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { sql } from 'kysely';
 import { api, DEFAULT_TIME_RANGE_MS, type ScriptRunDetail } from '@neurouter/shared';
 import type { AuditLogTable } from '../../../kernel/db/schema.js';
@@ -27,7 +28,7 @@ export async function taskRoutes(app: FastifyInstance, c: ApiContext): Promise<v
     const { from, to } = range(q, c.clock.now());
     const limit = clampLimit(q.limit);
     const key = decodeCursor(q.cursor);
-    let qb = db.selectFrom('tasks').selectAll().where('tenant_id', '=', c.tenantId).where('started_at', '>=', from).where('started_at', '<', to);
+    let qb = db.selectFrom('tasks').selectAll().where('tenant_id', '=', tenantOf(req)).where('started_at', '>=', from).where('started_at', '<', to);
     if (q.serverId) qb = qb.where('server_id', '=', q.serverId);
     if (q.environmentId) qb = qb.where('environment_id', '=', q.environmentId);
     if (q.status) qb = qb.where('status', '=', q.status);
@@ -57,14 +58,14 @@ export async function taskRoutes(app: FastifyInstance, c: ApiContext): Promise<v
     return { items: await Promise.all(page.items.map((r) => tr.taskRow(r))), nextCursor: page.nextCursor };
   });
 
-  const taskOr404 = async (id: string) => {
-    const t = await db.selectFrom('tasks').selectAll().where('id', '=', id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+  const taskOr404 = async (req: FastifyRequest, id: string) => {
+    const t = await db.selectFrom('tasks').selectAll().where('id', '=', id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!t) throw AppError.notFound('Task');
     return t;
   };
 
   route(app, 'tasks.get', api.tasks.get, async (req) => {
-    const t = await taskOr404(req.params.id);
+    const t = await taskOr404(req, req.params.id);
     const tl = await tr.timeline(t.id);
     const [needs, issues, evalRun] = await Promise.all([
       db.selectFrom('unmet_needs').select(['id', 'group_id', 'intent', 'created_at']).where('task_id', '=', t.id).execute(),
@@ -84,7 +85,7 @@ export async function taskRoutes(app: FastifyInstance, c: ApiContext): Promise<v
   });
 
   route(app, 'tasks.events', api.tasks.events, async (req) => {
-    const t = await taskOr404(req.params.id);
+    const t = await taskOr404(req, req.params.id);
     const tl = await tr.timeline(t.id);
     const limit = clampLimit(req.query.limit);
     const key = decodeCursor(req.query.cursor);
@@ -95,13 +96,13 @@ export async function taskRoutes(app: FastifyInstance, c: ApiContext): Promise<v
 
   route(app, 'calls.get', api.calls.get, async (req) => {
     await c.auditStore.flush().catch(() => {});
-    const a = (await c.auditStore.get(req.params.auditId)) as AuditLogTable | null;
-    if (!a || a.tenant_id !== c.tenantId) throw AppError.notFound('Call');
+    const a = (await c.auditStore.get(tenantOf(req), req.params.auditId)) as AuditLogTable | null;
+    if (!a) throw AppError.notFound('Call');
     return tr.callDetail(a);
   });
 
   route(app, 'scripts.get', api.scripts.get, async (req) => {
-    const r = await db.selectFrom('script_runs').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', c.tenantId).executeTakeFirst();
+    const r = await db.selectFrom('script_runs').selectAll().where('id', '=', req.params.id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!r) throw AppError.notFound('Script run');
     await c.auditStore.flush().catch(() => {});
     const inner = (await c.dbs.audit.db.selectFrom('audit_log').selectAll().where('script_run_id', '=', r.id).where('kind', '=', 'tool_call').orderBy('seq').limit(500).execute()) as AuditLogTable[];

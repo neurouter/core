@@ -2,6 +2,7 @@ import type { Kysely } from 'kysely';
 import type { MainDB } from '../db/schema.js';
 import type { Clock } from '../lib/clock.js';
 import { newId } from '../lib/ids.js';
+import { INSTANCE_SCOPE_ID } from '../tenancy/index.js';
 import type { EnvelopeService } from './envelope.service.js';
 import type { SecretProvider, SecretRef } from './provider.js';
 
@@ -18,7 +19,8 @@ export class BuiltinSecretProvider implements SecretProvider {
     private readonly clock: Clock,
   ) {}
 
-  async put(input: { purpose: string; value: Uint8Array; id?: string }): Promise<SecretRef> {
+  /** `tenantId` owns a new row; an existing row (by id) keeps its tenant. */
+  async put(input: { purpose: string; value: Uint8Array; id?: string; tenantId?: string }): Promise<SecretRef> {
     const now = this.clock.now();
     const existing = input.id ? await this.db.selectFrom('secrets').select(['id', 'version', 'purpose']).where('id', '=', input.id).executeTakeFirst() : undefined;
     const id = existing?.id ?? input.id ?? newId();
@@ -33,7 +35,7 @@ export class BuiltinSecretProvider implements SecretProvider {
     } else {
       await this.db
         .insertInto('secrets')
-        .values({ id, purpose: input.purpose, provider: 'builtin', external_ref: null, dek_id: sealed.dekId, nonce: sealed.nonce, ciphertext: sealed.ciphertext, version, created_at: now, updated_at: now })
+        .values({ id, tenant_id: input.tenantId ?? INSTANCE_SCOPE_ID, purpose: input.purpose, provider: 'builtin', external_ref: null, dek_id: sealed.dekId, nonce: sealed.nonce, ciphertext: sealed.ciphertext, version, created_at: now, updated_at: now })
         .execute();
     }
     return { id };

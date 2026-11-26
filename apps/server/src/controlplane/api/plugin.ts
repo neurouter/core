@@ -24,7 +24,7 @@ const OPTIONAL_MODULES = [{ path: './routes/evals.js', exportName: 'evalsRoutes'
 
 /** Console REST API (§14): session/CSRF/access gate, then every route module. */
 export async function apiPlugin(app: FastifyInstance, c: ApiContext): Promise<void> {
-  installWebAuth(app, { db: c.dbs.main.db, sessions: c.sessions, audit: c.audit, demoReadOnly: c.config.env.NEUROUTER_DEMO_READ_ONLY });
+  installWebAuth(app, { db: c.dbs.main.db, sessions: c.sessions, audit: c.audit, demoReadOnly: c.config.env.NEUROUTER_DEMO_READ_ONLY, tenancy: c.tenancy, maintenance: c.config.env.NEUROUTER_MAINTENANCE });
   for (const m of ROUTE_MODULES) await m(app, c);
   for (const o of OPTIONAL_MODULES) {
     let mod: Record<string, unknown> | null = null;

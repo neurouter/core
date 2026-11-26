@@ -29,7 +29,7 @@ export interface AuditStore {
   /** Flush queued events (shutdown, tests). */
   flush(deadlineMs?: number): Promise<void>;
   query(q: AuditQuery): Promise<{ rows: AuditRow[]; nextSeq: number | null }>;
-  get(id: string): Promise<AuditRow | null>;
+  get(tenantId: string, id: string): Promise<AuditRow | null>;
   export(q: Omit<AuditQuery, 'limit' | 'cursorSeq'>, maxRows: number): AsyncIterable<AuditRow>;
   /** Matching rows, counted up to `cap + 1` (export truncation). */
   count(q: Omit<AuditQuery, 'limit' | 'cursorSeq' | 'order'>, cap: number): Promise<number>;
@@ -43,7 +43,7 @@ export interface AuditStore {
   checkpoint(kind: CheckpointKind): Promise<AuditCheckpoint | null>;
   periodicCheckpoint(): Promise<AuditCheckpoint | null>;
   /** Rows after `seq` in order (sink dispatcher), plus checkpoints in that seq range. */
-  readAfter(seq: number, limit: number): Promise<{ rows: AuditRow[]; checkpoints: AuditCheckpoint[] }>;
+  readAfter(seq: number, limit: number, tenantId?: string): Promise<{ rows: AuditRow[]; checkpoints: AuditCheckpoint[] }>;
   headSeq(): Promise<number>;
   applyRetention(cutoff: number): Promise<RetentionOutcome>;
   /** Postgres: create upcoming daily partitions (no-op on SQLite). */
@@ -59,6 +59,8 @@ export interface SqlAuditStoreOptions {
   log?: { info(o: object, m: string): void; warn(o: object, m: string): void; error(o: object, m: string): void };
   /** Runtime settings for each flush (redaction rules, FTS param keys, full output, session idle, install id). */
   context?: () => Promise<AuditWriteContext>;
+  /** Tenant-scoped audit settings (spec §4.6): search param keys, full output. */
+  tenantContext?: (tenantId: string) => Promise<Pick<AuditWriteContext, 'searchParamKeys' | 'storeFullOutput'>>;
   enrich?: (events: AuditEventInput[]) => Promise<void>;
   /** Setting `auditFailClosed` (default true). Read synchronously; refresh it in `context()`. */
   failClosed?: () => boolean;
@@ -103,6 +105,7 @@ export class SqlAuditStore implements AuditStore {
         this.installId = ctx.installId;
         return ctx;
       },
+      ...(opts.tenantContext ? { tenantContext: opts.tenantContext } : {}),
       ...(opts.enrich ? { enrich: opts.enrich } : {}),
       failClosed: opts.failClosed ?? (() => true),
       ...(opts.onCommitted ? { onCommitted: opts.onCommitted } : {}),
@@ -148,8 +151,8 @@ export class SqlAuditStore implements AuditStore {
     return queryRows(this.db, this.dialect, q, this.fts());
   }
 
-  async get(id: string): Promise<AuditRow | null> {
-    return ((await this.db.selectFrom('audit_log').selectAll().where('id', '=', id).executeTakeFirst()) as AuditRow | undefined) ?? null;
+  async get(tenantId: string, id: string): Promise<AuditRow | null> {
+    return ((await this.db.selectFrom('audit_log').selectAll().where('id', '=', id).where('tenant_id', '=', tenantId).executeTakeFirst()) as AuditRow | undefined) ?? null;
   }
 
   export(q: Omit<AuditQuery, 'limit' | 'cursorSeq'>, maxRows: number): AsyncIterable<AuditRow> {
@@ -195,8 +198,11 @@ export class SqlAuditStore implements AuditStore {
     return maybePeriodicCheckpoint(this.db, this.signer(), this.clock.now());
   }
 
-  async readAfter(seq: number, limit: number): Promise<{ rows: AuditRow[]; checkpoints: AuditCheckpoint[] }> {
-    const rows = (await this.db.selectFrom('audit_log').selectAll().where('seq', '>', seq).orderBy('seq', 'asc').limit(limit).execute()) as AuditRow[];
+  async readAfter(seq: number, limit: number, tenantId?: string): Promise<{ rows: AuditRow[]; checkpoints: AuditCheckpoint[] }> {
+    let qb = this.db.selectFrom('audit_log').selectAll().where('seq', '>', seq);
+    // tenant-scope: system-job (SIEM delivery is per tenant when `tenantId` is given; the chain export without it is instance-level)
+    if (tenantId !== undefined) qb = qb.where('tenant_id', '=', tenantId);
+    const rows = (await qb.orderBy('seq', 'asc').limit(limit).execute()) as AuditRow[];
     if (!rows.length) return { rows, checkpoints: [] };
     const hi = Number(rows[rows.length - 1]!.seq);
     const cps = await this.db.selectFrom('audit_checkpoints').selectAll().where('seq', '>', seq).where('seq', '<=', hi).orderBy('seq', 'asc').execute();
