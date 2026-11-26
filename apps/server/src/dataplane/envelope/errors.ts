@@ -74,25 +74,26 @@ export interface ErrorContext {
 }
 
 let redactor: Redactor | null = null;
-const redact = (s: string): string => {
+/** Built-in redaction (sensitive keys, bearer/JWT/PEM/cloud tokens) over a value, then as text. */
+function redacted(v: unknown): unknown {
   redactor ??= Redactor.builtins();
-  const r = redactor.redact(s).value;
-  return typeof r === 'string' ? r : JSON.stringify(r);
-};
+  return redactor.redact(v).value;
+}
 
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
 /** Upstream body → a short, redacted excerpt: problem `detail`/`message`/`title` when present, else compact JSON. */
 export function upstreamDetail(body: unknown): string {
+  const b = redacted(body);
   let s: string;
-  if (typeof body === 'string') s = body;
-  else if (body && typeof body === 'object') {
-    const o = body as Record<string, unknown>;
+  if (typeof b === 'string') s = b;
+  else if (b && typeof b === 'object') {
+    const o = b as Record<string, unknown>;
     const err = o.error && typeof o.error === 'object' ? (o.error as Record<string, unknown>) : null;
     const pick = [o.detail, o.message, err?.message, o.error_description, typeof o.error === 'string' ? o.error : undefined, o.title].find((x) => typeof x === 'string' && x.trim());
-    s = typeof pick === 'string' ? pick : (JSON.stringify(body) ?? '');
-  } else s = body === null || body === undefined ? '' : String(body);
-  return clip(redact(s.replace(/\s+/g, ' ').trim()), BUDGET.upstreamChars);
+    s = typeof pick === 'string' ? pick : (JSON.stringify(b) ?? '');
+  } else s = b === null || b === undefined ? '' : String(b);
+  return clip(s.replace(/\s+/g, ' ').trim(), BUDGET.upstreamChars);
 }
 
 /** A value as received, kept small (long strings and objects are clipped). */
