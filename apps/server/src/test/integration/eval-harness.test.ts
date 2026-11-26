@@ -43,6 +43,10 @@ describe('eval harness (calibration, redaction, run cap)', () => {
     expect(cal).toMatchObject({ passed: 1, rejected: 1, mockDataVersion: 2 });
     expect(cal.tasks.find((t) => t.key === 'wrong')!.reasons.join(' ')).toContain('not in the reference outcome');
     expect(ev.suiteMeta(await ev.suiteOf(DEFAULT_TENANT_ID, srv.id, suite.id)).calibration?.rejected).toBe(1);
+    // --calibrate-with: one tool-mode model pass over the accepted tasks; disagreements are flagged, never dropped
+    const withModel = await ev.calibrateSuite(DEFAULT_TENANT_ID, srv.id, suite.id, { environmentId: env.id, calibrateWith: 'stub' });
+    expect(withModel).toMatchObject({ model: 'stub', rejected: 1 });
+    expect(withModel.passed + withModel.flagged).toBe(1);
 
     const run = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 1, trigger: 'cli', createdBy: null, wait: true });
     expect(run.status).toBe('succeeded');
