@@ -54,7 +54,23 @@ export class ToolSearchService {
     const [kw, vec] = await Promise.all([this.keyword.search(query, ids, LIST_DEPTH), this.vectorList(query, ids)]);
     const exact = new Set(ids.filter((id) => allowed.get(id)?.toLowerCase() === q || allowed.get(id)?.toLowerCase() === q.replace(/\s+/g, '_')));
     const mode: SearchMode = vec.length ? 'hybrid' : 'keyword';
-    const ranked = fuseRankings({ lists: [kw.map((h) => h.toolId), vec], allowed: new Set(ids), names: new Map(allowed), exact, limit });
+    const fused = fuseRankings({ lists: [kw.map((h) => h.toolId), vec], allowed: new Set(ids), names: new Map(allowed), exact, limit: Math.max(limit * 3, 25) });
+    // name-coverage boost: prefer tools whose name words are all asked for (create an issue → issues_create
+    // before issues_create_comment). Small enough to only reorder near-ties of the fused ranking.
+    const qWords = new Set(stemWords(query));
+    const ranked = fused
+      .map((c) => {
+        const words = stemWords(allowed.get(c.id) ?? '');
+        const covered = words.length ? words.filter((w) => qWords.has(w)).length / words.length : 0;
+        return { ...c, score: c.score + covered * 0.01 };
+      })
+      .sort((a, b) => b.score - a.score || (allowed.get(a.id) ?? '').localeCompare(allowed.get(b.id) ?? ''))
+      .slice(0, limit);
     return { mode, ranked: ranked.map((c) => ({ id: c.id, name: allowed.get(c.id) ?? '', score: Math.round(c.score * 1e6) / 1e6 })) };
   }
+}
+
+/** Lower-cased word stems (`issues_create` → issue, create). */
+export function stemWords(s: string): string[] {
+  return (s.toLowerCase().match(/[a-z0-9]+/g) ?? []).map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w));
 }

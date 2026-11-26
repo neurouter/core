@@ -132,19 +132,14 @@ function makeConfirmer(d: McpRouteDeps, ctx: RunContext, c: ServerContext): Conf
   const caps = ctx.client.caps ?? {};
   const canElicit = Boolean((caps as Record<string, unknown>).elicitation);
   if (!canElicit) return null;
-  const mcpReq = c.mcpReq as unknown as { requestState?: <T>() => T | undefined; inputResponses?: Record<string, unknown>; elicitInput?: ServerContext['mcpReq']['elicitInput'] };
+  const mcpReq = c.mcpReq as unknown as { requestState?: <T>() => T | undefined; inputResponses?: Record<string, unknown> };
   const schema = { type: 'object' as const, properties: { approve: { type: 'boolean' as const, title: 'Approve this change' } }, required: ['approve'] };
   return {
     confirm: async ({ tool, argsHash, message }): Promise<ConfirmOutcome> => {
-      if (ctx.client.era === 'legacy') {
-        if (!mcpReq.elicitInput) return { status: 'unsupported' };
-        try {
-          const r = await mcpReq.elicitInput({ mode: 'form', message, requestedSchema: schema } as never);
-          return r.action === 'accept' && (r.content as Record<string, unknown> | undefined)?.approve === true ? { status: 'approved' } : { status: 'declined' };
-        } catch {
-          return { status: 'unsupported' };
-        }
-      }
+      // Deviation (§9.7 legacy path): a stateless server cannot receive the client's answer to a
+      // server-initiated elicitInput (it arrives as a separate POST with no session), so 2025-era
+      // clients are treated as not elicitation-capable (deny_without_elicitation).
+      if (ctx.client.era === 'legacy') return { status: 'unsupported' };
       const raw = mcpReq.requestState?.<unknown>();
       if (typeof raw === 'string') {
         try {

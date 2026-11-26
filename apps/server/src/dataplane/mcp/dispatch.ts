@@ -3,6 +3,9 @@ import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { RunContext } from '../pipeline/context.js';
 import { errorResult } from '../pipeline/errors.js';
+import type { ArgValidator } from '../pipeline/arg-validate.js';
+import { resolveVisibleTool } from '../pipeline/pipeline.js';
+import { applyArgTransforms } from '../http/request-builder.js';
 import type { Confirmer, McpToolResult, Pipeline } from '../pipeline/pipeline.js';
 import type { ToolSearchService } from '../search/search.service.js';
 import type { ScriptRunner } from '../code/run-script.js';
@@ -17,6 +20,7 @@ export interface DispatchDeps {
   search: ToolSearchService;
   tracker: TaskTracker;
   audit: AuditRecorder;
+  args: ArgValidator;
   now: () => number;
 }
 
@@ -70,17 +74,37 @@ export class Dispatcher {
       if ((META_TOOL_NAMES as readonly string[]).includes(inner)) return { kind: 'result', result: errorResult(`call_tool cannot call ${inner}`, null, 'invalid_args') };
       const op = opFor(ctx, inner);
       if (op) return { kind: 'result', result: await tip((await this.d.ops.call(ctx, op, innerArgs as Record<string, unknown>)).result) };
+      const composite = await this.composite(ctx, inner, innerArgs as Record<string, unknown>, confirmer, signal);
+      if (composite) return composite;
       const out = await this.d.pipeline.invoke({ ...ctx, via: ctx.via === 'eval' ? 'eval' : 'call_tool' }, inner, innerArgs as Record<string, unknown>, { confirmer, ...(signal ? { signal } : {}) });
       if (out.inputRequired) return { kind: 'input_required', result: out.inputRequired };
       return { kind: 'result', result: await tip(out.result) };
     }
     const op = opFor(ctx, name);
     if (op) return { kind: 'result', result: await tip((await this.d.ops.call(ctx, op, args)).result) };
+    const composite = await this.composite(ctx, name, args, confirmer, signal);
+    if (composite) return composite;
     // a tool that is not on the surface is still callable directly when visible (clients may cache lists)
     const out = await this.d.pipeline.invoke(ctx, name, args, { confirmer, ...(signal ? { signal } : {}) });
     if (out.unknown) return { kind: 'unknown', message: `Unknown tool: ${name}` };
     if (out.inputRequired) return { kind: 'input_required', result: out.inputRequired };
     return { kind: 'result', result: await tip(out.result) };
+  }
+
+  /**
+   * Composite tools (§8.4): the overlay script runs through code mode with the composite's arguments
+   * bound as globals; every inner call goes through the pipeline under the caller's policy.
+   */
+  private async composite(ctx: RunContext, name: string, args: Record<string, unknown>, confirmer: Confirmer | null, signal?: AbortSignal): Promise<DispatchResult | null> {
+    const t = resolveVisibleTool(ctx, name);
+    if (!t || t.binding.type !== 'composite') return null;
+    const check = this.d.args.check(t.defHash, t.inputSchema, applyArgTransforms(t, args));
+    if (!check.ok) return { kind: 'result', result: errorResult(`Invalid arguments for ${t.name}:\n- ${check.errors.join('\n- ')}`, null, 'invalid_args') };
+    const inputs = applyArgTransforms(t, args);
+    for (const [k, v] of Object.entries((t.inputSchema.properties ?? {}) as Record<string, { default?: unknown }>)) if (inputs[k] === undefined && v?.default !== undefined) inputs[k] = v.default;
+    const r = await this.d.scripts.run({ ...ctx, mode: 'code' }, { code: t.binding.script, mode: 'execute', inputs }, confirmer, signal, { allowWithoutScope: true });
+    if (r.inputRequired) return { kind: 'input_required', result: r.inputRequired };
+    return { kind: 'result', result: r.result };
   }
 
   /** `search_tools` (§9.4): ACL before ranking (only the principal's visible tools are scored). */

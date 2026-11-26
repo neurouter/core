@@ -255,7 +255,8 @@ export function createServices(input: ServiceInputs) {
     await executorHealth.check();
   };
   const scripts = new ScriptRunner({ db, executor: () => executor, pipeline, ops, tracker, audit, pages, metrics, now, log: logger, healthy: () => executorHealth.healthy });
-  const dispatcher = new Dispatcher({ pipeline, ops, scripts, search, tracker, audit, now });
+  const argValidator = new ArgValidator();
+  const dispatcher = new Dispatcher({ pipeline, ops, scripts, search, tracker, audit, args: argValidator, now });
 
   /* ---------------------------------------------------------------- control plane */
   const builds = new BuildsService(db, dbs.main.dialect, clock, coord, { onBuild: () => indexer?.kick() });

@@ -37,8 +37,8 @@ export async function keyFor(s: RunningServer, server: string, env: string, scop
   return token;
 }
 
-export async function mcpClient(s: RunningServer, server: string, env: string, token: string, opts: { elicitation?: boolean; headers?: Record<string, string>; onElicit?: (msg: string) => { approve: boolean } } = {}): Promise<Client> {
-  const client = new Client({ name: 'test-agent', version: '1.0.0' }, { capabilities: opts.elicitation ? { elicitation: { form: {} } } : {} });
+export async function mcpClient(s: RunningServer, server: string, env: string, token: string, opts: { elicitation?: boolean; headers?: Record<string, string>; onElicit?: (msg: string) => { approve: boolean }; era?: 'legacy' | 'modern' } = {}): Promise<Client> {
+  const client = new Client({ name: 'test-agent', version: '1.0.0' }, { capabilities: opts.elicitation ? { elicitation: { form: {} } } : {}, ...(opts.era === 'modern' ? { versionNegotiation: { mode: { pin: '2026-07-28' } } } : {}) } as never);
   if (opts.elicitation) {
     client.setRequestHandler('elicitation/create', async (req) => {
       const r = opts.onElicit ? opts.onElicit(String((req.params as { message?: string }).message ?? '')) : { approve: true };

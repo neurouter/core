@@ -95,14 +95,14 @@ export class ScriptRunner {
 
   constructor(private readonly d: RunScriptDeps) {}
 
-  async run(ctx: RunContext, args: Record<string, unknown>, confirmer: Confirmer | null, signal?: AbortSignal): Promise<{ result: McpToolResult; inputRequired?: unknown }> {
+  async run(ctx: RunContext, args: Record<string, unknown>, confirmer: Confirmer | null, signal?: AbortSignal, opts: { allowWithoutScope?: boolean } = {}): Promise<{ result: McpToolResult; inputRequired?: unknown }> {
     const code = typeof args.code === 'string' ? args.code : '';
     const mode = args.mode === 'dry_run' ? 'dry_run' : 'execute';
     const inputs = args.inputs && typeof args.inputs === 'object' && !Array.isArray(args.inputs) ? (args.inputs as Record<string, unknown>) : {};
     if (!code) return { result: errorResult('run_script needs `code`', null, 'script_rejected') };
     if (Buffer.byteLength(code, 'utf8') > 16 * 1024) return { result: errorResult('Script larger than 16 KiB', null, 'script_rejected') };
     const executor = this.d.executor();
-    if (!executor || !codeModeAvailable(ctx, this.d.healthy())) return { result: errorResult('Code mode is not available in this environment.', null, 'executor_unavailable') };
+    if (!executor || !(opts.allowWithoutScope ? this.d.healthy() && ctx.bundle.codeModeEnabled && !killSwitchFor(ctx, null, ['code_mode', 'all']) : codeModeAvailable(ctx, this.d.healthy()))) return { result: errorResult('Code mode is not available in this environment.', null, 'executor_unavailable') };
 
     // per-principal concurrency (≤ 2), wait ≤ 5 s
     const key = ctx.credentialKey;
