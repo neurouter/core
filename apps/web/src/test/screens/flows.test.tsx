@@ -195,8 +195,8 @@ describe('settings › models', () => {
     const evalModel = screen.getByLabelText('Eval model') as HTMLSelectElement;
     expect(evalModel.value).toBe('gpt-6-luna');
     expect([...evalModel.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['OpenAI', 'Anthropic', 'Gemini']);
-    await user.selectOptions(evalModel, 'gemini-3-flash-preview');
-    await waitFor(() => expect(db.settings.evalModel).toBe('gemini-3-flash-preview'));
+    await user.selectOptions(evalModel, 'gemini-3.5-flash-lite');
+    await waitFor(() => expect(db.settings.evalModel).toBe('gemini-3.5-flash-lite'));
   });
 
   it('new eval run defaults to the eval model and offers the configured providers’ models', async () => {
@@ -204,6 +204,6 @@ describe('settings › models', () => {
     await renderRoute('/evals?new=1', { db });
     expect(await screen.findByRole('checkbox', { name: 'gpt-6-luna' })).toBeChecked();
     expect(await screen.findByRole('checkbox', { name: 'claude-sonnet-5-5' })).not.toBeChecked();
-    expect(screen.queryByRole('checkbox', { name: 'gemini-3-flash-preview' })).not.toBeInTheDocument(); // no Gemini key in the demo
+    expect(screen.queryByRole('checkbox', { name: 'gemini-3.5-flash-lite' })).not.toBeInTheDocument(); // no Gemini key in the demo
   });
 });

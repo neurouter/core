@@ -31,7 +31,7 @@ export const PEOPLE = {
   priya: { id: 'usr_priya', name: 'Priya Raman', email: 'priya.raman@acme.test', role: 'viewer' as const },
 };
 
-export const MODELS = ['gpt-6-luna', 'claude-sonnet-5-5', 'gemini-3-flash-preview'] as const;
+export const MODELS = ['gpt-6-luna', 'claude-sonnet-5-5', 'gemini-3.5-flash-lite'] as const;
 export const CLIENTS = [
   { name: 'Claude Code', version: '2.4.1' },
   { name: 'Cursor', version: '1.9.0' },
@@ -333,27 +333,27 @@ export type RunSeed = {
 export const RUNS: RunSeed[] = [
   {
     id: 'run_18', number: 18, serverId: 'srv_acme_orders', score: 87, overlayRev: 4, modes: ['tool', 'code'], daysAgo: 0.09, label: 'after fixes', trigger: 'console',
-    matrix: { 'gpt-6-luna': { tool: [0.88, 3.1, 4300], code: [0.94, 1.1, 2900] }, 'claude-sonnet-5-5': { tool: [0.85, 3.3, 4100], code: [0.92, 1.2, 2700] }, 'gemini-3-flash-preview': { tool: [0.74, 3.9, 3900], code: [0.86, 1.4, 2500] } },
+    matrix: { 'gpt-6-luna': { tool: [0.88, 3.1, 4300], code: [0.94, 1.1, 2900] }, 'claude-sonnet-5-5': { tool: [0.85, 3.3, 4100], code: [0.92, 1.2, 2700] }, 'gemini-3.5-flash-lite': { tool: [0.74, 3.9, 3900], code: [0.86, 1.4, 2500] } },
   },
   {
     id: 'run_17', number: 17, serverId: 'srv_acme_orders', score: 79, overlayRev: 3, modes: ['tool', 'code'], daysAgo: 0.6, trigger: 'ci',
-    matrix: { 'gpt-6-luna': { tool: [0.8, 4.2, 6100], code: [0.91, 1.2, 3100] }, 'claude-sonnet-5-5': { tool: [0.78, 4.4, 5900], code: [0.89, 1.3, 2900] }, 'gemini-3-flash-preview': { tool: [0.66, 5.0, 5400], code: [0.8, 1.6, 2800] } },
+    matrix: { 'gpt-6-luna': { tool: [0.8, 4.2, 6100], code: [0.91, 1.2, 3100] }, 'claude-sonnet-5-5': { tool: [0.78, 4.4, 5900], code: [0.89, 1.3, 2900] }, 'gemini-3.5-flash-lite': { tool: [0.66, 5.0, 5400], code: [0.8, 1.6, 2800] } },
   },
   {
     id: 'run_16', number: 16, serverId: 'srv_acme_orders', score: 70, overlayRev: 3, modes: ['tool'], daysAgo: 1.1, trigger: 'console',
-    matrix: { 'gpt-6-luna': { tool: [0.76, 4.8, 6900], code: null }, 'claude-sonnet-5-5': { tool: [0.73, 5.0, 6600], code: null }, 'gemini-3-flash-preview': { tool: [0.6, 5.9, 6100], code: null } },
+    matrix: { 'gpt-6-luna': { tool: [0.76, 4.8, 6900], code: null }, 'claude-sonnet-5-5': { tool: [0.73, 5.0, 6600], code: null }, 'gemini-3.5-flash-lite': { tool: [0.6, 5.9, 6100], code: null } },
   },
   {
     id: 'run_15', number: 15, serverId: 'srv_acme_orders', score: 61, overlayRev: 2, modes: ['tool'], daysAgo: 1.6, trigger: 'cli',
-    matrix: { 'gpt-6-luna': { tool: [0.7, 5.9, 8100], code: null }, 'claude-sonnet-5-5': { tool: [0.67, 6.2, 7800], code: null }, 'gemini-3-flash-preview': { tool: [0.55, 7.1, 7300], code: null } },
+    matrix: { 'gpt-6-luna': { tool: [0.7, 5.9, 8100], code: null }, 'claude-sonnet-5-5': { tool: [0.67, 6.2, 7800], code: null }, 'gemini-3.5-flash-lite': { tool: [0.55, 7.1, 7300], code: null } },
   },
   {
     id: 'run_14', number: 14, serverId: 'srv_acme_orders', score: 52, overlayRev: 1, modes: ['tool', 'code'], daysAgo: 2, label: 'baseline', trigger: 'console',
-    matrix: { 'gpt-6-luna': { tool: [0.64, 6.9, 9800], code: [0.86, 1.3, 3900] }, 'claude-sonnet-5-5': { tool: [0.61, 7.1, 9100], code: [0.84, 1.4, 3500] }, 'gemini-3-flash-preview': { tool: [0.48, 8.0, 8400], code: [0.71, 1.8, 3200] } },
+    matrix: { 'gpt-6-luna': { tool: [0.64, 6.9, 9800], code: [0.86, 1.3, 3900] }, 'claude-sonnet-5-5': { tool: [0.61, 7.1, 9100], code: [0.84, 1.4, 3500] }, 'gemini-3.5-flash-lite': { tool: [0.48, 8.0, 8400], code: [0.71, 1.8, 3200] } },
   },
   {
     id: 'run_6', number: 6, serverId: 'srv_lumen', score: 74, overlayRev: 2, modes: ['tool', 'code'], daysAgo: 3, trigger: 'console',
-    matrix: { 'gpt-6-luna': { tool: [0.8, 3.0, 4100], code: [0.83, 1.2, 2600] }, 'claude-sonnet-5-5': { tool: [0.77, 3.2, 3900], code: [0.8, 1.3, 2500] }, 'gemini-3-flash-preview': { tool: [0.62, 3.9, 3600], code: [0.7, 1.6, 2400] } },
+    matrix: { 'gpt-6-luna': { tool: [0.8, 3.0, 4100], code: [0.83, 1.2, 2600] }, 'claude-sonnet-5-5': { tool: [0.77, 3.2, 3900], code: [0.8, 1.3, 2500] }, 'gemini-3.5-flash-lite': { tool: [0.62, 3.9, 3600], code: [0.7, 1.6, 2400] } },
   },
 ];
 

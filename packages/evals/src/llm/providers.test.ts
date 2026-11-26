@@ -14,7 +14,7 @@ describe('model routing', () => {
     expect(providerForModel('o4-mini')).toBe('openai');
     expect(providerForModel('chatgpt-image-latest')).toBe('openai');
     expect(providerForModel('claude-sonnet-5-5')).toBe('anthropic');
-    expect(providerForModel('gemini-3-flash-preview')).toBe('gemini');
+    expect(providerForModel('gemini-3.5-flash-lite')).toBe('gemini');
     expect(providerForModel('mistral-large')).toBeNull();
     expect(providerForModel('openclaw')).toBeNull();
     expect(parseModelRef('openai:my-finetune')).toEqual({ provider: 'openai', model: 'my-finetune' });
@@ -32,8 +32,8 @@ describe('model routing', () => {
     expect(textOf(await r.create(req('openai:ft-custom')))).toBe('o');
     expect(clients.openai.requests.map((x) => x.model)).toEqual(['gpt-6-luna', 'ft-custom']);
     expect(made).toEqual(['openai', 'anthropic']); // one SDK client per provider
-    await expect(r.create(req('gemini-3-flash-preview'))).rejects.toThrow(LlmKeyError);
-    await expect(r.create(req('gemini-3-flash-preview'))).rejects.toThrow(/GEMINI_API_KEY/);
+    await expect(r.create(req('gemini-3.5-flash-lite'))).rejects.toThrow(LlmKeyError);
+    await expect(r.create(req('gemini-3.5-flash-lite'))).rejects.toThrow(/GEMINI_API_KEY/);
     await expect(r.create(req('mystery-model'))).rejects.toThrow(/prefix it/);
     expect(r.hasKeyFor('claude-haiku-5-5')).toBe(true);
     expect(r.hasKeyFor('gemini-3.1-flash-lite')).toBe(false);
@@ -44,7 +44,7 @@ describe('model routing', () => {
     const r = llmFromEnv({}, 'sk-ant-legacy') as RoutingLlmClient;
     expect(r.hasKeyFor('claude-sonnet-5-5')).toBe(true);
     expect(r.hasKeyFor('gpt-6-luna')).toBe(false);
-    expect(llmFromEnv({ GEMINI_API_KEY: 'g', NEUROUTER_EVAL_MODEL: 'gemini-3-flash-preview' }).provider).toBe('gemini');
+    expect(llmFromEnv({ GEMINI_API_KEY: 'g', NEUROUTER_EVAL_MODEL: 'gemini-3.5-flash-lite' }).provider).toBe('gemini');
     // production sets all three keys: the default (gpt-6-luna) resolves to OpenAI
     const all = llmFromEnv({ OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a', GEMINI_API_KEY: 'g' }) as RoutingLlmClient;
     expect(all.provider).toBe('openai');
@@ -135,9 +135,9 @@ describe('OpenAiLlmClient', () => {
 
 describe('GeminiLlmClient', () => {
   it('maps the request: stateless steps, function tools, thinking_level, response_format', () => {
-    const p = toGeminiRequest({ model: 'gemini-3-flash-preview', max_tokens: 800, system: [{ type: 'text', text: 'sys' }], messages: [{ role: 'user', content: 'hi' }], tools, tool_choice: { type: 'auto' }, output_config: { effort: 'medium', format: { type: 'json_schema', schema: { type: 'object' } } } });
+    const p = toGeminiRequest({ model: 'gemini-3.5-flash-lite', max_tokens: 800, system: [{ type: 'text', text: 'sys' }], messages: [{ role: 'user', content: 'hi' }], tools, tool_choice: { type: 'auto' }, output_config: { effort: 'medium', format: { type: 'json_schema', schema: { type: 'object' } } } });
     expect(p).toMatchObject({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash-lite',
       store: false,
       system_instruction: 'sys',
       input: [{ type: 'user_input', content: [{ type: 'text', text: 'hi' }] }],
@@ -157,14 +157,14 @@ describe('GeminiLlmClient', () => {
       .mockResolvedValueOnce({ id: 'int_2', status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'Two pets.' }] }], usage: { total_input_tokens: 80, total_output_tokens: 4 } });
     const llm = new GeminiLlmClient({ apiKey: 'g', client: { interactions: { create } } as unknown as GeminiInteractionsApi });
     const messages: LlmMessageParam[] = [{ role: 'user', content: 'list 2 pets' }];
-    const r1 = await llm.create({ model: 'gemini-3-flash-preview', max_tokens: 100, messages, tools });
+    const r1 = await llm.create({ model: 'gemini-3.5-flash-lite', max_tokens: 100, messages, tools });
     expect(r1.stop_reason).toBe('tool_use');
-    expect(r1.model).toBe('gemini-3-flash-preview');
+    expect(r1.model).toBe('gemini-3.5-flash-lite');
     expect(r1.usage).toEqual({ input_tokens: 40, output_tokens: 12, cache_read_input_tokens: 10 });
     expect(r1.content.find((b) => b.type === 'tool_use')).toEqual({ type: 'tool_use', id: 'fc_9', name: 'list_pets', input: { limit: 2 } });
     messages.push({ role: 'assistant', content: r1.content as LlmMessageParam['content'] });
     messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'fc_9', content: '[1,2]', is_error: false }] });
-    const r2 = await llm.create({ model: 'gemini-3-flash-preview', max_tokens: 100, messages, tools });
+    const r2 = await llm.create({ model: 'gemini-3.5-flash-lite', max_tokens: 100, messages, tools });
     expect(textOf(r2)).toBe('Two pets.');
     expect(r2.stop_reason).toBe('end_turn');
     expect(create.mock.calls[1]![0].input).toEqual([{ type: 'user_input', content: [{ type: 'text', text: 'list 2 pets' }] }, thought, call, { type: 'function_result', call_id: 'fc_9', name: 'list_pets', result: [{ type: 'text', text: '[1,2]' }] }]);
@@ -174,7 +174,7 @@ describe('GeminiLlmClient', () => {
     const fail = (status: number) => Object.assign(new Error('boom'), { status });
     const create = vi.fn().mockRejectedValueOnce(fail(403)).mockRejectedValueOnce(fail(429)).mockResolvedValueOnce({ id: 'x', status: 'failed', steps: [] });
     const llm = new GeminiLlmClient({ apiKey: 'g', client: { interactions: { create } } as unknown as GeminiInteractionsApi });
-    const req: LlmRequest = { model: 'gemini-3-flash-preview', max_tokens: 1, messages: [{ role: 'user', content: 'x' }] };
+    const req: LlmRequest = { model: 'gemini-3.5-flash-lite', max_tokens: 1, messages: [{ role: 'user', content: 'x' }] };
     await expect(llm.create(req)).rejects.toBeInstanceOf(LlmKeyError);
     await expect(llm.create(req)).rejects.toBeInstanceOf(LlmRateLimitError);
     await expect(llm.create(req)).rejects.toThrow(/failed/);

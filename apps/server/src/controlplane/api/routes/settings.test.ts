@@ -38,7 +38,7 @@ describe('settings, model providers, kill switches, system, users, public report
     const openai = p.items.find((x: any) => x.kind === 'openai');
     expect(openai).toMatchObject({ id: 'openai-stored', name: 'OpenAI', defaultModel: 'gpt-6-luna', isDefault: true });
     expect(openai.models[0]).toBe('gpt-6-luna');
-    expect(p.items.find((x: any) => x.kind === 'gemini')).toMatchObject({ id: 'gemini-stored', defaultModel: 'gemini-3.1-pro-preview', isDefault: false });
+    expect(p.items.find((x: any) => x.kind === 'gemini')).toMatchObject({ id: 'gemini-stored', defaultModel: 'gemini-3.5-flash-lite', isDefault: false });
     expect((await t.as(t.admin, { method: 'POST', url: '/api/settings/model-providers', payload: { kind: 'openai', name: 'x', apiKey: 'sk-other-key' } })).statusCode).toBe(409);
     const created = await t.json(t.admin, { method: 'POST', url: '/api/settings/model-providers', payload: { kind: 'anthropic', name: 'Claude', apiKey: 'sk-ant-new-3333' } }, 201);
     expect(created).toMatchObject({ id: 'anthropic-stored', kind: 'anthropic', name: 'Claude', keyLast4: '3333' });
@@ -99,13 +99,13 @@ describe('env model providers (all three keys, as in production)', () => {
     expect(s.models.evalModel).toBe('gpt-6-luna');
     expect(s.models.keys).toEqual({ openai: { configured: true, source: 'env', last4: 'aaaa' }, anthropic: { configured: true, source: 'env', last4: 'bbbb' }, gemini: { configured: true, source: 'env', last4: 'cccc' } });
     const p = await t.json(t.admin, { url: '/api/settings/model-providers' }, 200);
-    expect(p.items.map((x: any) => [x.id, x.isDefault, x.defaultModel])).toEqual([['openai-env', true, 'gpt-6-luna'], ['anthropic-env', false, 'claude-opus-5-5'], ['gemini-env', false, 'gemini-3.1-pro-preview']]);
+    expect(p.items.map((x: any) => [x.id, x.isDefault, x.defaultModel])).toEqual([['openai-env', true, 'gpt-6-luna'], ['anthropic-env', false, 'claude-opus-5-5'], ['gemini-env', false, 'gemini-3.5-flash-lite']]);
     expect(p.items[0].name).toBe('OpenAI (OPENAI_API_KEY)');
     expect(JSON.stringify(p)).not.toMatch(/sk-env|sk-ant-env|AIza-env/);
     expect((await t.as(t.admin, { method: 'DELETE', url: '/api/settings/model-providers/openai-env' })).statusCode).toBe(409);
     expect((await t.as(t.admin, { method: 'PATCH', url: '/api/settings/model-providers/gemini-env', payload: { apiKey: 'AIza-new-key-0000' } })).statusCode).toBe(422);
     // test calls are disabled under NODE_ENV=test but resolve the provider of the eval model
     expect(await t.json(t.admin, { method: 'POST', url: '/api/settings/models/test' }, 200)).toMatchObject({ ok: false, model: 'gpt-6-luna' });
-    expect(await t.json(t.admin, { method: 'POST', url: '/api/settings/model-providers/gemini-env/test' }, 200)).toMatchObject({ model: 'gemini-3.1-pro-preview' });
+    expect(await t.json(t.admin, { method: 'POST', url: '/api/settings/model-providers/gemini-env/test' }, 200)).toMatchObject({ model: 'gemini-3.5-flash-lite' });
   });
 });

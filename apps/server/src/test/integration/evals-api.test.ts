@@ -90,7 +90,7 @@ describe('eval runs need a key for each model provider', () => {
   afterAll(async () => t?.close());
 
   it('412 llm_key_missing for a Gemini or Anthropic model when only OPENAI_API_KEY is set; 422 for an unroutable id', async () => {
-    const gem = await t.as(t.admin, { method: 'POST', url: '/api/eval-runs', payload: { serverId, preset: 'quick', models: ['gemini-3-flash-preview'] } });
+    const gem = await t.as(t.admin, { method: 'POST', url: '/api/eval-runs', payload: { serverId, preset: 'quick', models: ['gemini-3.5-flash-lite'] } });
     expect(gem.statusCode).toBe(412);
     expect(gem.json()).toMatchObject({ code: 'llm_key_missing' });
     expect(gem.json().detail ?? gem.json().title).toMatch(/GEMINI_API_KEY/);

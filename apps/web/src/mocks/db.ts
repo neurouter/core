@@ -655,7 +655,7 @@ export function generateTask(db: MockDb, idx: number, startedMs: number, opts: {
     goal: inferred ? null : goal,
     outcome,
     framing: inferred ? 'inferred' : hasScript && r() < 0.3 ? 'script' : 'explicit',
-    inferredLabel: inferred ? { goal, outcome: 'unknown', confidence: 0.62, model: 'gemini-3-flash-preview' } : null,
+    inferredLabel: inferred ? { goal, outcome: 'unknown', confidence: 0.62, model: 'gemini-3.5-flash-lite' } : null,
     status: opts.open ? 'open' : 'closed',
     origin: 'agent',
     server: { id: s.seed.id, slug: s.seed.slug, name: s.name },
