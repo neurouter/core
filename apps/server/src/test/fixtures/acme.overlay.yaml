@@ -1,0 +1,15 @@
+overlay: 1
+info:
+  notes: Contract golden fixture. listProducts is capped (truncated list); getShipment has a tiny byte budget (clipped object).
+tools:
+  operationId:listProducts:
+    response: { maxItems: 3 }
+  operationId:getShipment:
+    response: { maxBytes: 256 }
+composites:
+  count_orders:
+    description: Count the orders with a status.
+    inputSchema: { type: object, properties: { status: { type: string, enum: [pending, paid, shipped, delivered, cancelled, refunded] } }, required: [status] }
+    script: |
+      o = acme.list_orders(status=status, limit=100)
+      return {"status": status, "count": len(o["items"])}

@@ -1,0 +1,29 @@
+# Contract golden tests (v1 and v2): the Acme Orders example against the in-process mock.
+version: 1
+instance:
+  name: Contract goldens
+settings:
+  codeMode: { enabled: true }
+servers:
+  - slug: acme
+    name: Acme Orders
+    spec:
+      path: ../../../../../examples/acme-orders/openapi.yaml
+    overlay: acme.overlay.yaml
+    environments:
+      - slug: mock
+        kind: dev
+        baseUrl: "mock:"
+        writes: { enabled: true }
+        codeMode: true
+      - slug: prod
+        kind: prod
+        baseUrl: "mock:"
+        writes: { enabled: true, confirm: elicit }
+        codeMode: true
+      - slug: ro
+        kind: dev
+        baseUrl: "mock:"
+        writes: { enabled: false }
+        codeMode: true
+        discovery: search
