@@ -469,6 +469,14 @@ export interface TasksTable {
   hinted: Generated<number>;
   trace_id: string | null;
   origin: Generated<'live' | 'eval'>;
+  session_key: string | null;
+  state_calls: Generated<number>;
+  state_streak: Generated<number>;
+  state_call_key: string | null;
+  state_result_key: string | null;
+  state_env: string | null;
+  state_writes: string | null;
+  exit_kind: 'done' | 'blocked' | null;
 }
 
 export interface ScriptRunsTable {
@@ -771,6 +779,12 @@ export interface MockItemsTable {
   updated_at: number;
 }
 
+export interface ConfirmNoncesTable {
+  id: string;
+  tenant_id: string;
+  expires_at: number;
+}
+
 export interface AuditLogTable {
   seq: number;
   id: string;
@@ -967,6 +981,7 @@ export interface MainDB {
   mock_namespaces: MockNamespacesTable;
   mock_collections: MockCollectionsTable;
   mock_items: MockItemsTable;
+  confirm_nonces: ConfirmNoncesTable;
 }
 
 export interface AuditDB {
@@ -1011,7 +1026,7 @@ export const MAIN_TABLE_COLUMNS = {
   oauth_consents: ['id', 'tenant_id', 'user_id', 'client_id', 'environment_id', 'scopes', 'redirect_uri', 'created_at', 'revoked_at'],
   oauth_codes: ['code_hash', 'tenant_id', 'client_id', 'user_id', 'server_id', 'environment_id', 'redirect_uri', 'code_challenge', 'scopes', 'resource', 'expires_at', 'consumed_at'],
   oauth_tokens: ['id', 'tenant_id', 'token_hash', 'kind', 'client_id', 'user_id', 'server_id', 'environment_id', 'scopes', 'resource', 'family_id', 'parent_id', 'expires_at', 'revoked_at', 'last_used_at', 'created_at'],
-  tasks: ['tenant_id', 'id', 'server_id', 'environment_id', 'user_id', 'api_key_id', 'oauth_client_id', 'principal_type', 'credential_key', 'client_name', 'client_version', 'goal', 'outcome', 'notes', 'framing', 'inferred_label', 'status', 'started_at', 'last_activity_at', 'ended_at', 'call_count', 'error_count', 'write_count', 'blocked_count', 'script_count', 'decision_count', 'ops_count', 'hinted', 'trace_id', 'origin'],
+  tasks: ['tenant_id', 'id', 'server_id', 'environment_id', 'user_id', 'api_key_id', 'oauth_client_id', 'principal_type', 'credential_key', 'client_name', 'client_version', 'goal', 'outcome', 'notes', 'framing', 'inferred_label', 'status', 'started_at', 'last_activity_at', 'ended_at', 'call_count', 'error_count', 'write_count', 'blocked_count', 'script_count', 'decision_count', 'ops_count', 'hinted', 'trace_id', 'origin', 'session_key', 'state_calls', 'state_streak', 'state_call_key', 'state_result_key', 'state_env', 'state_writes', 'exit_kind'],
   script_runs: ['tenant_id', 'id', 'task_id', 'server_id', 'environment_id', 'user_id', 'credential_key', 'code', 'code_hash', 'mode', 'status', 'error', 'result_preview', 'result_bytes', 'result_handle', 'planned_changes', 'stats', 'phases', 'stdout', 'audit_id', 'trace_id', 'started_at', 'ended_at'],
   decisions: ['tenant_id', 'id', 'task_id', 'ts', 'choice', 'reason', 'alternatives', 'audit_id'],
   need_groups: ['tenant_id', 'id', 'server_id', 'label', 'intent_norm_hash', 'count', 'distinct_principals', 'first_seen_at', 'last_seen_at', 'status', 'note', 'centroid'],
@@ -1032,6 +1047,7 @@ export const MAIN_TABLE_COLUMNS = {
   mock_namespaces: ['tenant_id', 'environment_id', 'namespace', 'seed', 'kind', 'created_at', 'last_used_at', 'expires_at'],
   mock_collections: ['tenant_id', 'environment_id', 'namespace', 'collection_key', 'seed', 'next_id', 'item_count', 'bytes', 'created_at', 'last_used_at'],
   mock_items: ['tenant_id', 'environment_id', 'namespace', 'collection_key', 'item_id', 'ord', 'body', 'bytes', 'updated_at'],
+  confirm_nonces: ['id', 'tenant_id', 'expires_at'],
 } as const satisfies { [T in keyof MainDB]: readonly (keyof MainDB[T])[] };
 
 export const AUDIT_TABLE_COLUMNS = {

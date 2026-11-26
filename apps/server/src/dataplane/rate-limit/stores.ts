@@ -12,7 +12,7 @@ export class MemoryRateLimitStore implements RateLimitStore {
 
   constructor(private readonly clock: Clock) {}
 
-  async take(key: string, opts: TakeOpts): Promise<{ allowed: boolean; retryAfterMs: number }> {
+  async take(key: string, opts: TakeOpts): Promise<{ allowed: boolean; retryAfterMs: number; remaining: number }> {
     const now = this.clock.now();
     const cfg = { capacity: opts.capacity, refillPerMs: opts.refillPerMs };
     const cur = this.buckets.get(key);
@@ -20,7 +20,7 @@ export class MemoryRateLimitStore implements RateLimitStore {
     const r = take(state, opts.cost ?? 1, cfg);
     this.buckets.set(key, { ...r.state, ...cfg });
     if (this.buckets.size > 100_000) this.buckets.delete(this.buckets.keys().next().value!);
-    return { allowed: r.ok, retryAfterMs: r.retryAfterMs };
+    return { allowed: r.ok, retryAfterMs: r.retryAfterMs, remaining: Math.floor(r.state.tokens) };
   }
 
   reset(): void {
@@ -68,7 +68,8 @@ export class PgBucketExecutor implements BucketExecutor {
  * Unused leased tokens expire after 2 s (never refunded), bounding overshoot to ≈ replicas × L.
  */
 export class LeaseRateLimitStore implements RateLimitStore {
-  private readonly local = new Map<string, { tokens: number; expiresAt: number }>();
+  /** leased tokens per key, plus what the shared bucket had left at the last lease (for `remaining`) */
+  private readonly local = new Map<string, { tokens: number; expiresAt: number; shared: number }>();
 
   constructor(
     private readonly exec: BucketExecutor,
@@ -80,20 +81,21 @@ export class LeaseRateLimitStore implements RateLimitStore {
     return Math.max(1, Math.ceil(capacity * 0.1));
   }
 
-  async take(key: string, opts: TakeOpts): Promise<{ allowed: boolean; retryAfterMs: number }> {
+  async take(key: string, opts: TakeOpts): Promise<{ allowed: boolean; retryAfterMs: number; remaining?: number }> {
     const cost = opts.cost ?? 1;
     const now = this.clock.now();
     const cfg = { capacity: opts.capacity, refillPerMs: opts.refillPerMs };
     const l = this.local.get(key);
     if (l && l.expiresAt > now && l.tokens >= cost) {
       l.tokens -= cost;
-      return { allowed: true, retryAfterMs: 0 };
+      return { allowed: true, retryAfterMs: 0, remaining: Math.floor(l.shared + l.tokens) };
     }
     const size = Math.max(cost, LeaseRateLimitStore.leaseSize(cfg.capacity));
     for (const n of size > cost ? [size, cost] : [cost]) {
-      if ((await this.exec.lease(key, cfg, n, now)) !== null) {
-        this.local.set(key, { tokens: n - cost, expiresAt: now + this.leaseTtlMs });
-        return { allowed: true, retryAfterMs: 0 };
+      const shared = await this.exec.lease(key, cfg, n, now);
+      if (shared !== null) {
+        this.local.set(key, { tokens: n - cost, expiresAt: now + this.leaseTtlMs, shared });
+        return { allowed: true, retryAfterMs: 0, remaining: Math.floor(shared + n - cost) };
       }
     }
     this.local.delete(key);

@@ -41,6 +41,7 @@ import type { ArgValidator } from './arg-validate.js';
 import { principalUserId, traceIdOf, type RunContext } from './context.js';
 import { errorResult, type ErrorEvents } from './errors.js';
 import { evaluatePolicies } from './policy.js';
+import { writePlan, type ConfirmProblem, type ConfirmTokens } from './confirm-token.js';
 
 export interface PolicyStep {
   step: PolicyStepName;
@@ -114,6 +115,8 @@ export interface PipelineDeps {
   version: string;
   /** contract 2: signs and checks `page.next_cursor` (absent: no cursors) */
   cursors?: CursorCodec;
+  /** contract 2: confirm tokens for destructive writes outside prod (D5; absent: no token gate) */
+  confirms?: ConfirmTokens;
   /** Records usage + traffic examples after a successful call (post-commit; never fails the call). */
   onSuccess?: (ctx: RunContext, tool: ToolDef, args: Record<string, unknown>) => void;
   log: { warn: (o: object, m: string) => void };
@@ -356,14 +359,33 @@ export class Pipeline {
       step('rate_limit', 'fail', rl.scope);
       const secs = Math.max(1, Math.ceil(rl.retryAfterMs / 1000));
       this.d.metrics?.rateLimited(rl.scope);
-      return fail('denied_rate_limit', 'blocked', 'rate_limited', `Rate limit exceeded for ${tool.name}; retry after ${secs}s.`, { retryAfterSec: secs, scopeDetail: ` (${rl.scope})` }, { retryAfterMs: rl.retryAfterMs });
+      const out = await fail('denied_rate_limit', 'blocked', 'rate_limited', `Rate limit exceeded for ${tool.name}; retry after ${secs}s.`, { retryAfterSec: secs, scopeDetail: ` (${rl.scope})` }, { retryAfterMs: rl.retryAfterMs });
+      out.draft.left = { calls: 0 };
+      return out;
     }
     step('rate_limit', 'pass');
+    // contract 2 (§2.4): `state.left.calls` once a rate-limit bucket is down to 20%
+    const left = rl.left && rl.left.calls <= rl.left.capacity * 0.2 ? { calls: rl.left.calls } : undefined;
 
     const argsHash = argsHashOf(tool.name, args);
     // confirmation applies wherever the environment asks for it (prod: always; `none` is invalid there)
     const confirmMode = ctx.bundle.environment.writes.confirm;
     const wouldConfirm = tool.risk.write && confirmMode !== 'none';
+
+    // contract 2 (D5): the call without its own arguments, the base of confirm tokens and next calls
+    const confirmName = plan?.names.confirm ?? null;
+    const bound = Object.fromEntries(Object.entries(rawArgs).filter(([k]) => k !== confirmName && k !== plan?.names.dryRun && rawArgs[k] !== undefined));
+    const tokenGate = ctx.contract === 2 && tool.risk.write && tool.risk.destructive && confirmMode === 'none' && this.d.confirms !== undefined;
+    const binding = { tenantId: ctx.tenantId, environmentId: ctx.environment.id, credentialKey: ctx.credentialKey, tool: tool.name, args: bound };
+
+    // 8a contract 2: `dry_run: true` returns the plan; outside prod a destructive tool's plan carries the confirmed call
+    if (own?.dryRun && tool.risk.write) {
+      step('dry_run', 'pass', 'dry_run argument');
+      const p = writePlan(tool, agentArgs);
+      const value = { plan: p, ...(tokenGate && confirmName ? { next: { tool: tool.name, args: { ...bound, [confirmName]: this.d.confirms!.mint(binding) } } } : {}) };
+      record('dry_run', 'ok', { output: value });
+      return { ok: true, unknown: false, decision: 'dry_run', status: 'ok', value, result: v1Result(compactJson(value), value, { ...metaBase(), [META_DRY_RUN]: true }), auditId, tool, draft: okDraft(value, { flags: ['dry_run'], write: true, meta: metaBase() }) };
+    }
 
     // 8 dry-run short-circuit
     if (ctx.dryRun && tool.risk.write) {
@@ -376,7 +398,30 @@ export class Pipeline {
     }
     step('dry_run', 'skip');
 
-    // 9 write confirmation on prod (§9.7)
+    // 9a contract 2 (D5), outside prod: a destructive call needs a confirm token from its own plan; script runs
+    // need the call in the plan approved with a token (run_script answers the token round itself)
+    const confirmationRequired = (problem: ConfirmProblem | 'script' | null): ToolOutcome => {
+      const p = writePlan(tool!, agentArgs);
+      const why = problem === 'expired' ? 'The confirm token expired (5 minutes). ' : problem === 'used' ? 'The confirm token was already used. ' : problem === 'mismatch' || problem === 'malformed' ? 'The confirm token is for another call. ' : '';
+      const script = problem === 'script';
+      const token = script ? null : this.d.confirms!.mint(binding);
+      step('confirm', 'fail', script ? 'not in the confirmed plan' : problem ? `token ${problem}` : 'confirm token required');
+      record('dry_run', 'ok', { output: { plan: p }, decisionReason: 'confirmation_required' });
+      const text = `${why}${tool!.name} is destructive${p.reversible ? '' : ' and irreversible'}; nothing changed yet. ${script ? 'Dry-run the script, then run it with the confirm token.' : 'Repeat with the confirm token to execute.'}`;
+      const next = script ? [] : [{ tool: tool!.name, args: { ...bound, [confirmName ?? 'confirm']: token } }];
+      return { ok: false, unknown: false, decision: 'dry_run', status: 'blocked', result: errorResult(text, null, 'confirmation_declined'), error: { code: 'confirmation_declined', message: text, errorId: null }, auditId, tool: tool!, draft: errorDraft({ code: 'confirmation_required', message: text, text, tool, name, args: rawArgs, next }, { data: { plan: p }, flags: ['dry_run'], write: true, meta: metaBase() }) };
+    };
+    if (tokenGate && ctx.via === 'script' && !ctx.dryRun) {
+      if (!ctx.approvedPlan?.has(`${tool.name}|${argsHash}`)) return confirmationRequired('script');
+      step('confirm', 'pass', 'confirmed plan');
+    } else if (tokenGate && ctx.via !== 'script' && !ctx.dryRun) {
+      if (!own?.confirm) return confirmationRequired(null);
+      const problem = await this.d.confirms!.spend(own.confirm, binding);
+      if (problem) return confirmationRequired(problem);
+      step('confirm', 'pass', 'confirm token');
+    }
+
+    // 9 write confirmation on prod (§9.7); contract-2 confirm tokens are never accepted here (D5)
     let decision: AuditDecision = 'allowed';
     if (wouldConfirm) {
       if (ctx.via === 'script' && ctx.approvedPlan) {
@@ -387,7 +432,7 @@ export class Pipeline {
         decision = 'confirmed';
         step('confirm', 'pass', 'approved plan');
       } else {
-        const msg = this.confirmMessage(ctx, tool, args);
+        const msg = ctx.contract === 2 ? this.confirmMessageV2(ctx, tool, args) : this.confirmMessage(ctx, tool, args);
         const out = opts.confirmer ? await opts.confirmer.confirm({ tool, args, argsHash, message: msg }) : ({ status: 'unsupported' } as const);
         if (out.status === 'pending') {
           step('confirm', 'skip', 'elicitation sent');
@@ -403,8 +448,8 @@ export class Pipeline {
             return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `Not executed: this client cannot ask the user to confirm writes in ${where}. Planned change (nothing was changed): ${planned.method} ${planned.path} ${compactJson(planned.arguments).slice(0, 2000)}. Show it to the user; they can approve it from a client with MCP elicitation support.`, {}, {
               meta: { [META_PLANNED_CHANGES]: [change] },
               audit: { output: { planned: [change] } },
-              spec: { text: `${tool.name} needs your user's approval in ${where} and this client cannot ask; nothing changed. Show data.plan to the user.` },
-              data: { plan: { tool: change.tool, method: change.method, path: change.path, args: change.arguments } },
+              spec: { text: `${tool.name} needs your user's approval in ${where} and this client cannot ask; nothing changed. Show data.plan to the user.`, ...(ctx.contract === 2 && ctx.bundle.server.opsTools.end_task ? { next: [{ tool: 'neurouter_report', args: { kind: 'blocked', text: `needs approval for ${tool.name} in ${where}` } }] } : {}) },
+              data: { plan: ctx.contract === 2 ? writePlan(tool, agentArgs) : { tool: change.tool, method: change.method, path: change.path, args: change.arguments } },
             });
           }
           return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `This client cannot ask the user to confirm writes in ${where}; ${tool.name} was not called.`, {}, { spec: { text: `This client cannot ask the user to confirm writes in ${where}; ${tool.name} was not called. Nothing changed.` } });
@@ -557,6 +602,7 @@ export class Pipeline {
     void urlTemplate;
     const handle = (meta[META_RESULT_HANDLE] as string | undefined) ?? null;
     const draft = this.successDraft(ctx, tool, rawArgs, value, shaped?.truncated, { signals, handle, plan }, upstream.headers, decision, metaBase());
+    if (left) draft.left = left;
     return { ok: true, unknown: false, decision, status: 'ok', value, result: v1Result(text, wrapStructured(value), meta), auditId, tool, draft, ...(signals ? { paging: { more: signals.more, next: signals.next } } : {}) };
   }
 
@@ -661,6 +707,12 @@ export class Pipeline {
     const method = tool.binding.type === 'http' ? tool.binding.method : tool.binding.type === 'graphql' ? 'POST' : 'SCRIPT';
     const path = tool.binding.type === 'http' ? tool.binding.pathTemplate : tool.binding.type === 'graphql' ? `graphql:${tool.binding.operationType}` : tool.name;
     return { tool: tool.name, method, path, arguments: args, wouldConfirm, argsHash };
+  }
+
+  /** Contract 2: the prod approval prompt also says what the write does and whether it can be undone. */
+  confirmMessageV2(ctx: RunContext, tool: ToolDef, args: Record<string, unknown>): string {
+    const p = writePlan(tool, args);
+    return `${this.confirmMessage(ctx, tool, args)}\nEffect: ${p.effect}${p.target ? ` (${p.target})` : ''}\n${p.reversible ? 'Can be undone.' : 'Irreversible.'}`;
   }
 
   confirmMessage(ctx: RunContext, tool: ToolDef, args: Record<string, unknown>): string {

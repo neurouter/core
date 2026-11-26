@@ -50,15 +50,21 @@ export const isNeurouterCursor = (s: string): boolean => s.startsWith(PREFIX);
  * altered, replayed with other arguments or by another credential; the payload carries its expiry.
  */
 export class CursorCodec {
+  private readonly re: RegExp;
+
   constructor(
     private readonly key: () => Buffer,
     private readonly now: () => number,
     private readonly ttlMs = CURSOR_TTL_MS,
-  ) {}
+    /** `c_` page cursors; `ct_` confirm tokens use the same format with their own key */
+    private readonly prefix = PREFIX,
+  ) {
+    this.re = new RegExp(`^${prefix}([A-Za-z0-9_-]{4,4096})\\.([A-Za-z0-9_-]{16})$`);
+  }
 
-  static fromKeyring(keyring: Keyring, now: () => number): CursorCodec {
+  static fromKeyring(keyring: Keyring, now: () => number, info = 'neurouter-core:cursor:v1', ttlMs = CURSOR_TTL_MS, prefix = PREFIX): CursorCodec {
     let cached: Buffer | null = null;
-    return new CursorCodec(() => (cached ??= hkdf(keyring.derivationKey(), 'neurouter-core:cursor:v1')), now);
+    return new CursorCodec(() => (cached ??= hkdf(keyring.derivationKey(), info)), now, ttlMs, prefix);
   }
 
   private mac(body: string, b: CursorBinding): Buffer {
@@ -66,16 +72,16 @@ export class CursorCodec {
     return hmacSha256(this.key(), `${body}|${bind}`).subarray(0, MAC_BYTES);
   }
 
-  encode(payload: CursorPayload, b: CursorBinding): string {
+  encode(payload: CursorPayload | Record<string, unknown>, b: CursorBinding): string {
     const exp = Math.ceil((this.now() + this.ttlMs) / 1000);
     // nulls are left out (short cursors); a missing `then`/`t` reads as none
     const body = Buffer.from(JSON.stringify([exp, payload], (_k, v: unknown) => (v === null ? undefined : v))).toString('base64url');
-    return `${PREFIX}${body}.${this.mac(body, b).toString('base64url')}`;
+    return `${this.prefix}${body}.${this.mac(body, b).toString('base64url')}`;
   }
 
   /** Throws `CursorError` (malformed, mismatch = altered or other tool/arguments/credential, expired). */
   decode(cursor: string, b: CursorBinding): CursorPayload {
-    const m = /^c_([A-Za-z0-9_-]{4,4096})\.([A-Za-z0-9_-]{16})$/.exec(cursor);
+    const m = this.re.exec(cursor);
     if (!m) throw new CursorError('malformed');
     if (!timingSafeEqualBuf(this.mac(m[1]!, b), Buffer.from(m[2]!, 'base64url'))) throw new CursorError('mismatch');
     let parsed: unknown;

@@ -95,7 +95,11 @@ describe('contract v2 goldens (acme, mock)', () => {
     await call('search_python', 'search_tools', { query: 'find orders of a customer', limit: 3 }, { 'x-neurouter-exposure': 'code' });
     await call('search_empty', 'search_tools', { query: 'zzqx frobnicate warp drive' });
     await call('search_invalid', 'search_tools', { query: '' });
-    // ops: listed report tools, then the unlisted v1 names
+    // ops: neurouter_report (listed), then the unlisted v1 names
+    await call('report_kind_unmet_need', 'neurouter_report', { kind: 'unmet_need', text: 'export orders as CSV', attempted: ['search_tools'] });
+    await call('report_kind_tool_problem', 'neurouter_report', { kind: 'tool_problem', text: 'total is wrong', tool: 'get_order' });
+    await call('report_kind_decision', 'neurouter_report', { kind: 'decision', text: 'used list_orders', reason: 'no search tool' });
+    await call('report_kind_invalid', 'neurouter_report', { kind: 'nope', text: 'x' });
     await call('report_unmet_need', 'neurouter_report_unmet_need', { intent: 'export orders as CSV', attempted: ['search_tools'] });
     await call('report_issue', 'neurouter_report_issue', { tool: 'get_order', problem: 'wrong total' });
     await call('log_decision', 'neurouter_log_decision', { choice: 'used list_orders', reason: 'no search tool' });
@@ -133,9 +137,17 @@ describe('contract v2 goldens (acme, mock)', () => {
     await call('script_runtime_error', 'run_script', { code: 'x = {}\nreturn x["missing"]' });
     await call('script_too_large', 'run_script', { code: 'return "x" * 1100000' });
     await call('script_missing_code', 'run_script', {});
-    // writes (mutate the mock: last)
-    const w = await call('cancel_order', 'cancel_order', { order_id: 'order_3', reason: 'other' });
+    // writes (mutate the mock: last). Destructive outside prod: plan + confirm token first (D5)
+    await call('cancel_order_dry_run', 'cancel_order', { order_id: 'order_3', reason: 'other', dry_run: true });
+    const need = await call('cancel_order_confirmation_required', 'cancel_order', { order_id: 'order_3', reason: 'other' });
+    expect(need.error).toMatchObject({ code: 'confirmation_required', next: [{ tool: 'cancel_order', args: { order_id: 'order_3', reason: 'other' } }] });
+    expect(need.data.plan).toMatchObject({ tool: 'cancel_order', target: 'order order_3', reversible: false });
+    const w = await call('cancel_order', 'cancel_order', need.error.next[0].args);
     expect(w.state.wrote).toBe('cancel_order → order order_3');
+    await call('cancel_order_token_reused', 'cancel_order', need.error.next[0].args);
+    await call('update_order', 'update_order', { order_id: 'order_4', note: 'gift' });
+    await call('script_confirmation_required', 'run_script', { code: 'return acme.cancel_order(order_id="order_5", reason="other")' });
+    await call('report_done', 'neurouter_report', { kind: 'done', text: 'Cancelled order_3' });
     await call('end_task', 'neurouter_end_task', { outcome: 'success' });
 
     // prod: confirmation without elicitation (plan in data)

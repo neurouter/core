@@ -32,8 +32,8 @@ export interface PagingPlan {
   nextPath?: string;
   /** the spec declares `Link` response headers: no `rel=next` means the last page */
   link?: boolean;
-  /** contract-2 argument names */
-  names: { cursor: string | null; limit: string | null; fields: string };
+  /** contract-2 argument names (`dry_run` on writes, `confirm` on destructive tools: P3, D5) */
+  names: { cursor: string | null; limit: string | null; fields: string; dryRun: string | null; confirm: string | null };
   /** upstream arguments replaced by `cursor`/`limit` in the contract-2 input schema (still accepted) */
   replaced: string[];
 }
@@ -60,7 +60,7 @@ export function pagingPlan(t: ToolDef): PagingPlan {
     const arg = inv ?? p.arg;
     return arg in props ? arg : null;
   };
-  const plan: PagingPlan = { list: false, names: { cursor: null, limit: null, fields: 'fields' }, replaced: [] };
+  const plan: PagingPlan = { list: false, names: { cursor: null, limit: null, fields: 'fields', dryRun: null, confirm: null }, replaced: [] };
   if (t.binding.type === 'http') {
     for (const p of t.binding.params) {
       if (p.in !== 'query') continue;
@@ -96,6 +96,8 @@ export function pagingPlan(t: ToolDef): PagingPlan {
     if (plan.size && plan.names.limit !== plan.size.arg) plan.replaced.push(plan.size.arg);
   }
   plan.names.fields = free('fields', undefined);
+  if (t.risk.write && t.kind !== 'composite') plan.names.dryRun = free('dry_run', undefined);
+  if (t.risk.write && t.risk.destructive && t.kind !== 'composite') plan.names.confirm = free('confirm', undefined);
   cache.set(t, plan);
   return plan;
 }
@@ -117,6 +119,8 @@ export function v2InputSchema(t: ToolDef, defaultFields?: string[]): Schema {
   }
   const def = defaultFields?.length ? ` Default: ${defaultFields.slice(0, 8).join(', ')}${defaultFields.length > 8 ? ', …' : ''}.` : '';
   props[plan.names.fields] = { type: 'array', items: { type: 'string' }, maxItems: 50, description: `Return only these fields (dot paths${plan.list ? ', per item' : ''}, e.g. ["id","customer.name"]).${def}` };
+  if (plan.names.dryRun) props[plan.names.dryRun] = { type: 'boolean', description: 'true: return the plan (target, effect, reversible) without changing anything.' };
+  if (plan.names.confirm) props[plan.names.confirm] = { type: 'string', description: 'Outside prod: the token from the plan this call returned (error.next); inside prod your user approves instead.' };
   const required = Array.isArray(t.inputSchema.required) ? (t.inputSchema.required as string[]).filter((r) => !plan.replaced.includes(r)) : undefined;
   const out: Schema = { ...t.inputSchema, properties: props };
   if (required) out.required = required;
@@ -132,6 +136,8 @@ export interface SplitArgs {
   upstream: Record<string, unknown>;
   cursor?: string;
   fields?: string[];
+  dryRun?: boolean;
+  confirm?: string;
   issues: ArgIssue[];
 }
 
@@ -162,6 +168,20 @@ export function splitArgs(plan: PagingPlan, args: Record<string, unknown>): Spli
       if (bad.length) issues.push({ path: `/${f}`, keyword: 'format', params: { format: 'dot path (a.b.c)' }, message: `invalid paths: ${bad.slice(0, 3).join(', ')}` });
       else if (v.length) out.fields = [...new Set(v as string[])];
     }
+  }
+  const d = plan.names.dryRun;
+  if (d && upstream[d] !== undefined) {
+    const v = upstream[d];
+    delete upstream[d];
+    if (typeof v === 'boolean') out.dryRun = v;
+    else issues.push({ path: `/${d}`, keyword: 'type', params: { type: 'boolean' }, message: 'must be boolean' });
+  }
+  const k = plan.names.confirm;
+  if (k && upstream[k] !== undefined) {
+    const v = upstream[k];
+    delete upstream[k];
+    if (typeof v === 'string' && v.length <= 4096) out.confirm = v;
+    else issues.push({ path: `/${k}`, keyword: 'type', params: { type: 'string' }, message: 'must be string' });
   }
   return out;
 }

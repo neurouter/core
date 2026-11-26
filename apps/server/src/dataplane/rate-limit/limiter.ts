@@ -16,7 +16,8 @@ export interface RateLimitConfig {
   burst: number;
 }
 
-export type LimitResult = { allowed: true } | { allowed: false; scope: LimitScope; retryAfterMs: number };
+/** `left`: the tightest bucket after this call (calls left before the limit, its capacity), when the store reports it. */
+export type LimitResult = { allowed: true; left?: { calls: number; capacity: number } } | { allowed: false; scope: LimitScope; retryAfterMs: number };
 
 /** Defaults when an environment does not set limits (§6.2 example values). */
 export const DEFAULT_RATE_LIMIT: RateLimitConfig = { perMinute: 600, burst: 120 };
@@ -42,11 +43,13 @@ export class RateLimiter {
   }
 
   async take(checks: readonly LimitCheck[]): Promise<LimitResult> {
+    let left: { calls: number; capacity: number } | undefined;
     for (const c of checks) {
       const cfg = perMinute(c.perMinute, c.burst);
       const r = await this.store.take(c.key, { capacity: cfg.capacity, refillPerMs: cfg.refillPerMs });
       if (!r.allowed) return { allowed: false, scope: c.scope, retryAfterMs: r.retryAfterMs };
+      if (r.remaining !== undefined && (!left || r.remaining / cfg.capacity < left.calls / left.capacity)) left = { calls: Math.max(0, r.remaining), capacity: cfg.capacity };
     }
-    return { allowed: true };
+    return left ? { allowed: true, left } : { allowed: true };
   }
 }

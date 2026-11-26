@@ -5,7 +5,7 @@ import { resolveVisibleTool } from '../pipeline/pipeline.js';
 import type { Draft, ErrorSpec } from './draft.js';
 import { buildError } from './errors.js';
 import { envelopeErrors, typedErrors } from './schema.js';
-import { type StateTracker } from './state.js';
+import { type StateSource } from './state.js';
 import { BUDGET, type Envelope, type ErrorInfo, type StateFlag } from './types.js';
 import type { McpToolResult } from './v1.js';
 
@@ -37,7 +37,7 @@ export class TypedSchemaIssues {
 }
 
 export interface RenderDeps {
-  state: StateTracker;
+  state: StateSource;
   typed: TypedSchemaIssues;
   /** nearest visible tool names for an unknown tool (search index, top 3) */
   closest: (ctx: RunContext, name: string) => Promise<string[]>;
@@ -105,7 +105,8 @@ export class EnvelopeRenderer {
       }
     }
     const write = Boolean(tool?.risk.write || draft.write);
-    env.state = this.d.state.next({
+    env.state = await this.d.state.next({
+      tenantId: ctx.tenantId,
       taskId: ctx.taskId,
       requestId: ctx.requestId,
       env: ctx.environment.slug,
