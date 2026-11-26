@@ -139,6 +139,12 @@ export const TaskResultCell = z.object({
   avgCalls: z.number(),
   /** Task runs of this cell (for the transcript link). */
   taskRunIds: z.array(Id),
+  /**
+   * Each attempt with its trace: the Neurouter task the attempt's calls were recorded under.
+   * `recorded` links to it; `none` when the agent made no tool call (no task); `expired` when the
+   * task was removed by retention.
+   */
+  runs: z.array(z.object({ id: Id, attempt: z.number().int(), passed: z.boolean(), taskId: Id.nullable(), trace: z.enum(['recorded', 'none', 'expired']) })),
 });
 export const TaskResultRow = z.object({ taskId: Id, key: z.string(), category: EvalCategory, prompt: z.string(), cells: z.array(TaskResultCell) });
 export type TaskResultRow = z.infer<typeof TaskResultRow>;

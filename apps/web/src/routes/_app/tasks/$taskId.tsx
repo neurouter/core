@@ -131,7 +131,7 @@ function TaskPage() {
                 <span className="w-[58px] shrink-0 pt-0.5 font-mono text-xs text-muted-foreground" title={`+${compactDuration(r.offsetMs)} from the start`}>
                   {formatTime(r.item.ts)}
                 </span>
-                <TimelineEntry item={r.item} latencyPct={r.latencyPct} onCall={open} limits={limits} followUp={followUpOf(r.item)} active={call === r.item.auditId} />
+                <TimelineEntry item={r.item} latencyPct={r.latencyPct} onCall={open} limits={limits} followUp={followUpOf(r.item)} active={call === r.item.auditId} evalTraffic={t.origin === 'eval'} />
               </li>
             ),
           )}
@@ -169,7 +169,7 @@ function TaskPage() {
   );
 }
 
-function TimelineEntry({ item, latencyPct, onCall, limits, followUp, active }: { item: TimelineItem; latencyPct: number; onCall: (id: string, el: HTMLElement) => void; limits?: { maxToolCalls: number; cpuTimeSec: number } | undefined; followUp: TimelineItem | null | undefined; active: boolean }) {
+function TimelineEntry({ item, latencyPct, onCall, limits, followUp, active, evalTraffic }: { item: TimelineItem; latencyPct: number; onCall: (id: string, el: HTMLElement) => void; limits?: { maxToolCalls: number; cpuTimeSec: number } | undefined; followUp: TimelineItem | null | undefined; active: boolean; evalTraffic: boolean }) {
   if (item.kind === 'script') return <ScriptBlock item={item} limits={limits} onCall={onCall} followUp={followUp ?? null} />;
   const box = 'flex-1 rounded-[10px] border px-3.5 py-2.5';
   if (item.kind === 'task_begin')
@@ -199,7 +199,8 @@ function TimelineEntry({ item, latencyPct, onCall, limits, followUp, active }: {
     return (
       <div className={cn(box, 'border-brand-border bg-brand-muted')}>
         <span className="font-mono text-[13px] font-medium">{item.tool}</span> · {item.summary}{' '}
-        {item.kind !== 'ops' ? (
+        {item.kind !== 'ops' && evalTraffic ? <span className="text-xs text-muted-foreground">(eval traffic: not sent to the inbox)</span> : null}
+        {item.kind !== 'ops' && !evalTraffic ? (
           <Link to="/inbox" search={{ tab: item.kind === 'issue' ? 'issues' : 'needs' }} className="text-primary hover:underline">
             Open in inbox
           </Link>

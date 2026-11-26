@@ -37,6 +37,29 @@ describe('evals REST flow (stub provider)', () => {
     const cell = d.tasks[0].cells[0];
     const tr = await t.json(t.admin, { method: 'GET', url: `/api/eval-runs/${run.id}/task-runs/${cell.taskRunIds[0]}` }, 200);
     expect(tr.transcript[0]).toMatchObject({ type: 'user' });
+    // eval isolation: impossible tasks report unmet needs, the assertion passes from the audited call, the inbox stays empty
+    const db = t.s.services.dbs.main.db;
+    const impossible = d.tasks.find((x: { category: string }) => x.category === 'impossible');
+    expect(impossible).toBeDefined();
+    const ir = await t.json(t.admin, { method: 'GET', url: `/api/eval-runs/${run.id}/task-runs/${impossible.cells[0].taskRunIds[0]}` }, 200);
+    expect(ir.transcript.some((x: { type: string; tool?: string }) => x.type === 'tool_call' && x.tool === 'neurouter_report_unmet_need')).toBe(true);
+    expect(ir.assertionResults.find((a: { assertion: { type: string } }) => a.assertion.type === 'unmet_need_reported_or_declined')).toMatchObject({ passed: true, detail: 'unmet need reported' });
+    expect(await db.selectFrom('unmet_needs').selectAll().execute()).toEqual([]);
+    expect(await db.selectFrom('need_groups').selectAll().execute()).toEqual([]);
+    expect(await t.json(t.admin, { url: '/api/inbox/summary' }, 200)).toMatchObject({ needs: { open: 0 } });
+    // every attempt links to its trace, an eval-origin task
+    const runsOfCells = d.tasks.flatMap((x: { cells: Array<{ runs: Array<{ taskId: string | null; trace: string }> }> }) => x.cells.flatMap((c) => c.runs));
+    expect(runsOfCells.length).toBe(d.tasks.reduce((n: number, x: { cells: Array<{ attempts: number }> }) => n + x.cells.reduce((m, c) => m + c.attempts, 0), 0));
+    expect(runsOfCells.every((r: { trace: string }) => r.trace === 'recorded')).toBe(true);
+    const traced = await t.json(t.admin, { url: `/api/tasks/${runsOfCells[0].taskId}` }, 200);
+    expect(traced).toMatchObject({ origin: 'eval', evalRunId: run.id });
+    // per-attempt eval keys: revoked when the attempt ends, hidden from the keys API
+    const evalKeys = await db.selectFrom('api_keys').select(['id', 'revoked_at']).where('purpose', '=', 'eval').execute();
+    expect(evalKeys.length).toBeGreaterThan(1);
+    expect(evalKeys.every((k) => k.revoked_at !== null)).toBe(true);
+    const listed = await t.json(t.admin, { url: '/api/keys' }, 200);
+    expect(listed.items.filter((k: { id: string }) => evalKeys.some((e) => e.id === k.id))).toEqual([]);
+    expect((await t.as(t.admin, { method: 'POST', url: `/api/keys/${evalKeys[0]!.id}/revoke` })).statusCode).toBe(404);
     const rd = await t.json(t.admin, { method: 'GET', url: `/api/servers/${serverId}/readiness` }, 200);
     expect(rd).toMatchObject({ confidence: 'measured', score: d.score.headline, runId: run.id });
     const sugg = await t.json(t.admin, { method: 'GET', url: `/api/eval-runs/${run.id}/suggestions` }, 200);

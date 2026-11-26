@@ -72,7 +72,9 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
   const matrix = (r: EvalRunRowDb): MatrixCell[] => ((ev.score(r) as EvalScore | null)?.cells ?? []).map((x) => ({ model: x.model, mode: x.mode, successRate: x.successRate, score: x.score, avgTokens: x.avgTokens, avgCalls: x.avgCalls, avgLatencyMs: x.avgLatencyMs, flakyTasks: x.flakyTasks, excludedAttempts: x.excludedFallback ?? 0, best: x.best }));
   const taskResults = async (r: EvalRunRowDb, filter: { model?: string; mode?: string; passed?: boolean; category?: string } = {}): Promise<TaskResultRow[]> => {
     const tasks = r.suite_id ? await ev.suiteTasks(r.suite_id) : [];
-    const runs = await db.selectFrom('eval_task_runs').select(['id', 'task_id', 'model', 'mode', 'passed', 'failure_cause', 'input_tokens', 'output_tokens', 'tool_calls']).where('run_id', '=', r.id).execute();
+    const runs = await db.selectFrom('eval_task_runs').select(['id', 'task_id', 'model', 'mode', 'attempt', 'passed', 'failure_cause', 'input_tokens', 'output_tokens', 'tool_calls', 'task_id_neurouter']).where('run_id', '=', r.id).orderBy('attempt').execute();
+    const traced = runs.map((x) => x.task_id_neurouter).filter((x): x is string => !!x);
+    const alive = new Set(traced.length ? (await db.selectFrom('tasks').select('id').where('id', 'in', traced).execute()).map((t) => t.id) : []);
     const out: TaskResultRow[] = [];
     for (const t of tasks) {
       if (filter.category && t.category !== filter.category) continue;
@@ -81,13 +83,14 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
       const cells = new Map<string, TaskResultRow['cells'][number]>();
       for (const x of mine) {
         const k = `${x.model}|${x.mode}`;
-        const cell = cells.get(k) ?? { model: x.model, mode: x.mode, passes: 0, attempts: 0, flaky: false, failureCause: null, avgTokens: 0, avgCalls: 0, taskRunIds: [] };
+        const cell = cells.get(k) ?? { model: x.model, mode: x.mode, passes: 0, attempts: 0, flaky: false, failureCause: null, avgTokens: 0, avgCalls: 0, taskRunIds: [], runs: [] };
         cell.attempts++;
         if (x.passed === 1) cell.passes++;
         else cell.failureCause ??= (x.failure_cause as never) ?? null;
         cell.avgTokens += x.input_tokens + x.output_tokens;
         cell.avgCalls += x.tool_calls;
         cell.taskRunIds.push(x.id);
+        cell.runs.push({ id: x.id, attempt: x.attempt, passed: x.passed === 1, taskId: x.task_id_neurouter, trace: !x.task_id_neurouter ? 'none' : alive.has(x.task_id_neurouter) ? 'recorded' : 'expired' });
         cells.set(k, cell);
       }
       for (const cell of cells.values()) {

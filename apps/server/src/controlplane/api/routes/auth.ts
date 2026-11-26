@@ -5,6 +5,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { loadConsoleUser, type ConsoleUser } from '../../../kernel/principal.js';
 import { clientMeta, requireUser } from '../../auth/guards.js';
 import { anyProviderKey } from '../../evals/model-keys.js';
+import { liveIssue, notEvalOnlyGroup } from '../../traces/origin.js';
 import type { ApiContext } from '../context.js';
 import { embedderView } from '../context.js';
 import { route } from '../routes.js';
@@ -14,8 +15,8 @@ export const ANONYMOUS_EMAIL = 'anonymous@demo.invalid';
 async function badges(c: ApiContext) {
   const db = c.dbs.main.db;
   const [n, i, e] = await Promise.all([
-    db.selectFrom('need_groups').select((eb) => eb.fn.countAll<number>().as('n')).where('status', '=', 'open').executeTakeFirst(),
-    db.selectFrom('issues').select((eb) => eb.fn.countAll<number>().as('n')).where('status', '=', 'open').executeTakeFirst(),
+    db.selectFrom('need_groups').select((eb) => eb.fn.countAll<number>().as('n')).where('status', '=', 'open').where(notEvalOnlyGroup(db)).executeTakeFirst(),
+    db.selectFrom('issues').select((eb) => eb.fn.countAll<number>().as('n')).where('status', '=', 'open').where(liveIssue(db)).executeTakeFirst(),
     db.selectFrom('eval_runs').select((eb) => eb.fn.countAll<number>().as('n')).where('status', 'in', ['queued', 'running']).executeTakeFirst(),
   ]);
   return { inboxOpen: Number(n?.n ?? 0) + Number(i?.n ?? 0), evalsRunning: Number(e?.n ?? 0) };

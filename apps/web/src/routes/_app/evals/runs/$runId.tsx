@@ -216,6 +216,7 @@ function TaskResults({ rows, runId }: { rows: TaskResultRow[]; runId: string }) 
                   </span>
                   {c.flaky ? <Pill tone="warn" className="ml-1">flaky</Pill> : null}
                   {c.failureCause && c.passes < c.attempts ? <span className="block text-xs text-muted-foreground">{CAUSE[c.failureCause]}</span> : null}
+                  <AttemptTraces runs={c.runs} task={t.key} model={c.model} mode={c.mode} />
                 </td>
               ))}
             </tr>
@@ -223,8 +224,41 @@ function TaskResults({ rows, runId }: { rows: TaskResultRow[]; runId: string }) 
         </tbody>
       </table>
       <p className="px-4 py-2 text-xs text-muted-foreground">
-        Eval traces are tagged <code>eval</code>; see them in Tasks with “Eval traffic” (run {runLabel(runId)}).
+        Each attempt links to its trace (run {runLabel(runId)}). Eval traffic never reaches the inbox, usage or analytics.
       </p>
     </div>
+  );
+}
+
+const TRACE_NOTE = { none: 'no trace', expired: 'expired' } as const;
+const TRACE_TITLE = { none: 'No trace was recorded: the agent made no tool call in this attempt.', expired: 'The trace was removed by the retention policy.' } as const;
+
+/** One link per attempt to its task trace (tasks/$taskId), or why there is none. */
+function AttemptTraces({ runs, task, model, mode }: { runs: TaskResultRow['cells'][number]['runs']; task: string; model: string; mode: string }) {
+  if (!runs.length) return null;
+  const single = runs.length === 1;
+  return (
+    <ul aria-label={`Attempt traces for ${task}, ${model} ${mode}`} className="mt-1 flex flex-wrap justify-center gap-x-2 gap-y-0.5 text-xs">
+      {runs.map((a) => {
+        const label = single ? 'trace' : `#${a.attempt}`;
+        const outcome = a.passed ? 'passed' : 'failed';
+        const why = a.trace === 'expired' ? 'expired' : 'none';
+        return (
+          <li key={a.attempt}>
+            {a.trace === 'recorded' && a.taskId ? (
+              <Link to="/tasks/$taskId" params={{ taskId: a.taskId }} className={cn('hover:underline', a.passed ? 'text-primary' : 'text-destructive')} aria-label={`Trace of attempt ${a.attempt} (${outcome})`}>
+                {label}
+              </Link>
+            ) : (
+              <span className="text-muted-foreground" title={TRACE_TITLE[why]}>
+                {single ? '' : `${label} `}
+                {TRACE_NOTE[why]}
+                <span className="sr-only"> (attempt {a.attempt} {outcome}: {TRACE_TITLE[why]})</span>
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

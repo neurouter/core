@@ -7,7 +7,7 @@ import { newId } from '../../kernel/lib/ids.js';
 import type { Keyring } from '../../kernel/secrets/keyring.js';
 import type { RuntimeBundle, RuntimeConfigSource } from '../../kernel/runtime-config.js';
 import type { McpAuthenticator } from '../auth/authenticate.js';
-import { RC_KEY, traceIdOf, type ClientInfo, type Principal, type RunContext } from '../pipeline/context.js';
+import { originOf, RC_KEY, traceIdOf, type ClientInfo, type Principal, type RunContext, type TrafficOrigin } from '../pipeline/context.js';
 import type { Confirmer, ConfirmOutcome, Pipeline } from '../pipeline/pipeline.js';
 import type { TaskTracker } from '../tasks/tracker.js';
 import { startCallTrace } from '../../kernel/observability/tracing.js';
@@ -53,6 +53,7 @@ interface RequestCtx {
   bundle: RuntimeBundle;
   principal: Principal;
   credentialKey: string;
+  origin: TrafficOrigin;
   ip: string;
   userAgent: string | null;
   traceparent: string | null;
@@ -101,6 +102,7 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
     apiKeyId: p.type === 'api_key' ? p.apiKeyId : null,
     oauthClientId: p.type === 'user' ? p.oauthClientId : null,
     traceId: traceIdOf(tp),
+    origin: rc.origin,
   };
   const task = await d.tracker.resolve(owner, metaTask, { create: createTask });
   return {
@@ -109,11 +111,12 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
     environment: { id: b.environment.id, slug: b.environment.slug, kind: b.environment.kind },
     principal: p,
     credentialKey: rc.credentialKey,
+    origin: rc.origin,
     client,
     bundle: b,
     taskId: task.taskId,
     framing: task.framing,
-    via: p.type === 'api_key' && p.purpose === 'eval' ? 'eval' : 'direct',
+    via: rc.origin === 'eval' ? 'eval' : 'direct',
     mode: 'tool',
     traceparent: tp,
     ip: rc.ip,
@@ -173,6 +176,7 @@ export function buildServerFactory(d: McpRouteDeps) {
       environment: { id: b.environment.id, slug: b.environment.slug, kind: b.environment.kind },
       principal: rc.principal,
       credentialKey: rc.credentialKey,
+      origin: rc.origin,
       client: { name: rc.legacyClient?.name ?? null, version: null, protocolVersion: null, era: mctx.era, caps: null },
       bundle: b,
       taskId: null,
@@ -288,7 +292,8 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
       const rpc = inspectJsonRpc(body);
       if (rpc.initialize) legacyClients.remember(auth.credentialKey, sessionId, rpc.initialize);
       for (const id of rpc.cancels) void inflight.cancel(auth.credentialKey, id).catch(() => {});
-      const isEval = auth.principal.type === 'api_key' && auth.principal.purpose === 'eval';
+      const origin = originOf(auth.principal);
+      const isEval = origin === 'eval';
       const mockNs = isEval ? header(req, HEADER_MOCK_STATE) : undefined;
       // any credential may narrow its own surface (console "code mode only" snippets); code still needs
       // code mode to be available (env codeMode, code:run scope, kill switches, executor), see effectiveMode
@@ -300,6 +305,7 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
         bundle: effective,
         principal: auth.principal,
         credentialKey: auth.credentialKey,
+        origin,
         ip: req.ip,
         userAgent: ua ? ua.slice(0, 512) : null,
         traceparent: header(req, 'traceparent') ?? null,

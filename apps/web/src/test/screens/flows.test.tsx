@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { meFixture } from '@/mocks/fixtures';
-import { createDb } from '@/mocks/db';
+import { createDb, taskDetail } from '@/mocks/db';
 import { renderRoute } from '@/test/render';
 
 describe('import wizard', () => {
@@ -127,6 +127,19 @@ describe('task detail', () => {
   });
 });
 
+describe('eval task trace', () => {
+  it('shows eval reports in the timeline without an inbox link', async () => {
+    const db = createDb({ speed: 0 });
+    const base = taskDetail(db, 'task_flag_unpaid')!;
+    const evalTask = { ...base, origin: 'eval' as const, unmetNeeds: [], issues: [], evalRunId: 'run_14', timeline: [...base.timeline, { id: 'aud_eval_need', kind: 'unmet_need' as const, ts: base.timeline.at(-1)!.ts, tool: 'neurouter_report_unmet_need', auditId: 'aud_eval_need', status: 'ok' as const, decision: 'allowed' as const, summary: 'Book a vet appointment' }] };
+    await renderRoute('/tasks/task_flag_unpaid', { db, fixtures: { 'tasks.get': () => evalTask } });
+    expect(await screen.findByText('eval traffic')).toBeInTheDocument();
+    const entry = (await screen.findByText(/Book a vet appointment/)).closest('div')!;
+    expect(within(entry).getByText(/not sent to the inbox/)).toBeInTheDocument();
+    expect(within(entry).queryByRole('link', { name: 'Open in inbox' })).not.toBeInTheDocument();
+  });
+});
+
 describe('inbox', () => {
   it('triages a need group to Planned', async () => {
     const { user } = await renderRoute('/inbox/needs/need_csv_export');
@@ -143,6 +156,21 @@ describe('evals', () => {
     const row = within(table).getByRole('row', { name: /gpt-6-luna/ });
     expect(within(row).getByText('best')).toBeInTheDocument();
     expect(within(row).getByText('86%')).toBeInTheDocument();
+  });
+
+  it('links each attempt to its task trace, and says when an attempt has none', async () => {
+    const { user, router } = await renderRoute('/evals/runs/run_14?tab=tasks');
+    const table = await screen.findByRole('table', { name: /passes per task/i });
+    const links = within(table).getAllByRole('link', { name: /Trace of attempt 1/ });
+    expect(links.length).toBeGreaterThan(0);
+    expect(links[0]).toHaveAttribute('href', '/tasks/task_flag_unpaid');
+    // impossible tasks that failed without any tool call have no trace
+    expect(within(table).getAllByText(/no trace/).length).toBeGreaterThan(0);
+    expect(within(table).getAllByText(/the agent made no tool call in this attempt/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/see them in Tasks/)).not.toBeInTheDocument();
+    await user.click(links[0]!);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/tasks/task_flag_unpaid'));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Flag unpaid orders older than 30 days' })).toBeInTheDocument();
   });
 
   it('verifies a fix and applies it to the overlay draft', async () => {

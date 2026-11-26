@@ -18,6 +18,8 @@ export interface TaskOwner {
   apiKeyId: string | null;
   oauthClientId: string | null;
   traceId: string | null;
+  /** Persisted as `tasks.origin` (eval tasks stay filterable after their eval key is garbage-collected). */
+  origin: 'live' | 'eval';
 }
 
 export type CounterField = 'call_count' | 'error_count' | 'write_count' | 'blocked_count' | 'script_count' | 'decision_count' | 'ops_count';
@@ -106,6 +108,7 @@ export class TaskTracker {
         last_activity_at: t,
         ended_at: null,
         trace_id: o.traceId,
+        origin: o.origin,
       })
       .execute();
     this.cache.set(this.key(o), { at: t, taskId: id });

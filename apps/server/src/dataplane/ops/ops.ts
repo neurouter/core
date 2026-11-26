@@ -134,6 +134,11 @@ const cap = (s: unknown, n = TEXT_CAP): string => (typeof s === 'string' ? s : s
 /**
  * `neurouter_*` ops tools (§11): toggled per server, audited as `ops_call`, rate-limited 60/min per
  * credential, and never fail the agent's task — on internal error they answer `{ recorded: false }`.
+ *
+ * Eval traffic (`ctx.origin === 'eval'`) gets the same answers, but its unmet needs and issues are
+ * recorded only in the `ops_call` audit row (params + output, which the eval scorer and the task
+ * timeline read) and the eval transcript: never in `unmet_needs` / `need_groups` / `issues`, never in
+ * the ops metrics, never an inbox change.
  */
 export class OpsTools {
   constructor(private readonly d: OpsDeps) {}
@@ -146,7 +151,7 @@ export class OpsTools {
   async call(ctx: RunContext, op: OpsTool | typeof READ_RESULT, args: Record<string, unknown>): Promise<{ result: McpToolResult; value: unknown }> {
     const start = this.d.now();
     const auditId = newId();
-    this.d.metrics?.opsCalls.inc({ tool: op });
+    if (ctx.origin !== 'eval') this.d.metrics?.opsCalls.inc({ tool: op });
     const rl = await this.d.limiter.take([this.d.limiter.opsCheck(ctx.credentialKey)]);
     let value: Record<string, unknown>;
     let status: 'ok' | 'blocked' = 'ok';
@@ -192,6 +197,7 @@ export class OpsTools {
       apiKeyId: p.type === 'api_key' ? p.apiKeyId : null,
       oauthClientId: p.type === 'user' ? p.oauthClientId : null,
       traceId: null,
+      origin: ctx.origin,
     };
   }
 
@@ -218,7 +224,7 @@ export class OpsTools {
         const notes = a.notes === undefined ? null : await this.redactText(cap(a.notes));
         await this.d.tracker.close(taskId, outcome, notes);
         const t = await db.selectFrom('tasks').select(['call_count', 'error_count', 'started_at', 'ended_at', 'framing', 'server_id']).where('id', '=', taskId).executeTakeFirst();
-        this.d.metrics?.tasksTotal.inc({ server: ctx.server.slug, framing: t?.framing ?? 'explicit', outcome });
+        if (ctx.origin !== 'eval') this.d.metrics?.tasksTotal.inc({ server: ctx.server.slug, framing: t?.framing ?? 'explicit', outcome });
         return { task_id: taskId, calls: t?.call_count ?? 0, errors: t?.error_count ?? 0, duration_ms: t ? Number(t.ended_at ?? now) - Number(t.started_at) : 0 };
       }
       case 'log_decision': {
@@ -230,6 +236,8 @@ export class OpsTools {
         const intent = await this.redactText(cap(a.intent));
         if (!intent) return { recorded: false, reason: 'intent is required' };
         const attempted = Array.isArray(a.attempted) ? a.attempted.filter((x): x is string => typeof x === 'string').slice(0, 20).map((x) => x.slice(0, 64)) : [];
+        // eval: same answer shape, recorded only in the audit row (never grouped, counted or shown in the inbox)
+        if (ctx.origin === 'eval') return { recorded: true, group_id: newId(), similar_reports: 0 };
         const groupId = await this.groupFor(ctx, intent, now);
         await db.insertInto('unmet_needs').values({ id: newId(), tenant_id: ctx.tenantId, group_id: groupId, server_id: ctx.server.id, environment_id: ctx.environment.id, task_id: ctx.taskId, user_id: principalUserId(ctx.principal), credential_key: ctx.credentialKey, client_name: ctx.client.name, intent, attempted: toJsonColumn(attempted), created_at: now, audit_id: auditId }).execute();
         const agg = await db.selectFrom('unmet_needs').select([(eb) => eb.fn.countAll<number>().as('n'), (eb) => eb.fn.count<number>('credential_key').distinct().as('p')]).where('group_id', '=', groupId).executeTakeFirst();
@@ -247,6 +255,7 @@ export class OpsTools {
           const json = JSON.stringify(a.evidence) ?? 'null';
           evidence = Buffer.byteLength(json) <= 4096 ? (await this.d.redactor()).redact(a.evidence).value : { truncated: (await this.redactText(json.slice(0, 4000))) };
         }
+        if (ctx.origin === 'eval') return { recorded: true, issue_id: newId() };
         let related: string | null = null;
         if (typeof a.error_id === 'string') related = (await this.d.errors.get(ctx.tenantId, a.error_id))?.auditId ?? null;
         const id = newId();
