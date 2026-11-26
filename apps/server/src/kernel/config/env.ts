@@ -96,10 +96,16 @@ export const Env = z
     EMBEDDINGS_ALLOW_REMOTE: zBool.default(true),
 
     UPSTREAM_ALLOW_PRIVATE_NETWORKS: zBool.default(true),
+    /** Added to the cloud-metadata floor (kernel/lib/net/policy.ts), never replacing it. */
     UPSTREAM_DENY_CIDRS: zCsv.default(['169.254.0.0/16', 'fd00:ec2::/32']),
+    /** Opt out of the cloud-metadata deny floor (only for deliberately proxied metadata services). */
+    UPSTREAM_ALLOW_METADATA: zBool.default(false),
     OUTBOUND_ALLOW_PRIVATE_NETWORKS: zBool.default(false),
     OUTBOUND_ALLOW_HTTP_LOOPBACK: zBool.default(false),
-    HTTPS_PROXY: opt(z.string()),
+    /** Egress proxy for upstream APIs, spec URLs, OIDC/JWKS, webhooks and LLM providers (NO_PROXY respected). */
+    HTTPS_PROXY: opt(z.url({ protocol: /^https?$/ })),
+    HTTP_PROXY: opt(z.url({ protocol: /^https?$/ })),
+    NO_PROXY: zCsv.default([]),
 
     METRICS_ENABLED: zBool.default(true),
     METRICS_TOKEN: opt(z.string()),

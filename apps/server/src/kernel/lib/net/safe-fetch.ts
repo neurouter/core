@@ -1,7 +1,8 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
-import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from 'undici';
-import { assertUrlAllowed, blockedReason, parseCidrs, SsrfError, type NetPolicy } from './ssrf-guard.js';
+import ipaddr from 'ipaddr.js';
+import { Agent, ProxyAgent, fetch as undiciFetch, type Dispatcher, type RequestInit as UndiciRequestInit } from 'undici';
+import { assertUrlAllowed, blockedReason, hostOf, parseCidrs, SsrfError, type NetPolicy } from './ssrf-guard.js';
 
 export type Resolver = (hostname: string) => Promise<LookupAddress[]>;
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -20,6 +21,51 @@ export interface SafeFetchOptions {
   resolver?: Resolver;
   /** Transport override (tests); receives the validated URL and init. */
   transport?: (url: URL, init: RequestInit & { dispatcher?: unknown }) => Promise<Response>;
+  /** Egress proxy (HTTPS_PROXY / HTTP_PROXY / NO_PROXY). */
+  proxy?: ProxyConfig;
+}
+
+export interface ProxyConfig {
+  /** Proxy for https URLs (HTTPS_PROXY, else HTTP_PROXY). */
+  https?: string;
+  /** Proxy for http URLs (HTTP_PROXY). */
+  http?: string;
+  /** NO_PROXY entries: `*`, host names (`.suffix` or `*.suffix` match subdomains), IPs, CIDRs, optional `:port`. */
+  noProxy: string[];
+}
+
+/** NO_PROXY matching (curl semantics: a plain name matches itself and its subdomains). */
+export function noProxyMatch(url: URL, entries: readonly string[]): boolean {
+  const host = hostOf(url).toLowerCase();
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+  for (const raw of entries) {
+    let e = raw.trim().toLowerCase();
+    if (!e) continue;
+    if (e === '*') return true;
+    let ePort: string | null = null;
+    const m = /^(\[[^\]]+\]|[^:]+):(\d+)$/.exec(e);
+    if (m) {
+      e = m[1]!;
+      ePort = m[2]!;
+    }
+    e = e.replace(/^\[|\]$/g, '');
+    if (ePort && ePort !== port) continue;
+    if (ipaddr.isValid(host) && e.includes('/') && ipaddr.isValidCIDR(e)) {
+      const [net, bits] = ipaddr.parseCIDR(e);
+      const a = ipaddr.process(host);
+      if (a.kind() === net.kind() && a.match(net, bits)) return true;
+      continue;
+    }
+    e = e.replace(/^\*?\./, '');
+    if (host === e || host.endsWith(`.${e}`)) return true;
+  }
+  return false;
+}
+
+/** Proxy URL for a request URL, or null for a direct connection. */
+export function proxyFor(url: URL, proxy: ProxyConfig | undefined): string | null {
+  if (!proxy || noProxyMatch(url, proxy.noProxy)) return null;
+  return (url.protocol === 'https:' ? (proxy.https ?? proxy.http) : proxy.http) ?? null;
 }
 
 const defaultResolver: Resolver = (host) => dnsLookup(host, { all: true, verbatim: true });
@@ -77,9 +123,43 @@ export function createSafeFetch(opts: SafeFetchOptions): FetchLike & { close(): 
   const agent = opts.transport
     ? null
     : new Agent({ connect: { lookup: pinnedLookup(opts.policy, opts.resolver) as never, timeout: opts.connectTimeoutMs ?? 5000 } });
+  const proxies = new Map<string, ProxyAgent>();
+  const resolver = opts.resolver ?? defaultResolver;
+  const denied = parseCidrs(opts.policy.denyCidrs);
+  /**
+   * Through a proxy the proxy resolves the name, so the connect-time DNS pin cannot apply: every
+   * address the name resolves to here is checked first (the proxy may still resolve differently;
+   * keep the proxy's own egress rules in place). Names that do not resolve locally are refused.
+   */
+  const viaProxy = async (url: URL, proxyUrl: string): Promise<Dispatcher> => {
+    const host = hostOf(url);
+    if (!ipaddr.isValid(host)) {
+      let records: LookupAddress[];
+      try {
+        records = await resolver(host);
+      } catch (err) {
+        throw new SsrfError(`Cannot resolve ${host} to check it before using the proxy: ${(err as Error).message}`, 'dns');
+      }
+      if (!records.length) throw new SsrfError(`No addresses for ${host}`, 'dns');
+      for (const r of records) {
+        const reason = blockedReason(r.address, opts.policy, denied);
+        if (reason) throw new SsrfError(`Blocked: ${host} resolves to a forbidden address (${reason})`, 'blocked_address');
+      }
+    }
+    let p = proxies.get(proxyUrl);
+    if (!p) {
+      p = new ProxyAgent({ uri: proxyUrl, connectTimeout: opts.connectTimeoutMs ?? 5000 });
+      proxies.set(proxyUrl, p);
+    }
+    return p;
+  };
   const send =
     opts.transport ??
-    ((url: URL, init: RequestInit) => undiciFetch(url, { ...(init as UndiciRequestInit), dispatcher: agent! }) as unknown as Promise<Response>);
+    (async (url: URL, init: RequestInit) => {
+      const proxyUrl = proxyFor(url, opts.proxy);
+      const dispatcher = proxyUrl ? await viaProxy(url, proxyUrl) : agent!;
+      return undiciFetch(url, { ...(init as UndiciRequestInit), dispatcher }) as unknown as Promise<Response>;
+    });
 
   const fn = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     let url: URL;
@@ -121,5 +201,10 @@ export function createSafeFetch(opts: SafeFetchOptions): FetchLike & { close(): 
       url = next;
     }
   };
-  return Object.assign(fn, { close: async () => { await agent?.close(); } });
+  return Object.assign(fn, {
+    close: async () => {
+      await agent?.close();
+      for (const p of proxies.values()) await p.close();
+    },
+  });
 }

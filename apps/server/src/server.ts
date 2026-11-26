@@ -18,6 +18,18 @@ import { routePlugins } from './routes.js';
 
 export { ConfigError };
 
+/** Proxy URL without credentials (for logs). */
+function redactProxy(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.username || u.password) u.username = u.password = '***';
+    return u.toString();
+  } catch {
+    return '(invalid)';
+  }
+}
+
 /** Pre-parses NEUROUTER_CONFIG for its process-level keys; null when there is no usable file (the reconcile reports problems). */
 async function readFileDefaults(source: Record<string, string | undefined>): Promise<FileEnvDefaults | null> {
   const path = source.NEUROUTER_CONFIG;
@@ -67,6 +79,12 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const config = loadConfig({ ...source, ...(file?.env ?? {}) });
   config.externalAs = file?.externalAs ?? null;
   const logger = createLogger({ level: config.env.LOG_LEVEL, pretty: config.env.LOG_PRETTY, instanceId: config.instanceId });
+  // egress proxy for plain fetch() users (LLM provider SDKs, JWKS); guarded fetches get it per request (safe-fetch)
+  if (config.env.HTTPS_PROXY || config.env.HTTP_PROXY) {
+    const { EnvHttpProxyAgent, setGlobalDispatcher } = await import('undici');
+    setGlobalDispatcher(new EnvHttpProxyAgent({ ...(config.env.HTTP_PROXY ? { httpProxy: config.env.HTTP_PROXY } : {}), ...(config.env.HTTPS_PROXY ? { httpsProxy: config.env.HTTPS_PROXY } : {}), noProxy: config.env.NO_PROXY.join(',') }));
+    logger.info({ httpsProxy: redactProxy(config.env.HTTPS_PROXY), httpProxy: redactProxy(config.env.HTTP_PROXY), noProxy: config.env.NO_PROXY }, 'egress proxy configured');
+  }
   for (const w of config.warnings) logger.warn(w);
   for (const w of file?.warnings ?? []) logger.warn(`neurouter.yaml: ${w}`);
   const dbs = createDatabases({ databaseUrl: config.databaseUrl, auditDatabaseUrl: config.auditDatabaseUrl, poolMax: config.env.DB_POOL_MAX, auditPoolMax: config.env.AUDIT_DB_POOL_MAX, onWarn: (msg, err) => logger.warn({ err }, msg) });

@@ -17,7 +17,7 @@ import type { Databases } from './kernel/db/index.js';
 import type { Clock } from './kernel/lib/clock.js';
 import { newId } from './kernel/lib/ids.js';
 import { createSafeFetch, type FetchLike } from './kernel/lib/net/safe-fetch.js';
-import type { NetPolicy } from './kernel/lib/net/ssrf-guard.js';
+import { outboundPolicy, proxyOptions, upstreamPolicy } from './kernel/lib/net/policy.js';
 import { Metrics } from './kernel/observability/metrics.js';
 import { DbRuntimeConfigSource } from './kernel/runtime-config.js';
 import { BuiltinSecretProvider } from './kernel/secrets/builtin.provider.js';
@@ -85,14 +85,7 @@ export interface ServiceInputs {
   otelLogProvider?: () => Promise<LogProviderLike>;
 }
 
-export function upstreamPolicy(config: Config, allowHttp = false): NetPolicy {
-  const allowPrivate = config.env.UPSTREAM_ALLOW_PRIVATE_NETWORKS;
-  return { allowPrivate, denyCidrs: config.env.UPSTREAM_DENY_CIDRS, allowHttp: allowHttp || allowPrivate ? 'always' : config.env.OUTBOUND_ALLOW_HTTP_LOOPBACK ? 'loopback' : 'never' };
-}
-
-export function outboundPolicy(config: Config): NetPolicy {
-  return { allowPrivate: config.env.OUTBOUND_ALLOW_PRIVATE_NETWORKS, denyCidrs: config.env.UPSTREAM_DENY_CIDRS, allowHttp: config.env.OUTBOUND_ALLOW_HTTP_LOOPBACK ? 'loopback' : 'never' };
-}
+export { upstreamPolicy, outboundPolicy } from './kernel/lib/net/policy.js';
 
 /** Composition root: constructs services with explicit dependencies (no DI framework). The only module importing both planes. */
 export function createServices(input: ServiceInputs) {
@@ -153,7 +146,7 @@ export function createServices(input: ServiceInputs) {
   /* ---------------------------------------------------------------- outbound */
   let outboundFetch = input.outboundFetch;
   if (!outboundFetch) {
-    const f = createSafeFetch({ policy: outboundPolicy(config), maxBytes: 16 * 1024 * 1024, timeoutMs: 30_000, maxRedirects: 3 });
+    const f = createSafeFetch({ policy: outboundPolicy(config), ...proxyOptions(config), maxBytes: 16 * 1024 * 1024, timeoutMs: 30_000, maxRedirects: 3 });
     closers.push(() => f.close());
     outboundFetch = f;
   }
@@ -162,7 +155,7 @@ export function createServices(input: ServiceInputs) {
     if (input.upstreamFetch) return input.upstreamFetch;
     let f = upstreamFetches.get(allowHttp);
     if (!f) {
-      const sf = createSafeFetch({ policy: upstreamPolicy(config, allowHttp), maxBytes: 64 * 1024 * 1024, connectTimeoutMs: 5000, maxRedirects: 0 });
+      const sf = createSafeFetch({ policy: upstreamPolicy(config, allowHttp), ...proxyOptions(config), maxBytes: 64 * 1024 * 1024, connectTimeoutMs: 5000, maxRedirects: 0 });
       closers.push(() => sf.close());
       upstreamFetches.set(allowHttp, sf);
       f = sf;

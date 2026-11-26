@@ -90,7 +90,8 @@ export async function environmentRoutes(app: FastifyInstance, c: ApiContext): Pr
     const t0 = c.clock.now();
     try {
       const { createSafeFetch } = await import('../../../kernel/lib/net/safe-fetch.js');
-      const f = createSafeFetch({ policy: { allowPrivate: c.config.env.UPSTREAM_ALLOW_PRIVATE_NETWORKS, denyCidrs: c.config.env.UPSTREAM_DENY_CIDRS, allowHttp: 'always' }, maxBytes: 64 * 1024, timeoutMs: 5000 });
+      const { upstreamPolicy, proxyOptions } = await import('../../../kernel/lib/net/policy.js');
+      const f = createSafeFetch({ policy: upstreamPolicy(c.config, true), ...proxyOptions(c.config), maxBytes: 64 * 1024, timeoutMs: 5000 });
       const res = await f(req.body.baseUrl, { method: 'HEAD' });
       await f.close();
       return { ok: res.status < 500, latencyMs: c.clock.now() - t0, status: res.status, credential: credential as 'ok' | 'missing' | 'not_required' };
