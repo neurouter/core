@@ -48,7 +48,6 @@ function fileManagedSettings(c: ApiContext): string[] {
     if (st?.evals?.fallbacks) out.push('models.fallbacks');
     if (st?.evals?.apiKey) out.push('models.anthropicKey', 'models.apiKeys');
     if (st?.discovery) out.push('discovery.nativeSearchClients');
-    if (st?.tasks) out.push('models.labelInferredTasks');
     if (st?.audit) out.push('audit.storeOutputs');
     return out;
   } catch {
@@ -75,7 +74,6 @@ async function settingsView(c: ApiContext): Promise<Settings> {
       generatorModel: (await s.get('generatorModel')) ?? evalModel,
       effort: await s.get('evalEffort'),
       fallbacks: await s.get('evalFallbacks'),
-      labelInferredTasks: await s.get('labelInferredTasks'),
     },
     codeMode: { enabled: await s.get('codeModeEnabled'), executor: c.ports.executorStatus(), defaults: DEFAULT_CODE_LIMITS },
     retention: { auditDays: await s.get('auditRetentionDays'), taskDays: (await s.get('retentionDays')) ?? c.config.env.NEUROUTER_RETENTION_DAYS },
@@ -167,7 +165,7 @@ export async function settingsRoutes(app: FastifyInstance, c: ApiContext): Promi
       if (m.generatorModel) await s.set('generatorModel', m.generatorModel, u.id);
       if (m.effort) await s.set('evalEffort', m.effort, u.id);
       if (m.fallbacks) await s.set('evalFallbacks', m.fallbacks, u.id);
-      if (m.labelInferredTasks !== undefined) await s.set('labelInferredTasks', m.labelInferredTasks, u.id);
+      // m.labelInferredTasks: deprecated, accepted and ignored
     }
     if (b.codeMode?.enabled !== undefined) {
       await s.set('codeModeEnabled', b.codeMode.enabled, u.id);

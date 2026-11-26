@@ -37,7 +37,6 @@ export const Settings = z.object({
     generatorModel: z.string(),
     effort: EvalEffort,
     fallbacks: z.enum(['default', 'off']),
-    labelInferredTasks: z.boolean(),
   }),
   codeMode: z.object({ enabled: z.boolean(), executor: ExecutorStatus, defaults: CodeLimits }),
   retention: z.object({ auditDays: z.number().int(), taskDays: z.number().int() }),
@@ -63,6 +62,7 @@ export const SettingsPatch = z.object({
       generatorModel: z.string().min(1),
       effort: EvalEffort,
       fallbacks: z.enum(['default', 'off']),
+      /** @deprecated accepted for older clients and ignored (no feature reads it). */
       labelInferredTasks: z.boolean(),
     })
     .partial()

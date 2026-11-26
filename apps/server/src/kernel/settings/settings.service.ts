@@ -47,7 +47,6 @@ export interface SettingValues {
   /** Last test of the Anthropic provider (legacy); other kinds in `modelProviderLastTests`. */
   modelProviderLastTest: { at: number; ok: boolean } | null;
   modelProviderLastTests: Partial<Record<'openai' | 'anthropic' | 'gemini', { at: number; ok: boolean }>>;
-  labelInferredTasks: boolean;
   retentionDays: number | null;
   nativeSearchClients: string[];
   /** Ids of users who have signed in at least once with a local link (first-start banner). */
@@ -88,7 +87,6 @@ export const SETTING_DEFAULTS: SettingValues = {
   modelProviderNames: {},
   modelProviderLastTest: null,
   modelProviderLastTests: {},
-  labelInferredTasks: false,
   retentionDays: null,
   nativeSearchClients: [],
   firstAdminSignedIn: false,

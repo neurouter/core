@@ -113,7 +113,6 @@ export interface MockDb {
     generatorModel: string;
     effort: 'low' | 'medium' | 'high';
     fallbacks: 'default' | 'off';
-    labelInferredTasks: boolean;
     codeModeEnabled: boolean;
     storeOutputs: boolean;
     auditDays: number;
@@ -857,7 +856,7 @@ export function createDb(opts: { speed?: number } = {}): MockDb {
     servers, tasks: [], taskDetails: new Map(), calls: new Map(), scripts: new Map(), needGroups: [], issues: [], keys: [], runs: [], suggestions: [], adminAudit: [], previews: new Map(),
     users: Object.values(PEOPLE).map((p, i) => ({ id: p.id, email: p.email, name: p.name, role: p.role, roleSource: i === 0 ? 'bootstrap' : 'oidc', status: 'active', lastLoginAt: ago((i + 1) * 2 * HOUR), createdAt: ago((60 - i * 10) * DAY) })),
     killSwitches: [{ scope: 'tool', target: 'acme-orders/prod/cancel_order', kind: 'writes', reason: 'Investigating double cancellations (INC-2231)', createdBy: ref(PEOPLE.jon), createdAt: ago(26 * HOUR) }],
-    settings: { keys: { openai: { configured: true, source: 'env', last4: 'Lu6a' }, anthropic: { configured: true, source: 'stored', last4: '9fQa' }, gemini: { configured: false, source: null, last4: null } }, evalModel: 'gpt-6-luna', judgeModel: 'gpt-6-luna', generatorModel: 'gpt-6-luna', effort: 'medium', fallbacks: 'default', labelInferredTasks: true, codeModeEnabled: true, storeOutputs: false, auditDays: 90, taskDays: 30, orgName: INSTANCE.name },
+    settings: { keys: { openai: { configured: true, source: 'env', last4: 'Lu6a' }, anthropic: { configured: true, source: 'stored', last4: '9fQa' }, gemini: { configured: false, source: null, last4: null } }, evalModel: 'gpt-6-luna', judgeModel: 'gpt-6-luna', generatorModel: 'gpt-6-luna', effort: 'medium', fallbacks: 'default', codeModeEnabled: true, storeOutputs: false, auditDays: 90, taskDays: 30, orgName: INSTANCE.name },
     speed: opts.speed ?? 1, nextRunNumber: 19, seq: 0, auditCache: null,
   };
 

@@ -30,6 +30,12 @@ describe('settings, model providers, kill switches, system, users, public report
     expect(tel.ok).toBe(false);
   });
 
+  it('labelInferredTasks is gone from the settings view and accepted but ignored on update (deprecated)', async () => {
+    const u = await t.json(t.admin, { method: 'PATCH', url: '/api/settings', payload: { models: { labelInferredTasks: true } } }, 200);
+    expect(u.models).not.toHaveProperty('labelInferredTasks');
+    expect(await t.s.services.dbs.main.db.selectFrom('settings').select('key').where('key', '=', 'labelInferredTasks').executeTakeFirst()).toBeUndefined();
+  });
+
   it('per-provider stored keys: openai and gemini beside anthropic, one provider per kind, keys write-only', async () => {
     const u = await t.json(t.admin, { method: 'PATCH', url: '/api/settings', payload: { models: { apiKeys: { openai: { value: 'sk-proj-openai-1111' }, gemini: { value: 'AIza-gemini-2222' } } } } }, 200);
     expect(u.models.keys).toMatchObject({ openai: { configured: true, source: 'stored', last4: '1111' }, gemini: { configured: true, source: 'stored', last4: '2222' } });

@@ -170,9 +170,6 @@ function Models() {
         {select('m-judge', 'judgeModel', 'Judge model')}
         {select('m-gen', 'generatorModel', 'Task generator')}
       </div>
-      <label className="flex items-center gap-2.5 text-[13.5px]">
-        <Switch checked={s.models.labelInferredTasks} disabled={gate.disabled} onCheckedChange={(v) => update.mutate({ models: { labelInferredTasks: v } })} /> Label inferred tasks with a short goal (uses the eval model)
-      </label>
     </section>
   );
 }

@@ -269,7 +269,7 @@ function settingsView(db: MockDb) {
   const st = db.settings;
   return {
     general: { orgName: st.orgName, publicUrl: 'https://mcp.acme.test', retentionDays: st.taskDays },
-    models: { anthropicKey: st.keys.anthropic, keys: st.keys, evalModel: st.evalModel, judgeModel: st.judgeModel, generatorModel: st.generatorModel, effort: st.effort, fallbacks: st.fallbacks, labelInferredTasks: st.labelInferredTasks },
+    models: { anthropicKey: st.keys.anthropic, keys: st.keys, evalModel: st.evalModel, judgeModel: st.judgeModel, generatorModel: st.generatorModel, effort: st.effort, fallbacks: st.fallbacks },
     codeMode: { enabled: st.codeModeEnabled, executor: { mode: 'embedded' as const, ok: true, montyVersion: '0.4.2', poolMax: 8, busy: 1, detail: null }, defaults: { maxToolCalls: 200, wallTimeSec: 30, cpuTimeSec: 10, maxMemoryMb: 64, maxConcurrentCalls: 8, maxResultBytes: 1_048_576 } },
     retention: { auditDays: st.auditDays, taskDays: st.taskDays },
     telemetry: { otelEnabled: true, metricsEnabled: true, otlpEndpoint: 'http://otel-collector:4318' },
@@ -1217,7 +1217,7 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
       const b = await body<{ general?: { orgName?: string }; models?: Record<string, unknown>; codeMode?: { enabled?: boolean }; retention?: { auditDays?: number; taskDays?: number }; audit?: { storeOutputs?: boolean } }>(ctx);
       const writes = { ...((b.models?.apiKeys ?? {}) as Record<string, { value?: string; clear?: boolean }>), ...(b.models?.anthropicKey ? { anthropic: b.models.anthropicKey as { value?: string; clear?: boolean } } : {}) };
       for (const [kind, k] of Object.entries(writes)) if (kind === 'openai' || kind === 'anthropic' || kind === 'gemini') db.settings.keys[kind] = k.clear ? { configured: false, source: null, last4: null } : { configured: true, source: 'stored', last4: (k.value ?? '').slice(-4) };
-      for (const key of ['evalModel', 'judgeModel', 'generatorModel', 'effort', 'fallbacks', 'labelInferredTasks'] as const) if (b.models?.[key] !== undefined) (db.settings as Record<string, unknown>)[key] = b.models[key];
+      for (const key of ['evalModel', 'judgeModel', 'generatorModel', 'effort', 'fallbacks'] as const) if (b.models?.[key] !== undefined) (db.settings as Record<string, unknown>)[key] = b.models[key];
       if (b.codeMode?.enabled !== undefined) db.settings.codeModeEnabled = b.codeMode.enabled;
       if (b.retention?.auditDays) db.settings.auditDays = b.retention.auditDays;
       if (b.retention?.taskDays) db.settings.taskDays = b.retention.taskDays;
