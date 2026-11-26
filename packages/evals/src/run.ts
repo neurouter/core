@@ -112,7 +112,8 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
       return finish('error', (err as Error).message);
     }
     out.turns++;
-    out.inputTokens += res.usage.input_tokens ?? 0;
+    // Anthropic's input_tokens excludes cache writes as well as reads; cache writes are billed input
+    out.inputTokens += (res.usage.input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
     out.outputTokens += res.usage.output_tokens ?? 0;
     out.cacheReadTokens += res.usage.cache_read_input_tokens ?? 0;
     out.servedByModel = res.model;
