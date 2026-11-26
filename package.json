@@ -25,7 +25,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b && npm run typecheck:tests --workspaces --if-present",
-    "lint": "eslint .",
+    "lint": "eslint . && npm run lint -w @neurouter/web",
     "db:migrate": "npm run db:migrate -w @neurouter/server --",
     "keys": "npm run keys -w @neurouter/server --",
     "neurouter": "tsx --conditions=@neurouter/source packages/cli/src/main.ts"

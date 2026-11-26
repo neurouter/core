@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 
-/** Root Vitest config: one project per workspace (unit tests only). apps/web adds its own project later. */
+/** Root Vitest config: one project per workspace (unit tests only). apps/web runs jsdom under its own config. */
 export default defineConfig({
   test: {
     projects: [
@@ -10,11 +10,12 @@ export default defineConfig({
       'apps/executor/vitest.config.ts',
       'apps/server/vitest.config.ts',
       'packages/cli/vitest.config.ts',
+      'apps/web/vitest.config.ts',
     ],
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'html'],
-      exclude: ['**/dist/**', '**/*.test.*', '**/test/**'],
+      exclude: ['**/dist/**', '**/*.test.*', '**/test/**', 'apps/web/src/components/ui/**', 'apps/web/src/routeTree.gen.ts'],
     },
   },
 });
