@@ -4,7 +4,7 @@
  */
 import type { JsonSchema } from '@neurouter/shared';
 import { isObj, type Obj } from '../util.js';
-import { generateValue, hashSeed, seededFaker } from './generate.js';
+import { generateValue, hashSeed, mockDataVersionOf, seededFaker, type MockDataVersion } from './generate.js';
 import { handleGraphqlMock } from './graphql.js';
 import type { MockModel, MockOperation, OpenApiMockModel } from './model.js';
 import { asStateStore, DEFAULT_SEED, MockLimitError, newItem, toMockNs, type MockNs, type MockStateStore, type MockStore } from './store.js';
@@ -90,12 +90,12 @@ function checkBody(schema: JsonSchema | null, body: unknown): string[] {
  * A list response wrapped in an object (`{total_count, items}`, Stripe's `{object, data, has_more, url}`):
  * the envelope's other fields are generated from its schema so required ones are present.
  */
-function listEnvelope(op: MockOperation, nsSeed: number, page: Obj[], total: number, more: boolean): Obj {
+function listEnvelope(op: MockOperation, nsSeed: number, page: Obj[], total: number, more: boolean, dv: MockDataVersion): Obj {
   const w = op.listWrapper!;
   const props = isObj(w.schema.properties) ? (w.schema.properties as Obj) : {};
   const { [w.arrayProp]: _items, ...rest } = props;
   const faker = seededFaker(hashSeed(nsSeed, op.method, op.pathTemplate, 'envelope'));
-  const base = generateValue({ ...w.schema, properties: rest, required: ((w.schema.required as string[] | undefined) ?? []).filter((r) => r !== w.arrayProp) }, 'result', { faker, defs: defsOf(w.schema), depth: 0, index: 1 });
+  const base = generateValue({ ...w.schema, properties: rest, required: ((w.schema.required as string[] | undefined) ?? []).filter((r) => r !== w.arrayProp) }, 'result', { faker, defs: defsOf(w.schema), depth: 0, index: 1, dv });
   const out: Obj = isObj(base) ? base : {};
   const closed = w.schema.additionalProperties === false;
   if (!closed || 'total_count' in props) out.total_count = total;
@@ -146,6 +146,81 @@ export async function handleMockRequest(model: MockModel, store: MockStateStore 
   return matchedPath ? problem(405, 'Method Not Allowed', `${method} is not supported on ${rawPath}`) : problem(404, 'Not Found', `No mock operation for ${method} ${rawPath}`);
 }
 
+const RANGE_OPS = ['gt', 'gte', 'lt', 'lte'] as const;
+
+/** Values of a query param given as a scalar, a list, a comma list or a deepObject (`p[gte]=…`). */
+function queryValues(q: MockRequest['query'], name: string): string[] {
+  const raw = q?.[name];
+  if (raw === undefined || raw === '') return [];
+  return (Array.isArray(raw) ? raw : [raw]).flatMap((v) => String(v).split(',')).map((v) => v.trim()).filter((v) => v !== '');
+}
+
+function comparable(v: unknown): number | string | null {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  if (typeof v !== 'string') return null;
+  if (v !== '' && Number.isFinite(Number(v))) return Number(v);
+  const t = Date.parse(v);
+  return /^\d{4}-\d\d-\d\d/.test(v) && Number.isFinite(t) ? t / 1000 : v.toLowerCase();
+}
+
+/** Equality on a filter value: case-insensitive strings, numbers and booleans compared by value. */
+function sameValue(item: unknown, wanted: string): boolean {
+  if (item === null || item === undefined) return wanted === 'null';
+  if (typeof item === 'boolean') return String(item) === wanted.toLowerCase();
+  if (typeof item === 'number') return Number(wanted) === item;
+  return String(item).toLowerCase() === wanted.toLowerCase();
+}
+
+/**
+ * Filters, sorts and returns the items a list request selects: equality filters (comma lists, `all`
+ * = no filter), range filters (`amount[gte]=50`, `created[lt]=…`, also `amount.gte`), and the sort
+ * params (`sort=updated&direction=asc`; dates map to `<field>_at`). Without a sort param the
+ * insertion order stands (data version 2 seeds newest first).
+ */
+export function applyListQuery(op: MockOperation, all: Obj[], query: MockRequest['query']): Obj[] {
+  let items = all;
+  for (const [param, field] of Object.entries(op.filters)) {
+    const wanted = queryValues(query, param);
+    if (!wanted.length || wanted.includes('all')) continue;
+    items = items.filter((it) => wanted.some((w) => sameValue(it[field], w)));
+  }
+  for (const [param, field] of Object.entries(op.rangeFilters ?? {})) {
+    for (const opName of RANGE_OPS) {
+      const raw = firstQuery(query, `${param}[${opName}]`) ?? firstQuery(query, `${param}.${opName}`);
+      if (raw === undefined || raw === '') continue;
+      const bound = comparable(raw);
+      if (bound === null) continue;
+      items = items.filter((it) => {
+        const v = comparable(it[field]);
+        if (v === null || typeof v !== typeof bound) return false;
+        return opName === 'gt' ? v > bound : opName === 'gte' ? v >= bound : opName === 'lt' ? v < bound : v <= bound;
+      });
+    }
+  }
+  const sortBy = op.sort?.param ? firstQuery(query, op.sort.param) : undefined;
+  const dirRaw = op.sort?.directionParam ? firstQuery(query, op.sort.directionParam)?.toLowerCase() : undefined;
+  if (sortBy || dirRaw) {
+    const sample = items[0] ?? {};
+    const key = sortBy ? [sortBy, `${sortBy}_at`, `${sortBy}d_at`, sortBy.replace(/d$/, '') + 'd_at'].find((k) => k in sample) : ['created_at', 'created', 'updated_at'].find((k) => k in sample);
+    if (key) {
+      // GitHub: dates default to desc, names to asc
+      const isDate = /(_at|created|updated|pushed)$/.test(key);
+      const dir = dirRaw === 'asc' || dirRaw === 'desc' ? dirRaw : (op.sort?.defaultDirection ?? (isDate ? 'desc' : 'asc'));
+      const sign = dir === 'asc' ? 1 : -1;
+      items = [...items].sort((a, b) => {
+        const x = comparable(a[key]);
+        const y = comparable(b[key]);
+        if (x === y) return 0;
+        if (x === null) return 1;
+        if (y === null) return -1;
+        return (x < y ? -1 : 1) * sign;
+      });
+    }
+  }
+  return items;
+}
+
 /** Params in a seed: case-insensitive values (`Hello-World` and `hello-world` name the same repo). */
 function seedParams(params: Record<string, string>): string {
   return JSON.stringify(Object.keys(params).sort().map((k) => [k, String(params[k]).toLowerCase()]));
@@ -154,6 +229,7 @@ function seedParams(params: Record<string, string>): string {
 async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: MockNs, op: MockOperation, params: Record<string, string>, query: Record<string, string | string[] | undefined>, body: unknown): Promise<MockResponse> {
   // derived from the namespace seed, not its name: an eval attempt sees what generation saw
   const nsSeed = (await store.seedOf?.(ns)) ?? DEFAULT_SEED;
+  const dv = mockDataVersionOf(ns.name);
   const resource = op.resource ? model.resources[op.resource] : undefined;
   if (!resource || op.kind === 'action') {
     if (op.requestSchema && op.method !== 'GET') {
@@ -163,38 +239,47 @@ async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: Mock
     if (op.successStatus === 204 || !op.responseSchema) return { status: op.successStatus, headers: op.successStatus === 204 ? {} : JSON_HEADERS, body: op.successStatus === 204 ? null : {} };
     const faker = seededFaker(hashSeed(nsSeed, op.method, op.pathTemplate, seedParams(params)));
     const defs = isObj(op.responseSchema.$defs) ? (op.responseSchema.$defs as Obj) : {};
-    return { status: op.successStatus, headers: JSON_HEADERS, body: generateValue(op.responseSchema, 'result', { faker, defs, depth: 0, index: 1 }) };
+    return { status: op.successStatus, headers: JSON_HEADERS, body: generateValue(op.responseSchema, 'result', { faker, defs, depth: 0, index: 1, dv }) };
   }
   const scope = Object.fromEntries(resource.scopeParams.map((p) => [p, params[p] ?? '']));
 
   switch (op.kind) {
     case 'list': {
-      let items = await store.list(ns, resource, scope);
-      for (const [param, field] of Object.entries(op.filters)) {
-        const raw = query[param];
-        if (raw === undefined || raw === '') continue;
-        const wanted = new Set((Array.isArray(raw) ? raw : [raw]).flatMap((v) => v.split(',')).map((v) => v.trim()));
-        if (wanted.has('all')) continue;
-        items = items.filter((it) => wanted.has(String(it[field])));
-      }
+      const items = applyListQuery(op, await store.list(ns, resource, scope), query);
       const total = items.length;
-      const paged = op.paging.limit || op.paging.page || op.paging.offset || op.paging.cursor;
-      const limit = Math.max(1, Math.min(1000, Number(firstQuery(query, op.paging.limit) ?? (paged ? 30 : total || 1)) || 30));
+      const p = op.paging;
+      const paged = p.limit || p.page || p.offset || p.cursor || p.startingAfter;
+      const maxLimit = Math.min(1000, p.maxLimit ?? 1000);
+      const limit = Math.max(1, Math.min(maxLimit, Number(firstQuery(query, p.limit) ?? (paged ? (p.defaultLimit ?? 30) : total || 1)) || (p.defaultLimit ?? 30)));
       let offset = 0;
-      if (op.paging.offset) offset = Number(firstQuery(query, op.paging.offset) ?? 0) || 0;
-      else if (op.paging.cursor && firstQuery(query, op.paging.cursor)) offset = Number(firstQuery(query, op.paging.cursor)) || 0;
-      else if (op.paging.page) offset = (Math.max(1, Number(firstQuery(query, op.paging.page) ?? 1) || 1) - 1) * limit;
-      const page = items.slice(offset, offset + limit);
+      let end: number | null = null;
+      const idOf = (it: Obj) => String(it[resource.idField]);
+      const after = firstQuery(query, p.startingAfter);
+      const before = firstQuery(query, p.endingBefore);
+      if (p.startingAfter && after) {
+        const i = items.findIndex((it) => idOf(it) === after);
+        if (i < 0) return problem(400, 'Bad Request', `No such object for ${p.startingAfter}: ${after}`, { code: 'resource_missing', param: p.startingAfter });
+        offset = i + 1;
+      } else if (p.endingBefore && before) {
+        const i = items.findIndex((it) => idOf(it) === before);
+        if (i < 0) return problem(400, 'Bad Request', `No such object for ${p.endingBefore}: ${before}`, { code: 'resource_missing', param: p.endingBefore });
+        end = i;
+        offset = Math.max(0, i - limit);
+      } else if (p.offset) offset = Number(firstQuery(query, p.offset) ?? 0) || 0;
+      else if (p.cursor && firstQuery(query, p.cursor)) offset = Number(firstQuery(query, p.cursor)) || 0;
+      else if (p.page) offset = (Math.max(1, Number(firstQuery(query, p.page) ?? 1) || 1) - 1) * limit;
+      const page = items.slice(offset, end ?? offset + limit);
+      const more = end !== null ? offset > 0 : offset + page.length < total;
       const headers: Record<string, string> = { ...JSON_HEADERS };
-      if (offset + limit < total && op.paging.page) headers.link = `<?${op.paging.page}=${Math.floor(offset / limit) + 2}&${op.paging.limit ?? 'per_page'}=${limit}>; rel="next"`;
-      if (op.listWrapper) return { status: 200, headers, body: listEnvelope(op, nsSeed, page, total, offset + page.length < total) };
+      if (more && p.page && end === null) headers.link = `<?${p.page}=${Math.floor(offset / limit) + 2}&${p.limit ?? 'per_page'}=${limit}>; rel="next"`;
+      if (op.listWrapper) return { status: 200, headers, body: listEnvelope(op, nsSeed, page, total, more, dv) };
       return { status: op.successStatus, headers, body: page };
     }
     case 'create': {
       const errs = checkBody(op.requestSchema, body);
       if (errs.length) return problem(422, 'Unprocessable Entity', errs.join('; '), { errors: errs });
       const item = await store.create(ns, resource, scope, (id) => {
-        const it = { ...newItem(resource, hashSeed(nsSeed, resource.key, id), id, scope), ...(isObj(body) ? body : {}) };
+        const it = { ...newItem(resource, hashSeed(nsSeed, resource.key, id), id, scope, dv), ...(isObj(body) ? body : {}) };
         it[resource.idField] = resource.idType === 'integer' ? id : `${resource.name}_${id}`;
         touch(it, store, true);
         return it;

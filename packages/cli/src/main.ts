@@ -84,6 +84,14 @@ export function buildProgram(): Command {
     .option('--transcript-max-chars <n>', 'with --transcripts: trim each transcript item (text, tool result) to n characters (default: untrimmed)')
     .option('--suggest', 'print fix suggestions', false)
     .option('--embeddings', 'enable local search embeddings', false)
+    .option('--max-run-tokens <n>', 'hard token cap for the run (agent + judge tokens): stops starting attempts once reached and marks the run incomplete')
+    .option('--no-calibrate', 'with --suite: skip the calibration gate (each task\'s reference solution through its own assertions)')
+    .option('--calibrate-with <model>', 'calibration: also run one tool-mode pass with this model and flag tasks whose answers disagree with the ground truth (for review; not dropped)')
+    .option('--calibrate-only', 'calibrate the suite (--suite or --generate) and exit (1 when a task is rejected); with --save-suite, write it with the calibration')
+    .option('--migrate-suite <file>', 'convert a 0.2.1 suite file to the outcome-based model (0.2.2), calibrate it, and write it to --save-suite (default <file>.v2.json)')
+    .option('--regrade <transcripts>', 'with --suite: re-grade recorded attempts (an --transcripts file) with this grader; no agent runs; --out writes the rows')
+    .option('--judge-model <model>', 'with --regrade: model for new judge and answer-equivalence calls (default: none, recorded verdicts only)')
+    .option('--max-judge-tokens <n>', 'with --regrade: cap for judge tokens', '300000')
     .action(async (o) => (await import('./commands/eval.js')).cmdEval(o));
 
   const keys = program.command('keys').description('Crypto keys and API keys');

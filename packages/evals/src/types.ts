@@ -16,11 +16,45 @@ export interface EvalTask {
   enabled: boolean;
 }
 
-/** Portable suite file for git and CI (§15.2 step 5). */
+/** Calibration of one task: its own reference solution run through its assertions in the mock. */
+export interface TaskCalibration {
+  key: string;
+  /** `passed`: the reference passes; `rejected`: it does not (task not run); `flagged`: a model run disagrees (human review). */
+  status: 'passed' | 'rejected' | 'flagged';
+  reasons: string[];
+  /** Ground-truth preview (truncated JSON of the reference outcomes). */
+  groundTruth?: string;
+}
+
+/** Calibration gate result, stored with the suite (§ calibration). */
+export interface SuiteCalibration {
+  at: string;
+  mockDataVersion: number;
+  passed: number;
+  rejected: number;
+  flagged: number;
+  /** `--calibrate-with <model>`: the model that ran one tool-mode pass. */
+  model?: string | null;
+  tasks: TaskCalibration[];
+}
+
+/**
+ * Portable suite file for git and CI (§15.2 step 5). Version 2 (0.2.2): outcome-based assertions
+ * (`answer_contains.from`, required-only `called.args`, derived soft budgets), a mock data version
+ * and the calibration result. Version 1 files (0.2.1) load as mock data version 1; `migrateSuite`
+ * converts them.
+ */
 export interface SuiteFile {
-  version: 1;
+  version: 1 | 2;
   server: string;
   generatedFrom: { buildHash?: string | null; model?: string | null; promptVersion?: string | null; seed?: number | null } | null;
+  /** Mock data version the suite's prompts and ground truth refer to (1 = 0.2.1 data; default 1 for version-1 files, else 2). */
+  mockDataVersion?: number;
+  calibration?: SuiteCalibration | null;
+  /** Tasks per tag/resource cluster (generation). */
+  coverage?: Record<string, number>;
+  /** `migrateSuite`: what changed, per task key. */
+  migration?: { from: string; at: string; notes: Record<string, string[]> } | null;
   tasks: EvalTask[];
 }
 
@@ -84,6 +118,10 @@ export interface AttemptRun {
   transcript: TranscriptItem[];
   /** `_meta["dev.neurouter/task-id"]` seen on tool results (the Neurouter task the attempt ran in). */
   neurouterTaskId: string | null;
+  /** Whether the server offered begin/end task framing (`neurouter_begin_task` listed; false on contract 2). Absent on records before 0.2.2 (= true). */
+  framingAvailable?: boolean;
+  /** JSON size of the tools/list the agent got (sent with every turn). */
+  toolsListBytes?: number;
 }
 
 /** AttemptRun + the audit-log view of the calls: what the checker consumes. */
@@ -95,6 +133,18 @@ export interface AssertionResult {
   assertion: Assertion;
   passed: boolean;
   detail: string;
+  /** answer_contains: how the expected value was found (`judge`: the equivalence judge ruled it stated). */
+  matchedBy?: 'literal' | 'normalized' | 'judge';
+  /** max_calls: over the soft budget (efficiency) without failing. */
+  overBudget?: boolean;
+}
+
+/** LLM usage of judge calls (rubric judge + answer-equivalence judge). */
+export interface JudgeUsage {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
 }
 
 export interface JudgeResult {
@@ -110,6 +160,10 @@ export interface CheckResult {
   framingPassed: boolean | null;
   judge: JudgeResult | null;
   failureCause: FailureCause | null;
+  /** Upstream API calls (see budget.ts) and the task's budget (null without a max_calls assertion). */
+  upstreamCalls: number;
+  callBudget: number | null;
+  overBudget: boolean;
 }
 
 /** One `(task, model, mode, attempt)` result (`eval_task_runs` row). */
@@ -146,6 +200,14 @@ export interface TaskRunResult {
   error: string | null;
   transcript: TranscriptItem[];
   calls: ObservedCall[];
+  /** Upstream API calls (0.2.2; older results: absent). */
+  upstreamCalls?: number;
+  callBudget?: number | null;
+  /** Passed (or failed) while over the soft call budget. */
+  overBudget?: boolean;
+  /** Judge LLM usage for this attempt. */
+  judgeUsage?: JudgeUsage | null;
+  toolsListBytes?: number;
 }
 
 export interface ReadinessComponent {
@@ -177,6 +239,12 @@ export interface CellScore {
   flakyTasks: number;
   attempts: number;
   excludedFallback: number;
+  /** Attempts the model provider refused (policy filter): excluded from scoring. */
+  excludedRefusals?: number;
+  /** Counted attempts over their soft call budget. */
+  overBudget?: number;
+  /** Mean tools/list size the agent got (bytes; resent with every turn). */
+  avgToolsListBytes?: number | null;
   best: boolean;
 }
 
@@ -190,6 +258,8 @@ export interface ReadinessScore {
   cells: CellScore[];
   /** Components of the headline cell. */
   breakdown: ReadinessComponent[];
+  /** The run stopped early (`--max-run-tokens`): scores cover only the attempts that ran. */
+  incomplete?: { reason: string; attemptsRun: number; attemptsPlanned: number } | null;
 }
 
 /* ------------------------------------------------------------------ generator I/O */
@@ -209,8 +279,12 @@ export interface GenTool {
   key?: string;
   /** Group for sampling large APIs (first tag). */
   group?: string;
+  /** Pinned in the overlay (topic weighting). */
+  pinned?: boolean;
   /** HTTP path template (links the tool to mock sample resources). */
   path?: string;
+  /** HTTP method (equivalent-tool detection). */
+  method?: string;
 }
 
 export interface GeneratorCategoryInput {
@@ -227,6 +301,10 @@ export interface GeneratorCategoryInput {
   seed: number;
   /** Validation errors of the previous attempt (regeneration round). */
   previousErrors?: string[];
+  /** One topic (tag/resource cluster) per task to write, sampled by importance (topic balance). */
+  topics?: string[];
+  /** Prompts already accepted (avoid near-duplicates). */
+  existingPrompts?: string[];
 }
 
 /** Wire format of one generated task (`GeneratedTasks.tasks[]`, snake_case as in §15.2). */
@@ -236,7 +314,8 @@ export interface GeneratedTask {
   prompt: string;
   rubric: string;
   assertions: Assertion[];
-  reference_calls: ReferenceCall[];
+  reference_calls: Array<ReferenceCall & { required_args?: string[]; alternatives?: Array<string | { tool: string }> }>;
   seed_state?: Record<string, unknown> | null;
   tags?: string[];
+  topic?: string;
 }

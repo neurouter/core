@@ -13,7 +13,7 @@ export { shapeResponse, shapeOutputSchema, wrapStructured, clipToFit, REDACTED_V
 export { generateStubs, generateOpsStub, pySignatureFor, pyArgMap, pascalCase, MAX_TYPED_DICTS, type StubOptions } from './stubs.js';
 export { lint, LINT_WEIGHTS, type LintOptions } from './lint.js';
 export { diffSpecs, type SpecChangeSummary, type OpRef } from './diff.js';
-export { buildMockModel, type MockModel, type OpenApiMockModel, type GraphqlMockModel, type MockOperation, type MockResource, type MockOpKind } from './mock/model.js';
+export { buildMockModel, objectProps, scalarTypeOf, type MockModel, type OpenApiMockModel, type GraphqlMockModel, type MockOperation, type MockResource, type MockOpKind } from './mock/model.js';
 export {
   MockStore,
   MemoryMockStateStore,
@@ -40,9 +40,9 @@ export {
   type MockScope,
   type MockStateStore,
 } from './mock/store.js';
-export { handleMockRequest, type MockRequest, type MockResponse } from './mock/handler.js';
+export { handleMockRequest, applyListQuery, type MockRequest, type MockResponse } from './mock/handler.js';
 export { handleGraphqlMock } from './mock/graphql.js';
-export { generateValue, seededFaker, hashSeed, stringFits, exampleFits } from './mock/generate.js';
+export { generateValue, seededFaker, hashSeed, stringFits, exampleFits, mockDataVersionOf, withMockDataVersion, MOCK_DATA_VERSION, type MockDataVersion } from './mock/generate.js';
 export { sha256Hex, jcsHash } from './util.js';
 
 import type { MockStore } from './mock/store.js';

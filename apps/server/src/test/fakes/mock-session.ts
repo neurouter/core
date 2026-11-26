@@ -6,7 +6,7 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 function body(schema: JsonSchema | null, salt: string): Record<string, unknown> {
   if (!schema) return {};
   const defs = isObj(schema.$defs) ? (schema.$defs as Record<string, unknown>) : {};
-  const v = generateValue(schema, 'body', { faker: seededFaker(hashSeed('session', salt)), defs, depth: 0, index: 1 });
+  const v = generateValue(schema, 'body', { faker: seededFaker(hashSeed('session', salt)), defs, depth: 0, index: 1, dv: 1 });
   return isObj(v) ? v : {};
 }
 

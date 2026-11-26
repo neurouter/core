@@ -24,7 +24,7 @@ describe('mock model', () => {
     });
     const list = m.operations.find((o) => o.kind === 'list')!;
     expect(list.filters).toEqual({ state: 'state' });
-    expect(list.paging).toEqual({ limit: 'per_page', page: 'page' });
+    expect(list.paging).toEqual({ limit: 'per_page', page: 'page', defaultLimit: 30 });
   });
 
   it('infers Petstore resources incl. list aliases and string ids', async () => {

@@ -52,8 +52,9 @@ export function toolResolver(tools: ToolIdentity[]): ToolResolver {
 /** Tasks with `called`/`not_called` assertions and reference calls pointing at the build's current names. */
 export function resolveTaskTools(tasks: EvalTask[], tools: ToolIdentity[]): EvalTask[] {
   const r = toolResolver(tools);
-  const assertion = (a: Assertion): Assertion => (a.type === 'called' || a.type === 'not_called' ? { ...a, tool: r.name(a.tool, a.toolKey) } : a);
-  const ref = (c: ReferenceCall): ReferenceCall => ({ ...c, tool: r.name(c.tool, c.toolKey) });
+  const alt = (x: { tool: string; toolKey?: string | undefined }) => ({ ...x, tool: r.name(x.tool, x.toolKey) });
+  const assertion = (a: Assertion): Assertion => (a.type === 'called' ? { ...a, tool: r.name(a.tool, a.toolKey), ...(a.anyOf ? { anyOf: a.anyOf.map(alt) } : {}) } : a.type === 'not_called' ? { ...a, tool: r.name(a.tool, a.toolKey) } : a);
+  const ref = (c: ReferenceCall): ReferenceCall => ({ ...c, tool: r.name(c.tool, c.toolKey), ...(c.alternatives ? { alternatives: c.alternatives.map(alt) } : {}) });
   return tasks.map((t) => ({ ...t, assertions: t.assertions.map(assertion), referenceCalls: t.referenceCalls.map(ref) }));
 }
 
@@ -67,7 +68,7 @@ export function stampToolKeys(task: EvalTask, tools: ToolIdentity[]): EvalTask {
   };
   return {
     ...task,
-    assertions: task.assertions.map((a) => (a.type === 'called' || a.type === 'not_called' ? stamp(a) : a)),
-    referenceCalls: task.referenceCalls.map(stamp),
+    assertions: task.assertions.map((a) => (a.type === 'called' ? { ...stamp(a), ...(a.anyOf ? { anyOf: a.anyOf.map(stamp) } : {}) } : a.type === 'not_called' ? stamp(a) : a)),
+    referenceCalls: task.referenceCalls.map((c) => ({ ...stamp(c), ...(c.alternatives ? { alternatives: c.alternatives.map(stamp) } : {}) })),
   };
 }

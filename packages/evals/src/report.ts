@@ -1,5 +1,5 @@
 import type { Suggestion } from './suggest.js';
-import type { ReadinessScore, TaskRunResult } from './types.js';
+import type { JudgeUsage, ReadinessScore, SuiteCalibration, TaskRunResult } from './types.js';
 
 /** CLI/CI report (`EvalReport` ≈ EvalRunDetail + suggestions, §15.8). */
 export interface EvalReport {
@@ -7,32 +7,50 @@ export interface EvalReport {
   server: { slug: string; name: string };
   run: { id: string | null; models: string[]; modes: string[]; repeats: number; environment: string; buildHash: string | null; provider: string; startedAt: string; endedAt: string };
   score: ReadinessScore;
-  tasks: Array<{ key: string; category: string; prompt: string; cells: Array<{ model: string; mode: string; passes: number; attempts: number; failureCause: string | null }> }>;
+  tasks: Array<{ key: string; category: string; prompt: string; cells: Array<{ model: string; mode: string; passes: number; attempts: number; failureCause: string | null; overBudget: number; refusals: number; matchedByJudge: number }> }>;
   topFailures: Array<{ taskKey: string; model: string; mode: string; cause: string | null; detail: string }>;
   suggestions: Suggestion[];
   /** Per model: uncached input, output, cached input read and cache writes (part of input); see `attemptTokens`. */
   usage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }>;
   /** Suite generation in this run (`eval --generate`): generator model and LLM usage. */
-  generator?: { model: string; usage: { calls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; totalTokens: number; budgetTokens: number }; tasks: number; diagnostics: number };
+  generator?: { model: string; usage: { calls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; totalTokens: number; budgetTokens: number }; tasks: number; diagnostics: number; coverage?: Record<string, number> };
+  /** Judge LLM usage of the run (rubric + answer-equivalence judge), per judge model. */
+  judgeUsage: Record<string, JudgeUsage>;
+  /** Attempts the model provider refused (policy filter): excluded from scoring. */
+  providerRefusals: number;
+  /** The run stopped at `--max-run-tokens`. */
+  incomplete?: { reason: string; attemptsRun: number; attemptsPlanned: number } | null;
+  /** Calibration gate of the suite (rejected tasks were not run). */
+  calibration?: Pick<SuiteCalibration, 'mockDataVersion' | 'passed' | 'rejected' | 'flagged' | 'model'> & { tasks: SuiteCalibration['tasks'] };
 }
 
-export function buildReport(input: Omit<EvalReport, 'version' | 'tasks' | 'topFailures' | 'usage' | 'generator'> & { generator?: EvalReport['generator'] } & { results: TaskRunResult[]; prompts: Record<string, { category: string; prompt: string }> }): EvalReport {
+export function buildReport(
+  input: Omit<EvalReport, 'version' | 'tasks' | 'topFailures' | 'usage' | 'generator' | 'judgeUsage' | 'providerRefusals' | 'incomplete' | 'calibration'> & {
+    generator?: EvalReport['generator'];
+    incomplete?: EvalReport['incomplete'];
+    calibration?: EvalReport['calibration'];
+    judgeModel?: string;
+  } & { results: TaskRunResult[]; prompts: Record<string, { category: string; prompt: string }> },
+): EvalReport {
   const byTask = new Map<string, TaskRunResult[]>();
   for (const r of input.results) byTask.set(r.taskKey, [...(byTask.get(r.taskKey) ?? []), r]);
   const tasks = [...byTask.entries()].map(([key, rs]) => {
-    const cells = new Map<string, { model: string; mode: string; passes: number; attempts: number; failureCause: string | null }>();
+    const cells = new Map<string, EvalReport['tasks'][number]['cells'][number]>();
     for (const r of rs) {
       const k = `${r.model}|${r.mode}`;
-      const c = cells.get(k) ?? { model: r.model, mode: r.mode, passes: 0, attempts: 0, failureCause: null };
-      c.attempts++;
+      const c = cells.get(k) ?? { model: r.model, mode: r.mode, passes: 0, attempts: 0, failureCause: null, overBudget: 0, refusals: 0, matchedByJudge: 0 };
+      if (r.failureCause === 'provider_refusal') c.refusals++;
+      else c.attempts++;
       if (r.passed) c.passes++;
-      else c.failureCause ??= r.failureCause;
+      else if (r.failureCause !== 'provider_refusal') c.failureCause ??= r.failureCause;
+      if (r.overBudget) c.overBudget++;
+      if (r.assertionResults.some((a) => a.matchedBy === 'judge')) c.matchedByJudge++;
       cells.set(k, c);
     }
     return { key, category: input.prompts[key]?.category ?? rs[0]!.category, prompt: input.prompts[key]?.prompt ?? '', cells: [...cells.values()] };
   });
   const topFailures = input.results
-    .filter((r) => !r.passed)
+    .filter((r) => !r.passed && r.failureCause !== 'provider_refusal')
     .slice(0, 10)
     .map((r) => ({ taskKey: r.taskKey, model: r.model, mode: r.mode, cause: r.failureCause, detail: r.assertionResults.filter((a) => !a.passed).map((a) => a.detail).join('; ') || r.error || '' }));
   const usage: EvalReport['usage'] = {};
@@ -43,8 +61,15 @@ export function buildReport(input: Omit<EvalReport, 'version' | 'tasks' | 'topFa
     u.cacheReadTokens += r.cacheReadTokens ?? 0;
     u.cacheWriteTokens += r.cacheWriteTokens ?? 0;
   }
-  const { results: _r, prompts: _p, ...rest } = input;
-  return { version: 1, ...rest, tasks, topFailures, usage };
+  const judgeUsage: EvalReport['judgeUsage'] = {};
+  for (const r of input.results) {
+    if (!r.judgeUsage) continue;
+    const u = (judgeUsage[input.judgeModel ?? r.model] ??= { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 });
+    for (const k of ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens'] as const) u[k] += r.judgeUsage[k];
+  }
+  const providerRefusals = input.results.filter((r) => r.failureCause === 'provider_refusal').length;
+  const { results: _r, prompts: _p, judgeModel: _j, ...rest } = input;
+  return { version: 1, ...rest, tasks, topFailures, usage, judgeUsage, providerRefusals };
 }
 
 export function renderMarkdown(rep: EvalReport): string {
@@ -57,11 +82,23 @@ export function renderMarkdown(rep: EvalReport): string {
   for (const c of s.cells)
     lines.push(`| ${c.model} | ${c.mode}${c.best ? ' ★' : ''} | ${c.score} | ${Math.round(c.successRate * 100)}% | ${Math.round(c.avgTokens)} | ${Math.round(c.avgCachedTokens ?? 0)} | ${c.avgTokensMulti === null ? '–' : Math.round(c.avgTokensMulti)} | ${c.avgCalls.toFixed(1)} | ${Math.round(c.avgLatencyMs)} ms | ${c.flakyTasks} |`);
   lines.push('', '_Tokens = uncached input + cached input + output, summed over the turns of an attempt (the same for every provider); "of which cached" is input read from the provider\'s prompt cache._');
+  const over = s.cells.reduce((a, c) => a + (c.overBudget ?? 0), 0);
+  if (over) lines.push('', `_${over} counted attempt(s) went over their call budget (soft: reported as efficiency, not failed)._`);
+  if (rep.providerRefusals) lines.push('', `_${rep.providerRefusals} attempt(s) were refused by the model provider's policy filter (\`provider_refusal\`) and excluded from scoring._`);
+  if (rep.incomplete) lines.push('', `**Incomplete run:** ${rep.incomplete.reason}; ${rep.incomplete.attemptsRun} of ${rep.incomplete.attemptsPlanned} attempts ran. Scores cover only those.`);
+  const ju = Object.entries(rep.judgeUsage ?? {});
+  if (ju.length) lines.push('', `Judge usage: ${ju.map(([m, u]) => `${m}: ${u.calls} calls, ${u.inputTokens + u.cacheReadTokens + u.outputTokens} tokens (input ${u.inputTokens}, cached ${u.cacheReadTokens}, output ${u.outputTokens})`).join('; ')}.`);
+  if (rep.calibration) {
+    const c = rep.calibration;
+    lines.push('', `Calibration (mock data v${c.mockDataVersion}): ${c.passed} tasks passed with their own reference solution, ${c.rejected} rejected (not run), ${c.flagged} flagged for review${c.model ? ` by ${c.model}` : ''}.`);
+    for (const t of c.tasks.filter((x) => x.status !== 'passed')) lines.push(`- \`${t.key}\` ${t.status}: ${t.reasons.join('; ').slice(0, 300)}`);
+  }
   lines.push('', '### Score breakdown', '', '| Component | Weight | Score | Detail |', '|---|---:|---:|---|');
   for (const b of s.breakdown) lines.push(`| ${b.label} | ${b.weight} | ${Math.round(b.score * 100)}% | ${b.detail} |`);
   if (rep.generator) {
     const u = rep.generator.usage;
     lines.push('', `Suite generated by ${rep.generator.model}: ${rep.generator.tasks} tasks, ${u.calls} calls, ${u.totalTokens} tokens (input ${u.inputTokens}, cached ${u.cacheReadTokens}, output ${u.outputTokens}; budget ${u.budgetTokens})${rep.generator.diagnostics ? `, ${rep.generator.diagnostics} rejected or short` : ''}.`);
+    if (rep.generator.coverage) lines.push('', `Coverage by tag: ${Object.entries(rep.generator.coverage).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}.`);
   }
   if (rep.topFailures.length) {
     lines.push('', '### Top failures', '');
@@ -81,5 +118,12 @@ export function renderTable(rep: EvalReport): string {
   const w = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
   const table = rows.map((r) => r.map((x, i) => x.padEnd(w[i]!)).join('  ')).join('\n');
   const fails = rep.topFailures.slice(0, 5).map((f) => `  - ${f.taskKey} [${f.mode}] ${f.cause ?? ''}`).join('\n');
-  return `${table}\n\nHeadline: ${s.headline}/100 (${s.band}) · recommended: ${s.recommendedMode ?? 'n/a'} · ${s.recommendationText}${fails ? `\nTop failures:\n${fails}` : ''}\n`;
+  const judge = Object.values(rep.judgeUsage ?? {}).reduce((a, u) => a + u.inputTokens + u.cacheReadTokens + u.outputTokens, 0);
+  const notes = [
+    rep.incomplete ? `INCOMPLETE: ${rep.incomplete.reason} (${rep.incomplete.attemptsRun}/${rep.incomplete.attemptsPlanned} attempts)` : '',
+    rep.providerRefusals ? `${rep.providerRefusals} provider refusal(s) excluded` : '',
+    judge ? `judge tokens: ${judge}` : '',
+    rep.calibration?.rejected ? `${rep.calibration.rejected} task(s) rejected by calibration` : '',
+  ].filter(Boolean);
+  return `${table}\n\nHeadline: ${s.headline}/100 (${s.band}) · recommended: ${s.recommendedMode ?? 'n/a'} · ${s.recommendationText}${notes.length ? `\n${notes.join(' · ')}` : ''}${fails ? `\nTop failures:\n${fails}` : ''}\n`;
 }

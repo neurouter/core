@@ -9,7 +9,7 @@
  */
 import type { JsonSchema } from '@neurouter/shared';
 import { isObj, sha256Hex, type Obj } from '../util.js';
-import { generateValue, hashSeed, SEED_ITEMS, seededFaker } from './generate.js';
+import { generateValue, hashSeed, MOCK_DATA_VERSION, mockDataVersionOf, SEED_ITEMS, seededFaker, type MockDataVersion } from './generate.js';
 import type { MockResource, OpenApiMockModel } from './model.js';
 
 export { SEED_ITEMS };
@@ -99,16 +99,20 @@ export function toMockNs(ns: MockNs | string): MockNs {
   return typeof ns === 'string' ? { tenantId: '', environmentId: '', name: ns } : ns;
 }
 
-/** Seed of a resource's collections: the namespace seed and the resource, never the scope values. */
-export function collectionSeed(r: MockResource, nsSeed: number): number {
-  return hashSeed(nsSeed, r.key);
+/**
+ * Seed of a resource's collections: the namespace seed and the resource, never the scope values. From
+ * data version 2 a nested collection of a top-level resource's objects uses that resource's seed
+ * (`seedKey`), so `refund_1` listed under a charge is the `refund_1` that `GET /v1/refunds/refund_1` returns.
+ */
+export function collectionSeed(r: MockResource, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION): number {
+  return hashSeed(nsSeed, dv >= 2 && r.seedKey ? r.seedKey : r.key);
 }
 
-/** The 20 seed items of a collection (exactly what both stores hold before any write). */
-export function seedItems(r: MockResource, scope: MockScope, nsSeed: number): Obj[] {
-  const seed = collectionSeed(r, nsSeed);
+/** The 20 seed items of a collection (exactly what both stores hold before any write). `dv`: mock data version. */
+export function seedItems(r: MockResource, scope: MockScope, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION): Obj[] {
+  const seed = collectionSeed(r, nsSeed, dv);
   const items: Obj[] = [];
-  for (let i = 1; i <= SEED_ITEMS; i++) items.push(newItem(r, hashSeed(seed, i), i, scope));
+  for (let i = 1; i <= SEED_ITEMS; i++) items.push(newItem(r, hashSeed(seed, i), i, scope, dv));
   return items;
 }
 
@@ -183,7 +187,7 @@ export class MockStore {
     const key = `${resource.key}|${scopeKeyOf(resource, scope)}`;
     let c = s.collections.get(key);
     if (!c) {
-      c = { items: seedItems(resource, scope, s.seed), nextId: SEED_ITEMS + 1 };
+      c = { items: seedItems(resource, scope, s.seed, mockDataVersionOf(namespace)), nextId: SEED_ITEMS + 1 };
       s.collections.set(key, c);
     }
     return c;
@@ -272,10 +276,10 @@ export function asStateStore(store: MockStateStore | MockStore): MockStateStore 
   return w;
 }
 
-export function newItem(resource: MockResource, seed: number, index: number, scope: Record<string, string>): Obj {
+export function newItem(resource: MockResource, seed: number, index: number, scope: Record<string, string>, dv: MockDataVersion = MOCK_DATA_VERSION): Obj {
   const faker = seededFaker(seed);
   const defs = isObj(resource.itemSchema.$defs) ? (resource.itemSchema.$defs as Obj) : {};
-  const v = generateValue(resource.itemSchema as JsonSchema, resource.name, { faker, defs, depth: 0, index });
+  const v = generateValue(resource.itemSchema as JsonSchema, resource.name, { faker, defs, depth: 0, index, dv, resource: resource.name });
   const item: Obj = isObj(v) ? v : {};
   item[resource.idField] = resource.idType === 'integer' ? index : `${resource.name}_${index}`;
   const props = isObj(resource.itemSchema.properties) ? resource.itemSchema.properties : {};

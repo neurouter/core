@@ -1,4 +1,5 @@
 import type { Logger } from 'pino';
+import { EvalArgsTap } from './kernel/audit/eval-args-tap.js';
 import { LocalExecutor, parseExecutorUrl, SocketExecutor, spawnEmbeddedExecutor, type EmbeddedExecutor, type Executor } from '@neurouter/executor';
 import { AuditRecorder } from './kernel/audit/recorder.js';
 import { SqlAuditStore, type AuditStore } from './kernel/audit/store.js';
@@ -181,7 +182,7 @@ export function createServices(input: ServiceInputs) {
   };
   const archive = input.archive !== undefined ? input.archive : createArchiveStore(config.env.AUDIT_ARCHIVE_URL);
   const postCommit: Array<(rows: readonly CommittedAuditRow[]) => void> = [];
-  const auditStore: AuditStore =
+  const auditStoreRaw: AuditStore =
     input.auditStore ??
     new SqlAuditStore(dbs.audit.db, dbs.audit.dialect, {
       clock,
@@ -208,6 +209,14 @@ export function createServices(input: ServiceInputs) {
       },
       hooks: { queueDepth: (n) => metrics.auditQueueDepth.set(n), dropped: () => metrics.auditDropped.inc(), flushed: (sec) => metrics.auditFlush.observe(sec) },
     });
+  // eval-only clear arguments (the audit log keeps them redacted): captured for watched eval keys, never persisted
+  const evalArgs = new EvalArgsTap();
+  const auditStore: AuditStore = auditStoreRaw;
+  const recordAudit = auditStore.record.bind(auditStore);
+  auditStore.record = (e) => {
+    evalArgs.capture(e);
+    return recordAudit(e);
+  };
   const audit = new AuditRecorder(auditStore, clock, logger);
   redactionRules = new RedactionRulesService(db, clock, audit, coord);
   const envelope = new EnvelopeService(db, keyring, clock);
@@ -400,6 +409,7 @@ export function createServices(input: ServiceInputs) {
     log: logger,
     onProgress: (tenantId, runId, done, total) => void coord.publish('events.eval', { tenantId, runId, done, total }).catch(() => {}),
     ports: {
+      evalArgs,
       baseUrl: () => localUrl.value,
       resetMock: (ns) => mockStore.reset(ns),
       mockSamples: async (ns, n) => {

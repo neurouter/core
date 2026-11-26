@@ -29,7 +29,7 @@ export const Route = createFileRoute('/_app/evals/runs/$runId')({
   component: RunPage,
 });
 
-const CAUSE = { wrong_tool: 'wrong tool', bad_arguments: 'bad arguments', missing_capability: 'missing capability', gave_up: 'gave up', hallucinated: 'hallucinated', policy_blocked: 'policy blocked', no_framing: 'no framing', over_budget: 'over budget', error: 'error' } as const;
+const CAUSE = { wrong_tool: 'wrong tool', bad_arguments: 'bad arguments', missing_capability: 'missing capability', gave_up: 'gave up', hallucinated: 'hallucinated', policy_blocked: 'policy blocked', no_framing: 'no framing', over_budget: 'over budget', error: 'error', provider_refusal: 'provider refusal' } as const;
 
 /** Eval run detail (spec §9.14, prototype EvalRun): score, matrix, breakdown, task results, fixes. */
 function RunPage() {

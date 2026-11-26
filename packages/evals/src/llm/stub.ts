@@ -1,5 +1,5 @@
 import type { Assertion } from '@neurouter/shared';
-import { GENERATOR_MARKER, JUDGE_MARKER, SUGGEST_MARKER, readMarkerInput } from '../prompts.js';
+import { EQUIV_MARKER, GENERATOR_MARKER, JUDGE_MARKER, SUGGEST_MARKER, readMarkerInput } from '../prompts.js';
 import { firstSentence, mulberry32, shuffle, tokens } from '../rng.js';
 import type { GeneratedTask, GeneratorCategoryInput, GenTool } from '../types.js';
 import { llmResponse } from './fake.js';
@@ -24,6 +24,8 @@ export class StubLlmClient implements LlmClient {
     const judge = readMarkerInput(first, JUDGE_MARKER) as StubJudgeInput | null;
     if (judge) return this.reply(req, [{ type: 'text', text: JSON.stringify(stubJudge(judge)) }]);
     if (first.includes(SUGGEST_MARKER)) return this.reply(req, [{ type: 'text', text: '{}' }]);
+    // the stub never rules an answer equivalent: normalized matching decides alone
+    if (first.includes(EQUIV_MARKER)) return this.reply(req, [{ type: 'text', text: '{"items":[]}' }]);
     return this.reply(req, stubAgentStep(req));
   }
 
@@ -67,7 +69,9 @@ export function stubGenerate(input: GeneratorCategoryInput): GeneratedTask[] {
   if (input.category === 'single') {
     const pool = shuffle(reads.length ? reads : tools, rand);
     for (let i = 0; i < n && pool.length; i++) {
-      const t = pool[i % pool.length]!;
+      // follow the planned topic when a tool of that cluster is available
+      const topic = input.topics?.[i];
+      const t = (topic ? pool.find((x) => (x.group ?? x.name.split('_')[0]) === topic && !out.some((o) => o.reference_calls[0]?.tool === x.name)) : undefined) ?? pool[i % pool.length]!;
       const args = argsFor(t, input.samples);
       out.push({
         key: `single-${t.name}-${i + 1}`,
@@ -75,7 +79,7 @@ export function stubGenerate(input: GeneratorCategoryInput): GeneratedTask[] {
         prompt: `${imperative(t)}${argText(args)}${variant(i, pool.length)}`,
         rubric: `The agent calls ${t.name} with the given values and reports the result.`,
         assertions: [{ type: 'called', tool: t.name, ...(Object.keys(args).length ? { args, argsMatch: 'subset' as const } : {}) }, framing],
-        reference_calls: [{ tool: t.name, arguments: args }],
+        reference_calls: [{ tool: t.name, arguments: args, required_args: Object.keys(args) }],
       });
     }
   } else if (input.category === 'multi') {
@@ -96,8 +100,8 @@ export function stubGenerate(input: GeneratorCategoryInput): GeneratedTask[] {
         rubric: `The agent calls ${a.name} and then ${b.name} and summarizes both results.`,
         assertions: [{ type: 'called', tool: a.name }, { type: 'called', tool: b.name, ...(Object.keys(ba).length ? { args: ba, argsMatch: 'subset' as const } : {}) }, framing],
         reference_calls: [
-          { tool: a.name, arguments: aa },
-          { tool: b.name, arguments: ba },
+          { tool: a.name, arguments: aa, required_args: Object.keys(aa) },
+          { tool: b.name, arguments: ba, required_args: Object.keys(ba) },
         ],
       });
     }
