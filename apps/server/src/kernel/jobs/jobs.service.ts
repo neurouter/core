@@ -3,7 +3,7 @@ import type { Job, JobKind } from '@neurouter/shared';
 import type { MainDB } from '../db/schema.js';
 import type { Clock } from '../lib/clock.js';
 import { toIso, toIsoOrNull } from '../lib/clock.js';
-import { AppError } from '../lib/errors.js';
+import { AppError, isAppError } from '../lib/errors.js';
 import { newId } from '../lib/ids.js';
 import { parseJsonColumn, toJsonColumn } from '../lib/json.js';
 import { isAdmin, type ConsoleUser } from '../principal.js';
@@ -36,7 +36,8 @@ export class JobsService {
         await this.db.updateTable('jobs').set({ status: 'ok', progress: 1, result: toJsonColumn(result ?? null), finished_at: this.clock.now() }).where('id', '=', id).execute();
       } catch (err) {
         this.log.warn({ err, jobId: id, kind }, 'job failed');
-        await this.db.updateTable('jobs').set({ status: 'error', error: (err as Error).message.slice(0, 1000), finished_at: this.clock.now() }).where('id', '=', id).execute().catch(() => {});
+        const problem = isAppError(err) ? { code: err.code, status: err.status, title: err.title, detail: err.message, ...(err.extensions ?? {}), ...(err.fieldErrors ? { errors: err.fieldErrors } : {}) } : null;
+        await this.db.updateTable('jobs').set({ status: 'error', error: (err as Error).message.slice(0, 1000), result: problem ? toJsonColumn({ problem }) : null, finished_at: this.clock.now() }).where('id', '=', id).execute().catch(() => {});
       }
     })();
     this.running.add(p);
@@ -51,14 +52,15 @@ export class JobsService {
 
   async get(id: string, viewer: ConsoleUser): Promise<Job> {
     const row = await this.db.selectFrom('jobs').selectAll().where('id', '=', id).executeTakeFirst();
-    if (!row || (row.created_by !== viewer.id && !isAdmin(viewer))) throw AppError.notFound('Job');
+    if (!row || (row.created_by !== viewer.id && !isAdmin(viewer) && viewer.role !== 'viewer')) throw AppError.notFound('Job');
     return {
       id: row.id,
       kind: row.kind as Job["kind"],
       status: STATUS[row.status],
       progress: row.progress,
-      result: parseJsonColumn(row.result),
+      result: row.status === 'error' ? null : parseJsonColumn(row.result),
       error: row.error,
+      problem: row.status === 'error' ? ((parseJsonColumn<{ problem?: Record<string, unknown> }>(row.result) ?? {}).problem ?? null) : null,
       createdAt: toIso(row.created_at),
       finishedAt: toIsoOrNull(row.finished_at),
     };

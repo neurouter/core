@@ -45,5 +45,24 @@ export function registerJobs(scheduler: JobScheduler, s: Services, extra: Array<
       for (const f of res.failed) s.logger.warn({ partition: f.name, error: f.error }, 'audit partition could not be created');
     },
   });
+  scheduler.register({
+    name: 'oauth.cleanup',
+    schedule: '40 */15 * * * *',
+    run: async () => {
+      await s.oauthTokens.cleanup();
+      await s.upstreamOAuth.cleanupStates();
+    },
+  });
+  scheduler.register({
+    name: 'console.session-cleanup',
+    schedule: '0 */15 * * * *',
+    run: async () => {
+      const db = s.dbs.main.db;
+      const now = s.clock.now();
+      await db.deleteFrom('web_sessions').where((eb) => eb.or([eb('expires_at', '<=', now), eb('last_seen_at', '<=', now - s.config.env.SESSION_IDLE_MINUTES * 60_000)])).execute();
+      await db.deleteFrom('oidc_login_states').where('expires_at', '<=', now).execute();
+      await db.deleteFrom('spec_previews').where('expires_at', '<=', now).execute();
+    },
+  });
   for (const e of extra) e(scheduler, s);
 }

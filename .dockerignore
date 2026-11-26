@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/.neurouter
+**/data
+**/*.db
+**/coverage
+.git
+.env
+.env.*
+!.env.example
+.agent
+tmp
+out
+examples/github/spec
+apps/web/test-results
+apps/web/playwright-report

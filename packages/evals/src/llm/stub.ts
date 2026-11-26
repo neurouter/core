@@ -352,7 +352,23 @@ function parseSearch(text: string): Candidate[] {
     const j = JSON.parse(text) as { tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown>; pyName?: string; pySignature?: string }> };
     return (j.tools ?? []).map((t) => ({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema ?? { type: 'object', properties: {} }, ...(t.pyName ? { pyName: t.pyName } : {}) }));
   } catch {
-    return [];
+    // Python-format results (code mode): `def fn(*, a: str, b: int | None = None) -> T` + docstring
+    const out: Candidate[] = [];
+    const re = /^def (\w+)\(([^)]*)\)[^\n]*\n(?:\s+"{3}([^\n]*))?/gm;
+    for (const m of text.matchAll(re)) {
+      const properties: Record<string, unknown> = {};
+      const required: string[] = [];
+      for (const part of m[2]!.split(',').map((x) => x.trim()).filter((x) => x && x !== '*')) {
+        const pm = /^(\w+)\s*:\s*([^=]+?)(\s*=\s*.+)?$/.exec(part);
+        if (!pm) continue;
+        const ty = pm[2]!.trim();
+        const arg = pm[1]!.replace(/_$/, '');
+        properties[arg] = { type: /^int\b/.test(ty) ? 'integer' : /^float\b/.test(ty) ? 'number' : /^bool\b/.test(ty) ? 'boolean' : /^list\[/.test(ty) ? 'array' : 'string' };
+        if (!pm[3]) required.push(arg);
+      }
+      out.push({ name: m[1]!, description: (m[3] ?? '').replace(/"{3}$/, ''), inputSchema: { type: 'object', properties, required } });
+    }
+    return out;
   }
 }
 
@@ -360,6 +376,8 @@ function namespaceFrom(req: LlmRequest, cands: Candidate[]): string {
   for (const c of cands) if (c.pyName?.includes('.')) return c.pyName.split('.')[0]!;
   const sys = typeof req.system === 'string' ? req.system : (req.system ?? []).map((b) => b.text).join('\n');
   const texts = [sys, ...(req.tools ?? []).map((t) => t.description ?? '')].join('\n');
+  const declared = /calls tools as ([a-z_][a-z0-9_]*)\.<fn>/.exec(sys);
+  if (declared) return declared[1]!;
   for (const m of texts.matchAll(/\b([a-z_][a-z0-9_]*)\.[a-z_][a-z0-9_]*\(/g)) if (m[1] !== 'ops') return m[1]!;
   return 'api';
 }

@@ -50,11 +50,16 @@ export async function mcpClient(s: RunningServer, server: string, env: string, t
   return client;
 }
 
-/** Drops and recreates the public schema of a throwaway Postgres (integration tests only). */
-export async function resetPg(url: string): Promise<void> {
+/** A fresh database per test file on a throwaway Postgres (integration tests only); returns its URL. */
+export async function resetPg(url: string, name = 'nr_test'): Promise<string> {
   const pg = (await import('pg')).default;
   const c = new pg.Client({ connectionString: url });
   await c.connect();
-  await c.query('drop schema public cascade; create schema public;');
+  const db = name.replace(/[^a-z0-9_]/gi, '_').toLowerCase();
+  await c.query(`drop database if exists ${db} with (force)`);
+  await c.query(`create database ${db}`);
   await c.end();
+  const u = new URL(url);
+  u.pathname = `/${db}`;
+  return u.toString();
 }

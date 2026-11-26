@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createMcpHandler, inputRequired, inputResponse, ProtocolError, Server, type McpHttpHandler, type McpRequestContext, type ServerContext, type ServerEventBus } from '@modelcontextprotocol/server';
-import { DEFAULT_TENANT_ID, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_TASK_ID } from '@neurouter/shared';
+import { DEFAULT_TENANT_ID, HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_TASK_ID } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { Keyring } from '../../kernel/secrets/keyring.js';
@@ -265,8 +265,11 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
       const isEval = auth.principal.type === 'api_key' && auth.principal.purpose === 'eval';
       const mockNs = isEval ? header(req, HEADER_MOCK_STATE) : undefined;
       const exp = isEval ? header(req, HEADER_EXPOSURE) : undefined;
+      const buildOverride = isEval ? header(req, HEADER_BUILD) : undefined;
+      const effective = buildOverride ? await d.runtime.withBuild(bundle, buildOverride) : bundle;
+      if (!effective) return reply.status(404).type('application/json').send({ error: 'build_not_found' });
       const rc: RequestCtx = {
-        bundle,
+        bundle: effective,
         principal: auth.principal,
         credentialKey: auth.credentialKey,
         ip: req.ip,

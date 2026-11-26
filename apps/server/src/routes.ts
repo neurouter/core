@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import type { Services } from './deps.js';
 import { mcpRoutes } from './dataplane/mcp/route.js';
 import { topToolsByUsage } from './dataplane/tasks/usage.js';
+import { oauthRoutes } from './controlplane/oauth/routes.js';
+import { consolePlugin } from './console.js';
 
 /** Route plugins in registration order: data plane (`/mcp`, PRM), then control plane (`/api`, OAuth, public). */
 export function routePlugins(s: Services, extra: Array<(app: FastifyInstance) => Promise<void> | void> = []): Array<(app: FastifyInstance) => Promise<void> | void> {
@@ -39,6 +41,20 @@ export function routePlugins(s: Services, extra: Array<(app: FastifyInstance) =>
         onAuthFailure: (reason, method) => s.metrics.authFailure(method, reason),
       });
     },
+    async (app) => {
+      await oauthRoutes(app, {
+        publicUrl: s.config.publicUrl,
+        consentCookie: s.config.cookieNames.consent,
+        dcrEnabled: () => s.settings.get('dcrEnabled'),
+        clients: s.oauthClients,
+        tokens: s.oauthTokens,
+        authorization: s.authorization,
+        sessions: s.consoleSessions,
+        rateLimit: s.coord.rateLimit,
+        upstream: s.upstreamOAuth,
+      });
+    },
+    consolePlugin(s),
     ...extra,
   ];
 }

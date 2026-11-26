@@ -1,0 +1,44 @@
+name: Neurouter agent-readiness eval
+description: Score how well AI agents can use your API (OpenAPI/GraphQL) through Neurouter, in tool and code mode.
+branding: { icon: check-circle, color: purple }
+inputs:
+  spec: { description: OpenAPI 3.x / GraphQL spec file or URL, required: true }
+  overlay: { description: Overlay YAML, required: false, default: "" }
+  suite: { description: Frozen suite JSON (else a suite is generated), required: false, default: "" }
+  config: { description: neurouter.yaml (with server), required: false, default: "" }
+  server: { description: Server slug in config, required: false, default: "" }
+  models: { description: Comma-separated models, required: false, default: claude-sonnet-5-5 }
+  modes: { description: tool,code, required: false, default: "tool,code" }
+  repeats: { description: Attempts per task, required: false, default: "3" }
+  min-score: { description: Fail below this headline score, required: false, default: "0" }
+  neurouter-version: { description: npm version of the neurouter CLI, required: false, default: "0.1.0" }
+  anthropic-api-key: { description: "Anthropic API key (pass secrets.ANTHROPIC_API_KEY)", required: true }
+outputs:
+  score: { description: Headline agent-readiness score, value: "${{ steps.eval.outputs.score }}" }
+  recommended-mode: { description: tool or code, value: "${{ steps.eval.outputs.mode }}" }
+  report-path: { description: JSON report path, value: "${{ steps.eval.outputs.report }}" }
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with: { node-version: 24 }
+    - id: eval
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        set -euo pipefail
+        ARGS=()
+        if [ -n "${{ inputs.config }}" ]; then ARGS+=(--config "${{ inputs.config }}" --server "${{ inputs.server }}"); else ARGS+=(--spec "${{ inputs.spec }}"); fi
+        if [ -n "${{ inputs.overlay }}" ]; then ARGS+=(--overlay "${{ inputs.overlay }}"); fi
+        if [ -n "${{ inputs.suite }}" ]; then ARGS+=(--suite "${{ inputs.suite }}"); else ARGS+=(--generate); fi
+        npx -y "neurouter@${{ inputs.neurouter-version }}" eval "${ARGS[@]}" --models "${{ inputs.models }}" --modes "${{ inputs.modes }}" \
+          --repeats "${{ inputs.repeats }}" --min-score "${{ inputs.min-score }}" \
+          --out "$RUNNER_TEMP/neurouter-report.json" --md "$RUNNER_TEMP/neurouter-report.md" || STATUS=$?
+        cat "$RUNNER_TEMP/neurouter-report.md" >> "$GITHUB_STEP_SUMMARY" || true
+        node -e "const r=require(process.argv[1]);console.log('score='+r.score.headline);console.log('mode='+(r.score.recommendedMode??''))" "$RUNNER_TEMP/neurouter-report.json" >> "$GITHUB_OUTPUT" || true
+        echo "report=$RUNNER_TEMP/neurouter-report.json" >> "$GITHUB_OUTPUT"
+        exit "${STATUS:-0}"
+    - uses: actions/upload-artifact@v5
+      if: always()
+      with: { name: neurouter-report, path: "${{ runner.temp }}/neurouter-report.json", if-no-files-found: ignore }

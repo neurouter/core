@@ -47,8 +47,18 @@ export function registerEndpoint<D extends EndpointDef>(
       const out = await handler(req as unknown as EndpointRequest<D>, reply);
       if (reply.sent) return reply;
       if (def.kind === 'empty') return reply.status(204).send();
-      reply.status(def.status);
+      // a handler may pick another success status (servers.create: 201 from a preview)
+      if (reply.statusCode === 200) reply.status(def.status);
       return out;
     },
   });
 }
+
+/** Registers a contract endpoint by registry key (`servers.get`), tagging the route with its key. */
+export function route<D extends EndpointDef>(app: FastifyInstance, key: string, def: D, handler: EndpointHandler<D>, opts: Pick<RouteShorthandOptions, 'bodyLimit'> = {}): void {
+  registerEndpoint(app, def, handler, { ...opts, config: { key } });
+  ROUTED_KEYS.add(key);
+}
+
+/** Keys registered by `route()` (the server contract test checks coverage). */
+export const ROUTED_KEYS = new Set<string>();

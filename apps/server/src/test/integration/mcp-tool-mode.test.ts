@@ -7,8 +7,8 @@ const PG = process.env.NEUROUTER_TEST_PG_URL;
 describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('tool-mode data plane (M2 acceptance, %s)', (_dialect, pgUrl) => {
   let s: RunningServer;
   beforeAll(async () => {
-    if (pgUrl) await resetPg(pgUrl);
-    s = await bootServer({ NEUROUTER_EXECUTOR_MODE: 'off', ...(pgUrl ? { DATABASE_URL: pgUrl } : {}) });
+    const dbUrl = pgUrl ? await resetPg(pgUrl, 'nr_it_tool') : '';
+    s = await bootServer({ NEUROUTER_EXECUTOR_MODE: 'off', ...(dbUrl ? { DATABASE_URL: dbUrl } : {}) });
   }, 60_000);
   afterAll(async () => {
     await s?.close();

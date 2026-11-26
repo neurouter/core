@@ -99,12 +99,25 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   if (listen) {
     const addr = await app.listen({ host: config.env.HOST, port: config.env.PORT });
     url = addr.replace('[::1]', 'localhost').replace('0.0.0.0', 'localhost');
+    const port = new URL(addr).port;
+    services.localUrl.value = `http://127.0.0.1:${port}`;
   } else await app.ready();
   const scheduler = new JobScheduler(coordination, config.instanceId, logger);
   registerJobs(scheduler, services);
   if (opts.jobs ?? listen) scheduler.start();
   if (services.embedder.status() === 'idle') services.embedder.warmUp();
   logger.info({ publicUrl: config.publicUrl, version: SERVER_VERSION }, 'neurouter server ready');
+  // first start: print a one-time console sign-in link until an admin has signed in (§13.1)
+  if (listen && config.localLink && !(await services.settings.get('firstAdminSignedIn'))) {
+    try {
+      const { mintConsoleLink } = await import('./console.js');
+      const link = await mintConsoleLink(services);
+      logger.info({ consoleLink: link }, 'open this one-time link to sign in to the console (valid 15 min; `npx neurouter console-link` mints a new one)');
+      if (process.stdout.isTTY) console.log(`\n  Neurouter console sign-in (one-time, 15 min):\n  ${link}\n`);
+    } catch (err) {
+      logger.warn({ err }, 'could not mint the console sign-in link');
+    }
+  }
   let closed = false;
   return {
     app,

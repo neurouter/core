@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RunningServer } from '../../server.js';
-import { bootServer, keyFor, mcpClient, REPO_ROOT } from '../fakes/server.js';
+import { bootServer, keyFor, mcpClient, REPO_ROOT, resetPg } from '../fakes/server.js';
 
 type Txt = Array<{ type: string; text: string }>;
 const text = (r: { content: unknown }) => (r.content as Txt).map((c) => c.text).join('\n');
@@ -40,7 +40,9 @@ paths:
               schema: { type: array, items: { type: object, properties: { id: { type: integer }, name: { type: string } } } }
 `;
 
-describe('context, discovery, confirmation and code mode (M3 + M4 acceptance)', () => {
+const PG = process.env.NEUROUTER_TEST_PG_URL;
+
+describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('context, discovery, confirmation and code mode (M3 + M4 acceptance, %s)', (_dialect, pgUrl) => {
   let s: RunningServer;
   let api: { server: Server; port: number };
   let dir: string;
@@ -91,7 +93,8 @@ servers:
         limits: { code: { cpuTimeSec: 1, wallTimeSec: 10 } }
 `,
     );
-    s = await bootServer({ NEUROUTER_CONFIG: join(dir, 'neurouter.yaml'), UPSTREAM_ALLOW_PRIVATE_NETWORKS: 'true' });
+    const dbUrl = pgUrl ? await resetPg(pgUrl, 'nr_it_ctx') : '';
+    s = await bootServer({ NEUROUTER_CONFIG: join(dir, 'neurouter.yaml'), UPSTREAM_ALLOW_PRIVATE_NETWORKS: 'true', ...(dbUrl ? { DATABASE_URL: dbUrl } : {}) });
   }, 90_000);
   afterAll(async () => {
     await s?.close();

@@ -1,0 +1,36 @@
+# Launch demo (backend spec §20.7): GitHub REST against the in-process mock.
+# The demo image ships the 48-operation GitHub subset; point spec.path at examples/github/spec/api.github.com.yaml
+# (fetched by examples/github/fetch.sh, tag v2.1.0) for the full ~860-operation spec.
+version: 1
+instance:
+  name: Neurouter demo
+settings:
+  codeMode: { enabled: true }
+  evals: { model: claude-sonnet-5-5, effort: medium, repeats: 3 }
+servers:
+  - slug: github
+    name: GitHub REST
+    description: Issues, pull requests and repositories (mock)
+    spec:
+      path: ../github/github-subset.json
+    overlay: ../github/curated.overlay.yaml
+    publicReport: true
+    environments:
+      - slug: mock
+        kind: dev
+        baseUrl: "mock:"
+        writes: { enabled: true }
+        codeMode: true
+  - slug: github-raw
+    name: GitHub REST (raw, no overlay)
+    description: The same spec without curation, for the raw → curated comparison
+    spec:
+      path: ../github/github-subset.json
+    publicReport: true
+    environments: []
+  - slug: petstore
+    name: Swagger Petstore
+    spec:
+      path: ../petstore/openapi.yaml
+    publicReport: true
+    environments: []

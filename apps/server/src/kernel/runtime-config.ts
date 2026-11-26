@@ -146,6 +146,8 @@ export interface RuntimeConfigSource {
   getByEnvironmentId(tenantId: string, environmentId: string): Promise<RuntimeBundle | null>;
   subscribe(fn: (e: { tenantId: string; serverId: string; environmentId: string }) => void): () => void;
   invalidate(): void;
+  /** Same bundle with another (e.g. temporary) build of the same server — eval verify runs only. */
+  withBuild(bundle: RuntimeBundle, buildId: string): Promise<RuntimeBundle | null>;
 }
 
 export const CONFIG_CHANGED = 'config.changed';
@@ -200,7 +202,7 @@ export function environmentRuntime(e: EnvRow): EnvironmentRuntime {
     kind: e.kind,
     baseUrl,
     isMock,
-    auth: (parseJsonColumn<UpstreamAuthDescriptor>(e.auth) ?? { type: 'none' }) as UpstreamAuthDescriptor,
+    auth: ((a) => (a && a.type ? a : { type: 'none' }))(parseJsonColumn<UpstreamAuthDescriptor>(e.auth)) as UpstreamAuthDescriptor,
     headers: parseJsonColumn<Record<string, string>>(e.headers) ?? {},
     writes: parseWrites(e.writes, e.kind),
     codeMode: toBool(e.code_mode),
@@ -302,6 +304,14 @@ export class DbRuntimeConfigSource implements RuntimeConfigSource {
     const codeModeEnabled = await this.opts.codeModeEnabled();
     const bundleHash = hashCanonical({ server, environment, build: build.hash, killSwitches, codeModeEnabled });
     return { bundleHash, tenantId, server, environment, build, killSwitches, codeModeEnabled };
+  }
+
+  async withBuild(bundle: RuntimeBundle, buildId: string): Promise<RuntimeBundle | null> {
+    const own = await this.db.selectFrom('builds').select('server_id').where('id', '=', buildId).executeTakeFirst();
+    if (!own || own.server_id !== bundle.server.id) return null;
+    const build = await this.loadBuild(buildId);
+    if (!build) return null;
+    return { ...bundle, build, bundleHash: hashCanonical({ base: bundle.bundleHash, build: build.hash }) };
   }
 
   /** Builds are immutable: cached by id (bounded). */

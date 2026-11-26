@@ -1,0 +1,33 @@
+# Prod-like local run: Neurouter + Postgres (pgvector).
+#   cp .env.example .env && npm run keys -- gen   # paste the values into .env
+#   docker compose up --build                     # http://localhost:3000
+name: neurouter
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg18
+    environment: { POSTGRES_USER: neurouter, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:-neurouter}', POSTGRES_DB: neurouter }
+    volumes: [pgdata:/var/lib/postgresql]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U neurouter -d neurouter"], interval: 5s, timeout: 3s, retries: 20 }
+    restart: unless-stopped
+
+  neurouter:
+    build: .
+    image: neurouter-core:local
+    depends_on: { postgres: { condition: service_healthy } }
+    ports: ["${NEUROUTER_PORT:-3000}:3000"]
+    environment:
+      NEUROUTER_MASTER_KEYS: ${NEUROUTER_MASTER_KEYS:?run `npm run keys -- gen` and set NEUROUTER_MASTER_KEYS in .env}
+      NEUROUTER_ACTIVE_KEY_ID: ${NEUROUTER_ACTIVE_KEY_ID:?set NEUROUTER_ACTIVE_KEY_ID in .env}
+      HASH_PEPPER: ${HASH_PEPPER:?set HASH_PEPPER in .env}
+      # NODE_ENV=production needs an https PUBLIC_URL and OIDC; compose runs in "local production" mode
+      NODE_ENV: ${NEUROUTER_NODE_ENV:-development}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      DATABASE_URL: postgres://neurouter:${POSTGRES_PASSWORD:-neurouter}@postgres:5432/neurouter
+      NEUROUTER_CONFIG: /app/neurouter.example.yaml
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+
+volumes:
+  pgdata:

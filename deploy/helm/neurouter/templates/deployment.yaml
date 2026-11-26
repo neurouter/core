@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "neurouter.fullname" . }}
+  labels: {{- include "neurouter.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: {{- include "neurouter.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "neurouter.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      serviceAccountName: {{ include "neurouter.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # held tool calls (elicitation, scripts) get time to finish on rollout
+      terminationGracePeriodSeconds: 90
+      automountServiceAccountToken: {{ .Values.serviceAccount.annotations | empty | not }}
+      containers:
+        - name: neurouter
+          image: {{ include "neurouter.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ .Values.service.port }}, protocol: TCP }
+          envFrom:
+            - configMapRef: { name: {{ include "neurouter.fullname" . }} }
+            {{- with .Values.extraEnvFrom }}{{ toYaml . | nindent 12 }}{{- end }}
+          env:
+            - name: INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            {{- include "neurouter.env" . | nindent 12 }}
+          startupProbe:
+            # migrations (onStart mode) and boot; the embedding model loads in the background
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+          lifecycle:
+            # give load balancers time to drop the pod before shutdown starts
+            preStop: { exec: { command: ["node", "-e", "setTimeout(()=>{}, 5000)"] } }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            {{- if .Values.config.neurouterYaml }}
+            - { name: config, mountPath: /config, readOnly: true }
+            {{- end }}
+        {{- if eq .Values.executor.mode "sidecar" }}
+        - name: executor
+          image: {{ include "neurouter.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/docker-entrypoint.sh", "node", "apps/executor/dist/main.js", "--tcp", {{ printf "127.0.0.1:%v" .Values.executor.port | quote }}]
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: NEUROUTER_EXECUTOR_POOL_MAX, value: {{ .Values.executor.poolMax | quote }} }
+            - { name: NEUROUTER_EXECUTOR_PREWARM, value: {{ .Values.executor.prewarm | quote }} }
+            - name: NEUROUTER_EXECUTOR_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "neurouter.executorSecret" . }}, key: NEUROUTER_EXECUTOR_TOKEN } }
+          resources: {{- toYaml .Values.executor.resources | nindent 12 }}
+          securityContext: {{- include "neurouter.executorSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - { name: executor-tmp, mountPath: /tmp }
+        {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if eq .Values.executor.mode "sidecar" }}
+        - name: executor-tmp
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.config.neurouterYaml }}
+        - name: config
+          configMap: { name: {{ include "neurouter.fullname" . }}-config }
+        {{- end }}
+      {{- if .Values.topologySpread }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "neurouter.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -66,9 +66,9 @@ export function ndjsonLine(r: AuditRow): string {
 
 /** Fixed, documented CSV columns (README "Audit export"). Params are not included; use NDJSON. */
 export const CSV_COLUMNS = [
-  'seq', 'id', 'ts', 'kind', 'user_id', 'agent_id', 'client_name', 'client_version', 'server_id', 'tool_id', 'tool_name',
+  'seq', 'id', 'ts', 'kind', 'user_id', 'api_key_id', 'client_name', 'client_version', 'server_id', 'tool_id', 'tool_name',
   'decision', 'decision_reason', 'status', 'latency_ms', 'upstream_latency_ms', 'error_code', 'error_message', 'trace_id',
-  'session_id', 'action', 'target_type', 'target_id', 'output_size', 'output_hash', 'ip', 'prev_hash', 'hash',
+  'environment_id', 'task_id', 'action', 'target_type', 'target_id', 'output_size', 'output_hash', 'ip', 'prev_hash', 'hash',
 ] as const;
 
 /**

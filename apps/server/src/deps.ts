@@ -51,6 +51,14 @@ import { ConfigSync } from './controlplane/config-sync/reconcile.js';
 import { ApiKeysService } from './controlplane/keys/api-keys.service.js';
 import { UsersService } from './controlplane/users/users.service.js';
 import { ExecutorHealth } from './dataplane/code/executor-health.js';
+import { EvalsService } from './controlplane/evals/evals.service.js';
+import { sampleEntities, type GraphqlMockModel, type OpenApiMockModel } from '@neurouter/compiler';
+import { AuthorizationService } from './controlplane/oauth/authorize.js';
+import { CimdResolver } from './controlplane/oauth/cimd.js';
+import { OAuthClientsService } from './controlplane/oauth/clients.service.js';
+import { DbSessionLookup, type ConsoleSessionLookup } from './controlplane/oauth/session.js';
+import { OAuthTokensService } from './controlplane/oauth/tokens.service.js';
+import { UpstreamOAuthService } from './controlplane/upstream-oauth/upstream-oauth.service.js';
 
 export interface ServiceInputs {
   config: Config;
@@ -179,6 +187,8 @@ export function createServices(input: ServiceInputs) {
   const errors = new ErrorEvents(db, now);
   const pages = new ResultPages(db, now);
   const mock = new InProcessMock({ now });
+  // constructed early: the data plane's CredentialResolver reads delegated upstream tokens through it
+  const upstreamOAuth = new UpstreamOAuthService({ db, clock, envelope, coord, audit, secrets: namedSecrets.resolver(tenantId), fetch: (allowHttp) => upstreamFetchFor(allowHttp), publicUrl: config.publicUrl, pepper: config.hashPepper, log: logger });
   const credentials = new CredentialResolver(namedSecrets.resolver(tenantId), {
     clientCredentials: new ClientCredentialsCache(async (d, secret) => {
       const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: d.clientId ?? '', client_secret: secret, ...(d.scopes?.length ? { scope: d.scopes.join(' ') } : {}) });
@@ -186,6 +196,7 @@ export function createServices(input: ServiceInputs) {
       if (!res.ok) throw new Error(`token endpoint answered ${res.status}`);
       return (await res.json()) as { access_token: string; expires_in?: number };
     }),
+    upstreamTokens: (environmentId, userId) => upstreamOAuth.token(environmentId, userId),
     now,
   });
   const http = new HttpInvoker(upstreamFetchFor, now);
@@ -266,6 +277,53 @@ export function createServices(input: ServiceInputs) {
   const apiKeys = new ApiKeysService(db, clock, config.hashPepper, audit, coord);
   const users = new UsersService(db, clock, audit, config);
 
+  /* ---------------------------------------------------------------- MCP OAuth 2.1 AS + upstream OAuth broker (§13.3, §13.5) */
+  const oauthClients = new OAuthClientsService(db, clock, new CimdResolver(outboundFetch, now), settings, config.hashPepper, audit, coord);
+  const oauthTokens = new OAuthTokensService(db, clock, coord, audit, { pepper: config.hashPepper, accessTtlSec: config.env.OAUTH_ACCESS_TOKEN_TTL_SEC, refreshTtlDays: config.env.OAUTH_REFRESH_TOKEN_TTL_DAYS });
+  const consoleSessions: ConsoleSessionLookup = new DbSessionLookup(db, clock, { cookieName: config.cookieNames.session, idleMs: config.env.SESSION_IDLE_MINUTES * 60_000 });
+  const authorization = new AuthorizationService(db, clock, oauthClients, oauthTokens, audit, { issuer: config.publicUrl, publicUrl: config.publicUrl, pepper: config.hashPepper, codeModeEnabled: () => settings.get('codeModeEnabled'), loginUrl: (r) => consoleSessions.loginUrl(r) });
+
+  /* ---------------------------------------------------------------- evals (§15) */
+  const localUrl = { value: config.publicUrl };
+  const mockModelFor = async (environmentId: string): Promise<OpenApiMockModel | null> => {
+    const b = await runtime.getByEnvironmentId(tenantId, environmentId);
+    const m = b?.build.mockModel() as OpenApiMockModel | GraphqlMockModel | null | undefined;
+    return m && m.kind === 'openapi' ? m : null;
+  };
+  const evals = new EvalsService({
+    db,
+    clock,
+    jobs,
+    settings,
+    secrets: namedSecrets,
+    keys: apiKeys,
+    servers,
+    builds,
+    auditStore,
+    tenantId,
+    env: config.env as unknown as Record<string, string | undefined>,
+    defaultModel: config.env.NEUROUTER_EVAL_MODEL,
+    metrics,
+    log: logger,
+    onProgress: (runId, done, total) => void coord.publish('events.eval', { runId, done, total }).catch(() => {}),
+    ports: {
+      baseUrl: () => localUrl.value,
+      resetMock: (ns) => mock.reset(ns),
+      mockSamples: async (environmentId, ns, n) => {
+        const m = await mockModelFor(environmentId);
+        if (!m) return {};
+        return Object.fromEntries(sampleEntities(m, mock.store, ns, n).map((e) => [e.resource, e.items]));
+      },
+      mockState: (environmentId, ns) => async (resource, scope, where) => {
+        const m = await mockModelFor(environmentId);
+        const r = m ? (m.resources[resource] ?? Object.values(m.resources).find((x) => x.name === resource)) : undefined;
+        if (!m || !r) return [];
+        const sc = { ...Object.fromEntries(r.scopeParams.map((p) => [p, r.defaultScope[p] ?? 'demo'])), ...(scope ?? {}) };
+        return mock.store.collection(ns, r, sc).items.filter((it) => Object.entries(where).every(([k, v]) => JSON.stringify((it as Record<string, unknown>)[k]) === JSON.stringify(v)));
+      },
+    },
+  });
+
   metrics.beforeRender = async () => {
     metrics.auditQueueDepth.set(auditStore.stats().queueDepth);
     metrics.embeddingStatus.reset();
@@ -291,6 +349,8 @@ export function createServices(input: ServiceInputs) {
     runtime, bus, limiter, authenticator, tracker, errors, pages, mock, credentials, http, pipeline, ops, scripts, dispatcher,
     executor: () => executor, executorHealth, startExecutor,
     builds, servers, fetchSpec, configSync, apiKeys, users,
+    oauthClients, oauthTokens, authorization, consoleSessions, upstreamOAuth,
+    evals, localUrl,
     shutdown,
   };
 }

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['24', '26']
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg18
+        env: { POSTGRES_USER: neurouter, POSTGRES_PASSWORD: neurouter, POSTGRES_DB: neurouter }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U neurouter" --health-interval 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: '${{ matrix.node }}', cache: npm }
+      - run: npm ci
+      - run: npm ls --all > /dev/null
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+        env:
+          EMBEDDINGS_ENABLED: 'false'
+          NEUROUTER_TEST_PG_URL: postgres://neurouter:neurouter@127.0.0.1:5432/neurouter
+      - run: npm run build
+
+  executor-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: '26', cache: npm }
+      - run: npm ci
+      - run: npx vitest run --project executor
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build --build-arg BAKE_MODEL=false -t neurouter-core:ci .
+      - name: readyz + one MCP call against the baked demo config
+        run: |
+          set -euo pipefail
+          printf 'NEUROUTER_MASTER_KEYS=k1:%s\nNEUROUTER_ACTIVE_KEY_ID=k1\nHASH_PEPPER=%s\n' "$(openssl rand -base64 32)" "$(openssl rand -hex 32)" > ci.env
+          docker run -d --name nr -p 3000:3000 --env-file ci.env -e NODE_ENV=development -e NEUROUTER_CONFIG=/app/neurouter.example.yaml -e EMBEDDINGS_ENABLED=false neurouter-core:ci
+          for i in $(seq 1 30); do curl -sf localhost:3000/readyz && break; sleep 2; done
+          TOKEN=$(docker exec nr node packages/cli/dist/main.js keys create --server petstore --env dev | tail -1)
+          curl -sf localhost:3000/mcp/petstore/dev -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-11-25' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pet_by_id","arguments":{"pet_id":1}}}' | grep -q '"id":1'
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - run: |
+          set -euo pipefail
+          printf 'database: { url: "postgres://x@y/z" }\ncrypto: { masterKeys: "k1:AAAA", activeKeyId: k1, hashPepper: pppppppppppppppppppppppppppppppppppp }\n' > v.yaml
+          for m in sidecar deployment; do helm template nr deploy/helm/neurouter -f v.yaml --set executor.mode=$m > $m.yaml; done
+          cat sidecar.yaml deployment.yaml | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 -summary -strict -

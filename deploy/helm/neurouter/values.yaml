@@ -1,0 +1,149 @@
+# Neurouter Helm values (backend spec §20.2; ADAPT the neurouter-hub chart).
+
+image:
+  repository: ghcr.io/neurouter/core
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicaCount: 2
+
+# Public https origin (no trailing slash). MCP endpoints are <publicUrl>/mcp/<server>/<env>.
+publicUrl: https://mcp.example.com
+orgName: Neurouter
+logLevel: info
+
+database:
+  # Postgres URL (pgvector extension required). Use existingSecret in production.
+  url: ""
+  existingSecret: ""          # secret with key `DATABASE_URL`
+  # Optional separate audit/telemetry DB (AUDIT_DATABASE_URL); key `AUDIT_DATABASE_URL` in the same secret.
+  auditUrl: ""
+  poolMax: 20
+
+crypto:
+  # Secret with NEUROUTER_MASTER_KEYS, NEUROUTER_ACTIVE_KEY_ID and HASH_PEPPER (generate: npm run keys -- gen).
+  existingSecret: ""
+  masterKeys: ""
+  activeKeyId: ""
+  hashPepper: ""
+
+oidc:
+  issuer: ""
+  clientId: ""
+  clientSecret: ""            # or oidc.existingSecret with key OIDC_CLIENT_SECRET
+  existingSecret: ""
+  scopes: openid email profile groups
+  groupsClaim: groups
+  adminGroups: ""
+  defaultRole: viewer         # role for OIDC users not in adminGroups
+  allowedEmailDomains: ""
+  bootstrapAdminEmail: ""
+
+# onStart: every pod migrates under Kysely's DB lock. job: a pre-upgrade Job migrates and pods skip it
+# (the first install always migrates on start, because the Job's ServiceAccount and Secrets don't exist yet).
+migrations:
+  mode: job
+
+embeddings:
+  enabled: true
+  model: onnx-community/granite-embedding-small-english-r2-ONNX
+  dtype: q8
+
+# neurouter.yaml (GitOps): mounted at /config/neurouter.yaml and applied on start (NEUROUTER_CONFIG).
+config:
+  neurouterYaml: ""
+  mode: hybrid                # file | hybrid | console
+
+# Code-mode executor (§10.6). sidecar: second container in the pod (shares the pod network, so egress
+# cannot be denied for the executor alone). deployment: separate Deployment + Service + NetworkPolicy
+# allowing ingress only from the server pods and denying all egress (recommended for production).
+executor:
+  mode: sidecar               # sidecar | deployment | off
+  port: 7777
+  poolMax: 4
+  prewarm: 2
+  replicas: 2
+  token:
+    existingSecret: ""        # secret with key NEUROUTER_EXECUTOR_TOKEN (>= 32 chars); generated when empty
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "2", memory: 1Gi }
+
+# BYOK Anthropic key for evals: secret with key ANTHROPIC_API_KEY
+anthropic:
+  existingSecret: ""
+
+archive:
+  url: ""                     # AUDIT_ARCHIVE_URL (file:, s3://, gs://, azblob://); credentials via extraEnv / workload identity
+
+otel:
+  enabled: false
+  endpoint: http://otel-collector:4318
+
+metrics:
+  token: ""                   # optional bearer for /metrics
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+extraEnv: []                  # [{ name, value }] or valueFrom
+extraEnvFrom: []
+
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: false
+  className: ""
+  host: mcp.example.com
+  tls: []                     # [{ secretName, hosts: [...] }]
+  # SSE (held tool calls, elicitation, events): no buffering, long timeouts
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+
+resources:
+  requests: { cpu: 250m, memory: 512Mi }
+  limits: { memory: 1Gi }
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  # Egress CIDRs the server may reach (upstream APIs, IdP, Anthropic, object storage). Cloud metadata is always denied.
+  allowEgressCidrs: ["0.0.0.0/0"]
+  denyEgressCidrs: ["169.254.169.254/32"]
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}             # e.g. IRSA / GKE workload identity for the audit archive
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpread: true
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ["ALL"] }
