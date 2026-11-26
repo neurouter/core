@@ -69,6 +69,13 @@ Tool results follow one of two contracts, chosen per session:
   envelope (`unknown_tool` + closest names), not a JSON-RPC error. In `run_script`, tool functions return plain data
   and raise `LookupError`/`ValueError`/`PermissionError`/… whose message is the error object;
   `ops.pages(fn="ns.list_x", args={…}, max_items=500)` returns the items of every page.
+  There is no task framing: Neurouter infers tasks per credential, client and MCP session (10-minute idle gap),
+  counts `state.call`/`streak` in the task row (the same on every instance), and shows `state.left` when a
+  rate limit is down to 20%. One ops tool is listed, `neurouter_report(kind: done|blocked|unmet_need|tool_problem|
+  decision, text)`; the v1 names still answer. Write tools take `dry_run: true` (the plan: target, effect,
+  `reversible`). Outside prod a destructive call first answers `confirmation_required` with the plan and the same
+  call carrying `confirm: "ct_…"` (5 minutes, single use, bound to the arguments and the credential); scripts with
+  destructive calls do the same per plan. In prod your user approves through elicitation; tokens are not accepted.
 - **Contract 1**: the 0.2.x shapes. Servers created before contract 2 keep it until switched.
 
 A client picks a version with the capability `experimental["dev.neurouter/contract"] = {"versions":[2,1]}` or the

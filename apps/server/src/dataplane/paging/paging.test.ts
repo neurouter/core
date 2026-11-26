@@ -84,7 +84,7 @@ describe('paging plan and the contract-2 input schema (D6)', () => {
   });
 
   it('prefixes nr_ on collisions with upstream arguments that mean something else; non-list tools only get fields', () => {
-    expect(pagingPlan(collide).names).toEqual({ cursor: 'cursor', limit: 'nr_limit', fields: 'nr_fields' });
+    expect(pagingPlan(collide).names).toEqual({ cursor: 'cursor', limit: 'nr_limit', fields: 'nr_fields', dryRun: null, confirm: null });
     expect(Object.keys(v2InputSchema(collide).properties as object).sort()).toEqual(['cursor', 'fields', 'limit', 'nr_fields', 'nr_limit']);
     expect(pagingPlan(getTool)).toMatchObject({ list: false, names: { cursor: null, limit: null, fields: 'fields' } });
     expect(Object.keys(v2InputSchema(getTool).properties as object)).toEqual(['note_id', 'fields']);

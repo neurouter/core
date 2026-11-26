@@ -25,7 +25,7 @@ describe('memory store', () => {
     const cfg = { capacity: 3, refillPerMs: 1 / 1000 };
     for (let i = 0; i < 3; i++) expect((await st.take('k', cfg)).allowed).toBe(true);
     const denied = await st.take('k', cfg);
-    expect(denied).toEqual({ allowed: false, retryAfterMs: 1000 });
+    expect(denied).toEqual({ allowed: false, retryAfterMs: 1000, remaining: 0 });
     clock.advance(1000);
     expect((await st.take('k', cfg)).allowed).toBe(true);
   });

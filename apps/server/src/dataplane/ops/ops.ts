@@ -1,5 +1,5 @@
 import type { Kysely } from 'kysely';
-import { META_CALL_ID, META_TASK_ID, OPS_TOOLS, opsMcpName, READ_RESULT, type ErrorCode, type OpsTool } from '@neurouter/shared';
+import { META_CALL_ID, META_TASK_ID, OPS_TOOLS, opsMcpName, READ_RESULT, REPORT, REPORT_KIND_TOGGLE, REPORT_KINDS, type ErrorCode, type OpsTool, type ReportKind } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import type { Redactor } from '../../kernel/audit/redact.js';
 import type { MainDB } from '../../kernel/db/schema.js';
@@ -28,14 +28,36 @@ export interface OpsToolDefinition {
   description: string;
   inputSchema: Schema;
   annotations: Record<string, unknown>;
-  op: OpsTool | typeof READ_RESULT;
+  op: OpsOp;
 }
+
+/** An ops operation: a v1 ops tool, `read_result`, or the contract-2 `report`. */
+export type OpsOp = OpsTool | typeof READ_RESULT | typeof REPORT;
 
 const obj = (properties: Record<string, unknown>, required: string[] = []): Schema => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (min: number, max: number, description: string): Schema => ({ type: 'string', minLength: min, maxLength: max, description });
 
 /** Ops tool definitions (§11.1). Free text is capped at 500 chars (truncated, not rejected), so maxLength is not enforced here. */
-export const OPS_DEFINITIONS: Record<OpsTool | typeof READ_RESULT, Omit<OpsToolDefinition, 'name' | 'pyName' | 'op'>> = {
+export const OPS_DEFINITIONS: Record<OpsOp, Omit<OpsToolDefinition, 'name' | 'pyName' | 'op'>> = {
+  report: {
+    title: 'Report to Neurouter',
+    description:
+      'Tell Neurouter how the task ends or what is missing. Optional. Use kind=unmet_need when no tool can do what the user asked, blocked when you need the user (ambiguous request, approval, missing access), tool_problem when a tool misbehaved, done when finished. Example: neurouter_report({"kind":"unmet_need","text":"run the test suite","attempted":["search_tools"]})',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: [...REPORT_KINDS] },
+        text: { type: 'string', minLength: 1, maxLength: 500 },
+        attempted: { type: 'array', items: { type: 'string' }, maxItems: 20 },
+        tool: { type: 'string' },
+        error_id: { type: 'string' },
+        reason: { type: 'string', maxLength: 500 },
+      },
+      required: ['kind', 'text'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
   begin_task: {
     title: 'Begin a task',
     description: "Start tracking one user request as a task. Call this first with the user's goal in one sentence; every following call attaches to the task until neurouter_end_task.",
@@ -92,19 +114,25 @@ export const OPS_DEFINITIONS: Record<OpsTool | typeof READ_RESULT, Omit<OpsToolD
   },
 };
 
-export function opsDefinition(op: OpsTool | typeof READ_RESULT): OpsToolDefinition {
-  return { ...OPS_DEFINITIONS[op], name: opsMcpName(op), pyName: op === READ_RESULT ? null : `ops.${op}`, op };
+export function opsDefinition(op: OpsOp): OpsToolDefinition {
+  return { ...OPS_DEFINITIONS[op], name: opsMcpName(op), pyName: op === READ_RESULT || op === REPORT ? null : `ops.${op}`, op };
+}
+
+/** Contract 2: whether `neurouter_report` is available (any kind's v1 toggle is on). */
+export function reportEnabled(ctx: RunContext): boolean {
+  return ctx.contract === 2 && Object.values(REPORT_KIND_TOGGLE).some((t) => ctx.bundle.server.opsTools[t]);
 }
 
 export function enabledOps(ctx: RunContext): OpsTool[] {
   return OPS_TOOLS.filter((t) => ctx.bundle.server.opsTools[t]);
 }
 
-/** MCP name (`neurouter_x`) or Python name (`ops.x` / `x`) → op, when enabled. read_result is always on. */
-export function opFor(ctx: RunContext, name: string): OpsTool | typeof READ_RESULT | null {
+/** MCP name (`neurouter_x`) or Python name (`ops.x` / `x`) → op, when enabled. read_result is always on; report only in contract 2. */
+export function opFor(ctx: RunContext, name: string): OpsOp | null {
   const raw = name.startsWith('neurouter_') ? name.slice('neurouter_'.length) : name.startsWith('ops.') ? name.slice(4) : null;
   if (!raw) return null;
   if (raw === READ_RESULT) return name.startsWith('ops.') ? null : READ_RESULT;
+  if (raw === REPORT) return !name.startsWith('ops.') && reportEnabled(ctx) ? REPORT : null;
   return (OPS_TOOLS as readonly string[]).includes(raw) && ctx.bundle.server.opsTools[raw as OpsTool] ? (raw as OpsTool) : null;
 }
 
@@ -150,7 +178,7 @@ export class OpsTools {
     return typeof r === 'string' ? r : JSON.stringify(r);
   }
 
-  async call(ctx: RunContext, op: OpsTool | typeof READ_RESULT, args: Record<string, unknown>): Promise<{ result: McpToolResult; value: unknown; draft: Draft }> {
+  async call(ctx: RunContext, op: OpsOp, args: Record<string, unknown>): Promise<{ result: McpToolResult; value: unknown; draft: Draft }> {
     const start = this.d.now();
     const auditId = newId();
     if (ctx.origin !== 'eval') this.d.metrics?.opsCalls.inc({ tool: op });
@@ -170,7 +198,8 @@ export class OpsTools {
         failed = true;
       }
     }
-    if (op !== 'begin_task' && op !== 'end_task') this.d.tracker.bump(ctx.taskId, { ops_count: 1, ...(op === 'log_decision' && value.recorded !== false ? { decision_count: 1 } : {}) });
+    const closes = op === 'begin_task' || op === 'end_task' || (op === REPORT && (args.kind === 'done' || args.kind === 'blocked'));
+    if (!closes) this.d.tracker.bump(ctx.taskId, { ops_count: 1, ...(op === 'log_decision' && value.recorded !== false ? { decision_count: 1 } : {}) });
     const taskId = typeof value.task_id === 'string' ? value.task_id : ctx.taskId;
     this.d.audit.record({
       ...this.d.pipeline.auditBase({ ...ctx, taskId }),
@@ -214,10 +243,12 @@ export class OpsTools {
     };
   }
 
-  private async dispatch(ctx: RunContext, op: OpsTool | typeof READ_RESULT, a: Record<string, unknown>, auditId: string): Promise<Record<string, unknown>> {
+  private async dispatch(ctx: RunContext, op: OpsOp, a: Record<string, unknown>, auditId: string): Promise<Record<string, unknown>> {
     const db = this.d.db;
     const now = this.d.now();
     switch (op) {
+      case 'report':
+        return this.report(ctx, a, auditId);
       case 'begin_task': {
         const goal = await this.redactText(cap(a.goal));
         if (!goal) return { recorded: false, reason: 'goal is required' };
@@ -319,6 +350,44 @@ export class OpsTools {
     }
   }
 
+  /**
+   * `neurouter_report(kind, text, …)` (contract-v2 §4.2, D2): each kind runs the v1 tool it replaces (so eval
+   * traffic stays out of the inbox and metrics exactly as before) and answers `{recorded, ref, similar}`.
+   * `done`/`blocked` close the inferred task (`success` / `partial` + `exit_kind: blocked`).
+   */
+  private async report(ctx: RunContext, a: Record<string, unknown>, auditId: string): Promise<Record<string, unknown>> {
+    const kind = a.kind as ReportKind;
+    if (!(REPORT_KINDS as readonly string[]).includes(String(a.kind))) return { recorded: false, reason: `kind must be one of ${REPORT_KINDS.join(', ')}` };
+    const text = typeof a.text === 'string' ? a.text.trim() : '';
+    if (!text) return { recorded: false, reason: 'text is required' };
+    if (!ctx.bundle.server.opsTools[REPORT_KIND_TOGGLE[kind]]) return { recorded: false, reason: `kind ${kind} is turned off on this server` };
+    switch (kind) {
+      case 'unmet_need': {
+        const v = await this.dispatch(ctx, 'report_unmet_need', { intent: text, ...(a.attempted !== undefined ? { attempted: a.attempted } : {}) }, auditId);
+        return v.recorded === false ? v : { recorded: true, ref: v.group_id, similar: v.similar_reports ?? 0 };
+      }
+      case 'tool_problem': {
+        const v = await this.dispatch(ctx, 'report_issue', { tool: typeof a.tool === 'string' && a.tool ? a.tool : 'unknown', problem: a.reason ? `${text} (${cap(a.reason, 200)})` : text, ...(typeof a.error_id === 'string' ? { error_id: a.error_id } : {}) }, auditId);
+        return v.recorded === false ? v : { recorded: true, ref: v.issue_id, similar: 0 };
+      }
+      case 'decision': {
+        const v = await this.dispatch(ctx, 'log_decision', { choice: text, reason: typeof a.reason === 'string' && a.reason ? a.reason : text }, auditId);
+        return v.recorded === false ? v : { recorded: true, ref: auditId, similar: 0 };
+      }
+      case 'done':
+      case 'blocked': {
+        const taskId = ctx.taskId;
+        if (!taskId) return { recorded: false, reason: 'no open task' };
+        await this.d.tracker.bumpNow(taskId, { ops_count: 1 });
+        const notes = await this.redactText(cap(a.reason ? `${text} (${cap(a.reason, 200)})` : text));
+        await this.d.tracker.closeWith(taskId, ctx.tenantId, kind, notes);
+        const t = await this.d.db.selectFrom('tasks').where('tenant_id', '=', ctx.tenantId).select(['framing']).where('id', '=', taskId).executeTakeFirst();
+        if (ctx.origin !== 'eval') this.d.metrics?.tasksTotal.inc({ server: ctx.server.slug, framing: t?.framing ?? 'inferred', outcome: kind === 'done' ? 'success' : 'partial' });
+        return { recorded: true, ref: taskId, similar: 0 };
+      }
+    }
+  }
+
   /** Need grouping (§11.5): same normalized-intent hash, else nearest group (cosine ≥ 0.88) when embeddings are ready, else new. */
   private async groupFor(ctx: RunContext, intent: string, now: number): Promise<string> {
     const db = this.d.db;
@@ -357,7 +426,7 @@ export class OpsTools {
  * Contract-2 form of an ops answer: data on success; `{recorded:false, reason}` answers become errors with a
  * code (they never fail the task: the agent can carry on).
  */
-function opsDraft(op: OpsTool | typeof READ_RESULT, args: Record<string, unknown>, value: Record<string, unknown>, failed: boolean, retryAfterMs: number | undefined, meta: Record<string, unknown>): Draft {
+function opsDraft(op: OpsOp, args: Record<string, unknown>, value: Record<string, unknown>, failed: boolean, retryAfterMs: number | undefined, meta: Record<string, unknown>): Draft {
   const name = opsMcpName(op);
   if (retryAfterMs !== undefined) return errorDraft({ code: 'rate_limited', message: `Too many neurouter_* calls; retry in ${Math.max(1, Math.ceil(retryAfterMs / 1000))}s.`, retryAfterMs, name, args, next: [{ tool: name, args }] }, { meta });
   if (failed) return errorDraft({ code: 'unavailable', message: `${name} could not record this; nothing else is affected.`, retry: 'yes', name, args, next: [{ tool: name, args }] }, { meta });

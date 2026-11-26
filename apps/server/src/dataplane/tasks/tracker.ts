@@ -1,7 +1,8 @@
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { TaskFraming, TaskOutcome } from '@neurouter/shared';
 import type { MainDB } from '../../kernel/db/schema.js';
 import { newId } from '../../kernel/lib/ids.js';
+import { toJsonColumn } from '../../kernel/lib/json.js';
 import type { PriorCall } from '../pipeline/policy.js';
 
 export const TASK_IDLE_MS = 10 * 60_000;
@@ -20,6 +21,18 @@ export interface TaskOwner {
   traceId: string | null;
   /** Persisted as `tasks.origin` (eval tasks stay filterable after their eval key is garbage-collected). */
   origin: 'live' | 'eval';
+  /** contract 2 (D1): the MCP session id, when the client has one; tasks are inferred per session */
+  sessionKey?: string | null;
+}
+
+/** One step of a task's state block (contract-v2 §2.4), computed in the database so every instance counts the same. */
+export interface StateStep {
+  /** n-th call of the task */
+  calls: number;
+  /** identical call + result streak (1 = not a repeat) */
+  streak: number;
+  /** first call of the task, or env/writes changed since the last answer */
+  changed: boolean;
 }
 
 export type CounterField = 'call_count' | 'error_count' | 'write_count' | 'blocked_count' | 'script_count' | 'decision_count' | 'ops_count';
@@ -41,8 +54,8 @@ export class TaskTracker {
     private readonly onChange?: (taskId: string, tenantId: string) => void,
   ) {}
 
-  private key(o: Pick<TaskOwner, 'environmentId' | 'credentialKey' | 'clientName'>): string {
-    return `${o.environmentId}|${o.credentialKey}|${o.clientName ?? ''}`;
+  private key(o: Pick<TaskOwner, 'environmentId' | 'credentialKey' | 'clientName' | 'sessionKey'>): string {
+    return `${o.environmentId}|${o.credentialKey}|${o.clientName ?? ''}|${o.sessionKey ?? ''}`;
   }
 
   /** Resolves the request's task; `create: false` only looks (tools/list does not open tasks). */
@@ -71,6 +84,8 @@ export class TaskTracker {
         .orderBy('last_activity_at', 'desc')
         .limit(1);
       q = o.clientName === null ? q.where('client_name', 'is', null) : q.where('client_name', '=', o.clientName);
+      // contract 2 (D1): a session's calls form its own task (two parallel sessions of one client are two tasks)
+      if (o.sessionKey) q = q.where('session_key', '=', o.sessionKey);
       const row = await q.executeTakeFirst();
       if (row) open = { id: row.id, framing: row.framing };
     }
@@ -111,6 +126,7 @@ export class TaskTracker {
         ended_at: null,
         trace_id: o.traceId,
         origin: o.origin,
+        session_key: o.sessionKey ?? null,
       })
       .execute();
     this.cache.set(this.key(o), { at: t, taskId: id });
@@ -144,6 +160,52 @@ export class TaskTracker {
     for (const [k, v] of this.cache) if (v.taskId === taskId) this.cache.delete(k);
     this.history.delete(taskId);
     this.onChange?.(taskId, row.tenant_id);
+  }
+
+  /**
+   * `neurouter_report(done|blocked)` (contract-v2 §4.2): closes the task with `success` (done) or `partial`
+   * (blocked; the outcome list has no `blocked`, `exit_kind` says it) and the report text as notes.
+   */
+  async closeWith(taskId: string, tenantId: string, kind: 'done' | 'blocked', notes: string | null): Promise<void> {
+    await this.db.updateTable('tasks').set({ exit_kind: kind }).where('id', '=', taskId).where('tenant_id', '=', tenantId).where('status', '=', 'open').execute();
+    await this.close(taskId, kind === 'done' ? 'success' : 'partial', notes);
+  }
+
+  /**
+   * One state-block step (contract-v2 §2.4) in the task row: the call counter increments atomically, the streak
+   * counts identical call + result pairs, and `changed` says whether env/writes differ from the last answer. Works
+   * across instances (P1 kept this per instance). Null when the task row is gone.
+   */
+  async step(taskId: string, tenantId: string, i: { callKey: string; resultKey: string; env: string; writes: string }): Promise<StateStep | null> {
+    // tenant-scope: child-of-scoped (task id from a tenant-scoped resolve)
+    const prev = await this.db.selectFrom('tasks').select(['state_env', 'state_writes', 'state_calls']).where('id', '=', taskId).where('tenant_id', '=', tenantId).executeTakeFirst();
+    if (!prev) return null;
+    const row = await this.db
+      .updateTable('tasks')
+      .set({
+        state_calls: sql<number>`state_calls + 1`,
+        state_streak: sql<number>`case when state_call_key = ${i.callKey} and state_result_key = ${i.resultKey} then state_streak + 1 else 1 end`,
+        state_call_key: i.callKey,
+        state_result_key: i.resultKey,
+        state_env: i.env,
+        state_writes: i.writes,
+      })
+      .where('id', '=', taskId)
+      .where('tenant_id', '=', tenantId)
+      .returning(['state_calls', 'state_streak'])
+      .executeTakeFirst();
+    if (!row) return null;
+    return { calls: Number(row.state_calls), streak: Number(row.state_streak), changed: Number(prev.state_calls) === 0 || prev.state_env !== i.env || prev.state_writes !== i.writes };
+  }
+
+  /**
+   * Contract 2 (D1): an inferred task's label from its first calls (a search query, else the first tool's title)
+   * until the labeler job or the agent says more. Only when the task has no goal and no label yet.
+   */
+  async labelOnce(taskId: string, tenantId: string, goal: string): Promise<void> {
+    const label = { goal: goal.slice(0, 200), outcome: 'unknown', confidence: 0.3, model: 'neurouter:first-calls' };
+    // tenant-scope: child-of-scoped (task id from a tenant-scoped resolve)
+    await this.db.updateTable('tasks').set({ inferred_label: toJsonColumn(label) }).where('id', '=', taskId).where('tenant_id', '=', tenantId).where('inferred_label', 'is', null).where('goal', 'is', null).execute();
   }
 
   /** Counter bump + activity (fire-and-forget from the hot path). */

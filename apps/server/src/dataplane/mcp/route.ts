@@ -72,6 +72,8 @@ interface RequestCtx {
   contractHeader?: string;
   /** client capabilities of a 2026-07-28 request envelope, seen before the SDK (negotiation in the factory) */
   envelopeCaps?: Record<string, unknown> | null;
+  /** `Mcp-Session-Id` (contract 2 infers one task per session, D1) */
+  sessionId?: string;
 }
 
 /**
@@ -119,6 +121,7 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
   const metaTask = typeof meta[META_TASK_ID] === 'string' ? (meta[META_TASK_ID] as string) : null;
   const tp = typeof meta.traceparent === 'string' ? meta.traceparent : rc.traceparent;
   const p = rc.principal;
+  const contract = negotiateContract(b, client.caps ?? rc.envelopeCaps, rc.contractHeader);
   const owner = {
     tenantId: b.tenantId,
     serverId: b.server.id,
@@ -132,6 +135,8 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
     oauthClientId: p.type === 'user' ? p.oauthClientId : null,
     traceId: traceIdOf(tp),
     origin: rc.origin,
+    // contract 2 (D1): tasks are inferred per (credential, client, MCP session) with the idle gap
+    ...(contract === 2 && rc.sessionId ? { sessionKey: rc.sessionId.slice(0, 200) } : {}),
   };
   const task = await d.tracker.resolve(owner, metaTask, { create: createTask });
   return {
@@ -153,7 +158,7 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
     requestId: newId(),
     ...(rc.mockNamespace ? { mockNamespace: rc.mockNamespace } : {}),
     ...(rc.exposureOverride ? { exposureOverride: rc.exposureOverride } : {}),
-    contract: negotiateContract(b, client.caps ?? rc.envelopeCaps, rc.contractHeader),
+    contract,
     outputSchema: outputSchemaSetting(b),
   };
 }
@@ -353,6 +358,7 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
         ...(exp === 'tools' || exp === 'code' ? { exposureOverride: exp } : {}),
         ...(header(req, HEADER_CONTRACT) ? { contractHeader: header(req, HEADER_CONTRACT)!.slice(0, 20) } : {}),
         ...(rpc.envelopeCaps ? { envelopeCaps: rpc.envelopeCaps } : {}),
+        ...(sessionId ? { sessionId } : {}),
       };
       const abort = new AbortController();
       const releases = rpc.calls.map((id) => inflight.register(auth.credentialKey, id, abort));

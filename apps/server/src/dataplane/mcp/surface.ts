@@ -8,15 +8,15 @@ import {
   META_WRITES_ENABLED,
   OPS_VISIBILITY,
   READ_RESULT,
+  REPORT,
   SEARCH_TOOLS,
-  type OpsTool,
   type OutputSchemaMode,
   type ToolDef,
 } from '@neurouter/shared';
 import { hashCanonical } from '../../kernel/lib/jcs.js';
 import type { RunContext } from '../pipeline/context.js';
 import { resolveVisibleTool, writeEnabled } from '../pipeline/pipeline.js';
-import { enabledOps, opsDefinition } from '../ops/ops.js';
+import { enabledOps, opsDefinition, reportEnabled, type OpsOp } from '../ops/ops.js';
 import { codeModeAvailable, runScriptEntry } from '../code/run-script.js';
 import type { TypedSchemaIssues } from '../envelope/render.js';
 import { ADVERTISED_ENVELOPE_SCHEMA, typedEnvelopeSchema } from '../envelope/schema.js';
@@ -77,10 +77,11 @@ export const CALL_TOOL_DEFINITION: McpToolEntry = {
 };
 
 /**
- * Ops tools listed in contract 2 until P3 merges them into `neurouter_report`. The other v1 names
- * (begin/end_task, whoami, explain_error, get_examples, read_result) are answered by name, unlisted (§1).
+ * Contract 2 lists one ops tool, `neurouter_report` (D2). Every v1 name (begin/end_task, report_unmet_need,
+ * report_issue, log_decision, whoami, explain_error, get_examples, read_result) is still answered, unlisted, for
+ * one release (§1).
  */
-export const V2_OPS = ['report_unmet_need', 'report_issue', 'log_decision'] as const;
+export const V2_OPS = [] as const;
 
 /** Tools the principal may see (hidden + profile filter), before discovery. */
 export function visibleTools(ctx: RunContext): ToolDef[] {
@@ -144,7 +145,7 @@ export function agentInputSchema(t: ToolDef): Record<string, unknown> {
   return v2InputSchema(t, include && list ? include.map((p) => p.replace(/^[^.[\]]*\[\]\.?/, '')).filter(Boolean) : include);
 }
 
-export function opsEntry(op: OpsTool | typeof READ_RESULT): McpToolEntry {
+export function opsEntry(op: OpsOp): McpToolEntry {
   const d = opsDefinition(op);
   return { name: d.name, title: d.title, description: d.description, inputSchema: d.inputSchema, annotations: d.annotations };
 }
@@ -192,7 +193,7 @@ export function buildSurface(ctx: RunContext, opts: { executorHealthy: boolean; 
   const pinned = visible.filter((t) => pinnedNames.has(t.name)).slice(0, 15);
   const ops = enabledOps(ctx).filter((o) => !v2 || (V2_OPS as readonly string[]).includes(o));
   const meta = (e: McpToolEntry) => (v2 ? v2Entry(ctx, view, e) : e);
-  const pinnedOps = ops.filter((o) => OPS_VISIBILITY[o] === 'pinned').map((o) => meta(opsEntry(o)));
+  const pinnedOps = v2 ? (reportEnabled(ctx) ? [meta(opsEntry(REPORT))] : []) : ops.filter((o) => OPS_VISIBILITY[o] === 'pinned').map((o) => meta(opsEntry(o)));
   const native = Boolean(ctx.client.name && opts.nativeSearchClients?.includes(ctx.client.name));
   const out: McpToolEntry[] = [];
   const code = mode !== 'tools';
@@ -236,7 +237,6 @@ export function instructions(ctx: RunContext, surface: Surface): string {
 
 /**
  * Contract-2 instructions (contract-v2 §6, ~90 tokens). Wording where later phases are not there yet:
- * the exit is `neurouter_report_unmet_need`
  * (P3 merges it into `neurouter_report`), and scripts dry-run with `mode="dry_run"`.
  */
 function instructionsV2(ctx: RunContext, surface: Surface): string {
@@ -256,7 +256,7 @@ function instructionsV2(ctx: RunContext, surface: Surface): string {
   if (surface.mode !== 'code' && areas) lines.push(`Tools by area: ${areas}.${listedSearch ? ' Not all tools are listed: use search_tools, then call_tool.' : ''}`);
   else if (surface.mode === 'code' && areas) lines.push(`Tools by area: ${areas}. Find functions with search_tools.`);
   if (surface.code) lines.push(`For multi-step work use run_script: Python calling ${ns}.<fn>(...); mode="dry_run" for writes.`);
-  if (ctx.bundle.server.opsTools.report_unmet_need) lines.push('If no tool can do what the user asks, call neurouter_report_unmet_need.');
+  if (reportEnabled(ctx)) lines.push('If no tool can do it or you need the user, call neurouter_report.');
   return lines.join('\n');
 }
 
