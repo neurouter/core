@@ -28,6 +28,9 @@ describe('evals REST flow (stub provider)', () => {
     await t.s.services.jobs.idle();
     const d = await t.json(t.admin, { method: 'GET', url: `/api/eval-runs/${run.id}` }, 200);
     expect(d.status).toBe('succeeded');
+    // stub runs are labelled as simulated, never as the configured real model
+    expect(d.models).toEqual(['stub (simulated, not a real model)']);
+    expect(d.matrix.every((m: { model: string }) => m.model.startsWith('stub (simulated'))).toBe(true);
     expect(d.score.headline).toBeGreaterThan(0);
     expect(d.matrix.map((m: { mode: string }) => m.mode).sort()).toEqual(['code', 'tool']);
     expect(d.tasks.length).toBeGreaterThan(0);

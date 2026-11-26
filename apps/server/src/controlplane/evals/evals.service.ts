@@ -10,6 +10,7 @@ import {
   runSuite,
   scoreRun,
   selectVerifyTasks,
+  STUB_RUN_MODEL,
   suggest,
   type EvalTask,
   type GenTool,
@@ -250,7 +251,9 @@ export class EvalsService {
     const buildId = input.buildId ?? env.build_id ?? server.latest_build_id;
     if (!buildId) throw AppError.conflict('The server has no build');
     const quick = input.preset === 'quick';
-    const models = input.models?.length ? input.models : [await this.model()];
+    // the stub plays every model: record it as such, never as the configured (real) model name
+    const stub = !this.d.env.NEUROUTER_EVAL_FAKE_LLM && this.d.env.NEUROUTER_EVAL_LLM === 'stub';
+    const models = stub ? [STUB_RUN_MODEL] : input.models?.length ? input.models : [await this.model()];
     const modes = input.modes?.length ? input.modes : env.code_mode === 1 ? (['tool', 'code'] as const) : (['tool'] as const);
     const repeats = Math.min(5, Math.max(1, input.repeats ?? (quick ? 1 : await this.d.settings.get('evalRepeats'))));
     const id = newId();

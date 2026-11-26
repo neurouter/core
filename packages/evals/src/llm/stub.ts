@@ -11,6 +11,8 @@ import type { LlmClient, LlmMessageParam, LlmRequest, LlmResponse, LlmTool, LlmT
  * report `model: "stub"`; the stub is only used when selected explicitly (`provider: 'stub'`).
  */
 export const STUB_MODEL = 'stub';
+/** Model label stored on eval runs played by the stub, so stored results never name a real model. */
+export const STUB_RUN_MODEL = 'stub (simulated, not a real model)';
 
 export class StubLlmClient implements LlmClient {
   readonly provider = 'stub' as const;
