@@ -43,6 +43,7 @@ export function routePlugins(s: Services, extra: Array<(app: FastifyInstance) =>
         externalIssuer: s.config.externalAs?.issuer ?? null,
         now: () => s.clock.now(),
         onAuthFailure: (reason, method) => s.metrics.authFailure(method, reason),
+        mockNamespaces: s.mockNamespaces,
       });
     },
     async (app) => {

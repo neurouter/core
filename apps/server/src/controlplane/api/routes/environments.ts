@@ -76,7 +76,7 @@ export async function environmentRoutes(app: FastifyInstance, c: ApiContext): Pr
   route(app, 'environments.resetMock', api.environments.resetMock, async (req) => {
     const e = await envs.get(req.params.id);
     if (!e.base_url.startsWith('mock:')) throw AppError.validation('Not a mock environment', [{ path: ['id'], message: 'baseUrl is not mock:', code: 'not_mock' }]);
-    c.ports.resetMock(e.id, req.body.seed);
+    await c.ports.resetMock(e.tenant_id, e.id, req.body.seed);
   });
   route(app, 'environments.testDraft', api.environments.testDraft, async (req) => {
     const p = await db.selectFrom('spec_previews').select(['id', 'expires_at']).where('id', '=', req.params.id).executeTakeFirst();

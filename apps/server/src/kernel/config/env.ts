@@ -121,6 +121,8 @@ export const Env = z
     NEUROUTER_CONFIG_MODE: z.enum(['file', 'hybrid', 'console']).default('hybrid'),
     NEUROUTER_ROLE: z.enum(['all']).default('all'),
     NEUROUTER_EXECUTOR_MODE: z.enum(['embedded', 'remote', 'local', 'off']).default('embedded'),
+    /** Mock state (multi-tenancy spec §7): `db` (shared by every instance) or `memory` (one process; the CLI). */
+    NEUROUTER_MOCK_STORE: z.enum(['db', 'memory']).default('db'),
     NEUROUTER_EXECUTOR_URL: opt(z.string()),
     NEUROUTER_EXECUTOR_TOKEN: opt(z.string()),
     NEUROUTER_EXECUTOR_SOCKET: z.string().default('/tmp/neurouter-executor.sock'),

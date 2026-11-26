@@ -7,6 +7,7 @@ import { newId } from '../../kernel/lib/ids.js';
 import type { Keyring } from '../../kernel/secrets/keyring.js';
 import type { RuntimeBundle, RuntimeConfigSource } from '../../kernel/runtime-config.js';
 import type { McpAuthenticator } from '../auth/authenticate.js';
+import type { MockNamespaceBinder } from '../mock/namespace.js';
 import { RC_KEY, traceIdOf, type ClientInfo, type Principal, type RunContext } from '../pipeline/context.js';
 import type { Confirmer, ConfirmOutcome, Pipeline } from '../pipeline/pipeline.js';
 import type { TaskTracker } from '../tasks/tracker.js';
@@ -46,6 +47,8 @@ export interface McpRouteDeps {
   onAuthFailure?: (reason: string, method: 'api_key' | 'oauth' | 'external') => void;
   inflight?: InflightCalls;
   legacyClients?: LegacyClientInfo;
+  /** Accepts the eval mock-state header only when bound to this tenant/environment/run (G13). */
+  mockNamespaces: MockNamespaceBinder;
 }
 
 /** What the HTTP layer hands the SDK factory (per HTTP request). */
@@ -289,7 +292,7 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
       if (rpc.initialize) legacyClients.remember(auth.credentialKey, sessionId, rpc.initialize);
       for (const id of rpc.cancels) void inflight.cancel(auth.credentialKey, id).catch(() => {});
       const isEval = auth.principal.type === 'api_key' && auth.principal.purpose === 'eval';
-      const mockNs = isEval ? header(req, HEADER_MOCK_STATE) : undefined;
+      const mockNs = await d.mockNamespaces.bind(header(req, HEADER_MOCK_STATE), { tenantId: bundle.tenantId, environmentId: bundle.environment.id, principal: auth.principal });
       // any credential may narrow its own surface (console "code mode only" snippets); code still needs
       // code mode to be available (env codeMode, code:run scope, kill switches, executor), see effectiveMode
       const exp = header(req, HEADER_EXPOSURE)?.trim().toLowerCase();
@@ -304,7 +307,7 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
         userAgent: ua ? ua.slice(0, 512) : null,
         traceparent: header(req, 'traceparent') ?? null,
         legacyClient: legacyClients.get(auth.credentialKey, sessionId),
-        ...(mockNs && /^eval:[A-Za-z0-9:_-]{1,200}$/.test(mockNs) ? { mockNamespace: mockNs } : {}),
+        ...(mockNs !== 'env' ? { mockNamespace: mockNs } : {}),
         ...(exp === 'tools' || exp === 'code' ? { exposureOverride: exp } : {}),
       };
       const abort = new AbortController();

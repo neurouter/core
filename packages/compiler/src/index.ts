@@ -14,7 +14,31 @@ export { generateStubs, generateOpsStub, pySignatureFor, pyArgMap, pascalCase, M
 export { lint, LINT_WEIGHTS, type LintOptions } from './lint.js';
 export { diffSpecs, type SpecChangeSummary, type OpRef } from './diff.js';
 export { buildMockModel, type MockModel, type OpenApiMockModel, type GraphqlMockModel, type MockOperation, type MockResource, type MockOpKind } from './mock/model.js';
-export { MockStore, sampleEntities, defaultScopeValue, SEED_ITEMS, DEFAULT_SEED, type MockStoreOptions, type Collection } from './mock/store.js';
+export {
+  MockStore,
+  MemoryMockStateStore,
+  MockLimitError,
+  sampleEntities,
+  defaultScopeValue,
+  newItem,
+  seedItems,
+  scopeKeyOf,
+  collectionKeyOf,
+  collectionFull,
+  itemJson,
+  mockSeedKey,
+  toMockNs,
+  asStateStore,
+  SEED_ITEMS,
+  DEFAULT_SEED,
+  MOCK_MAX_ITEMS,
+  MOCK_MAX_ITEM_BYTES,
+  type MockStoreOptions,
+  type Collection,
+  type MockNs,
+  type MockScope,
+  type MockStateStore,
+} from './mock/store.js';
 export { handleMockRequest, type MockRequest, type MockResponse } from './mock/handler.js';
 export { handleGraphqlMock } from './mock/graphql.js';
 export { generateValue, seededFaker, hashSeed } from './mock/generate.js';

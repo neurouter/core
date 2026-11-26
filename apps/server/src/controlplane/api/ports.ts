@@ -11,8 +11,8 @@ export interface ConsolePorts {
   agentEntry(tool: ToolDef, environmentId: string | null): Promise<Record<string, unknown>>;
   /** Health probe (no tool) or one read-tool call through the full pipeline (`via: console`). */
   testEnvironment(environmentId: string, toolName: string | undefined, args: Record<string, unknown> | undefined, userId: string): Promise<{ ok: boolean; latencyMs: number | null; status?: number; credential: 'ok' | 'missing' | 'rejected' | 'not_required'; detail?: string; result?: unknown }>;
-  /** Mock environments: reseed the in-memory state. */
-  resetMock(environmentId: string, seed?: number): void;
+  /** Mock environments: drop the environment's shared mock state (reseeded on next use, with `seed` if given). */
+  resetMock(tenantId: string, environmentId: string, seed?: number): Promise<void>;
   /** Mock sample for a tool (overlay preview): runs the tool against a scratch mock namespace. */
   mockSample(environmentId: string, tool: ToolDef): Promise<unknown>;
   executorStatus(): { mode: 'embedded' | 'remote' | 'local' | 'off'; ok: boolean; montyVersion: string | null; poolMax: number; busy: number; detail?: string | null };

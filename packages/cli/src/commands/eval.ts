@@ -36,6 +36,8 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
   env.PORT = '0';
   delete env.PUBLIC_URL;
   env.NEUROUTER_EXECUTOR_MODE ??= 'embedded';
+  // a throwaway in-process server: mock state stays in memory (no DB tables to fill and GC)
+  if (!o.config) env.NEUROUTER_MOCK_STORE ??= 'memory';
   let running: RunningServer | null = null;
   try {
     running = await startServer({ env, loadDotenv: false, jobs: false });

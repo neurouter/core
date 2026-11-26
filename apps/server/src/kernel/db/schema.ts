@@ -725,6 +725,42 @@ export interface SuggestionsTable {
   updated_at: number;
 }
 
+export interface MockNamespacesTable {
+  tenant_id: string;
+  environment_id: string;
+  namespace: string;
+  seed: number;
+  kind: 'env' | 'eval' | 'gen';
+  created_at: number;
+  last_used_at: number;
+  expires_at: number | null;
+}
+
+export interface MockCollectionsTable {
+  tenant_id: string;
+  environment_id: string;
+  namespace: string;
+  collection_key: string;
+  seed: number;
+  next_id: number;
+  item_count: number;
+  bytes: number;
+  created_at: number;
+  last_used_at: number;
+}
+
+export interface MockItemsTable {
+  tenant_id: string;
+  environment_id: string;
+  namespace: string;
+  collection_key: string;
+  item_id: string;
+  ord: number;
+  body: string;
+  bytes: number;
+  updated_at: number;
+}
+
 export interface AuditLogTable {
   seq: number;
   id: string;
@@ -917,6 +953,9 @@ export interface MainDB {
   eval_runs: EvalRunsTable;
   eval_task_runs: EvalTaskRunsTable;
   suggestions: SuggestionsTable;
+  mock_namespaces: MockNamespacesTable;
+  mock_collections: MockCollectionsTable;
+  mock_items: MockItemsTable;
 }
 
 export interface AuditDB {
@@ -978,6 +1017,9 @@ export const MAIN_TABLE_COLUMNS = {
   eval_runs: ['tenant_id', 'id', 'server_id', 'suite_id', 'environment_id', 'build_id', 'overlay_revision_id', 'models', 'modes', 'repeats', 'task_keys', 'status', 'progress', 'score', 'headline', 'recommended_mode', 'confidence', 'usage', 'error', 'trigger', 'base_run_id', 'job_id', 'created_by', 'created_at', 'started_at', 'ended_at'],
   eval_task_runs: ['tenant_id', 'id', 'run_id', 'task_id', 'model', 'mode', 'attempt', 'passed', 'assertion_results', 'judge', 'failure_cause', 'framing_ok', 'tool_calls', 'scripts', 'input_tokens', 'output_tokens', 'latency_ms', 'served_by_model', 'fallback_used', 'task_id_neurouter', 'transcript', 'created_at'],
   suggestions: ['tenant_id', 'id', 'run_id', 'server_id', 'cause', 'kind', 'tools', 'affected_task_ids', 'overlay_patch', 'spec_patch', 'rationale', 'predicted_delta', 'status', 'verify_run_id', 'verified_delta', 'created_at', 'updated_at'],
+  mock_namespaces: ['tenant_id', 'environment_id', 'namespace', 'seed', 'kind', 'created_at', 'last_used_at', 'expires_at'],
+  mock_collections: ['tenant_id', 'environment_id', 'namespace', 'collection_key', 'seed', 'next_id', 'item_count', 'bytes', 'created_at', 'last_used_at'],
+  mock_items: ['tenant_id', 'environment_id', 'namespace', 'collection_key', 'item_id', 'ord', 'body', 'bytes', 'updated_at'],
 } as const satisfies { [T in keyof MainDB]: readonly (keyof MainDB[T])[] };
 
 export const AUDIT_TABLE_COLUMNS = {
