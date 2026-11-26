@@ -43,7 +43,7 @@ export class ConfigError extends Error {
 }
 
 /** apps/server (works from src/ under tsx and dist/ when built). */
-export const SERVER_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const SERVER_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 /**
  * Loads `.env` files outside production: `$NEUROUTER_ENV_FILE`, else the first of

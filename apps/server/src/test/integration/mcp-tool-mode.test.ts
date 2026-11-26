@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RunningServer } from '../../server.js';
-import { bootServer, keyFor, mcpClient } from '../fakes/server.js';
+import { bootServer, keyFor, mcpClient, resetPg } from '../fakes/server.js';
 
-describe('tool-mode data plane (M2 acceptance)', () => {
+const PG = process.env.NEUROUTER_TEST_PG_URL;
+
+describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('tool-mode data plane (M2 acceptance, %s)', (_dialect, pgUrl) => {
   let s: RunningServer;
   beforeAll(async () => {
-    s = await bootServer({ NEUROUTER_EXECUTOR_MODE: 'off' });
+    if (pgUrl) await resetPg(pgUrl);
+    s = await bootServer({ NEUROUTER_EXECUTOR_MODE: 'off', ...(pgUrl ? { DATABASE_URL: pgUrl } : {}) });
   }, 60_000);
   afterAll(async () => {
     await s?.close();

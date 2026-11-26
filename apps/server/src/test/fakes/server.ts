@@ -49,3 +49,12 @@ export async function mcpClient(s: RunningServer, server: string, env: string, t
   await client.connect(transport);
   return client;
 }
+
+/** Drops and recreates the public schema of a throwaway Postgres (integration tests only). */
+export async function resetPg(url: string): Promise<void> {
+  const pg = (await import('pg')).default;
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
+  await c.query('drop schema public cascade; create schema public;');
+  await c.end();
+}
