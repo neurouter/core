@@ -30,7 +30,7 @@ export class Golden {
   }
 }
 
-const VOLATILE_NUMBERS = ['wallMs', 'duration_ms', 'durationMs', 'latencyMs', 'suspensions', 'retry_after_ms', 'retryAfterMs', 'dev.neurouter/retry-after-ms'];
+const VOLATILE_NUMBERS = ['seconds', 'wallMs', 'duration_ms', 'durationMs', 'latencyMs', 'suspensions', 'retry_after_ms', 'retryAfterMs', 'dev.neurouter/retry-after-ms'];
 
 /** Replaces values that differ between runs (uuids, error ids, handles, task handles, confirm tokens, timings). */
 export function normalize(value: unknown): unknown {
@@ -40,7 +40,7 @@ export function normalize(value: unknown): unknown {
   s = s.replace(/rh_[A-Za-z0-9]{22}/g, 'rh_<id>');
   s = s.replace(/\bt_[A-Za-z0-9]{8}\b/g, 't_<id>');
   s = s.replace(/nrk_[A-Za-z0-9_]+/g, 'nrk_<key>');
-  for (const k of VOLATILE_NUMBERS) s = s.replace(new RegExp(`(\\\\*"${k.replace(/[/.]/g, '\\$&')}\\\\*":)\\d+`, 'g'), '$10');
+  for (const k of VOLATILE_NUMBERS) s = s.replace(new RegExp(`(\\\\*"${k.replace(/[/.]/g, '\\$&')}\\\\*":)[\\d.]+`, 'g'), '$10');
   return JSON.parse(s) as unknown;
 }
 

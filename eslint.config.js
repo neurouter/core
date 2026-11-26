@@ -50,6 +50,20 @@ export default tseslint.config(
     },
   },
   {
+    // no-raw-tool-result (contract-v2 §7): only dataplane/envelope builds MCP tool results. Producers return their
+    // v1 result through envelope/v1.ts and a contract-neutral draft; the dispatcher renders contract 2. The
+    // bypass test (dataplane/envelope/bypass.test.ts) checks the same in `npm test`.
+    files: ['apps/server/src/dataplane/**/*.ts'],
+    ignores: ['apps/server/src/dataplane/envelope/**', 'apps/server/src/dataplane/**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        { selector: "ObjectExpression > Property[key.name='content'][value.type='ArrayExpression']", message: 'no-raw-tool-result: build tool results in dataplane/envelope (v1Result / errorResult / the renderer).' },
+        { selector: "ObjectExpression > Property[key.name='structuredContent']", message: 'no-raw-tool-result: build tool results in dataplane/envelope (v1Result / errorResult / the renderer).' },
+      ],
+    },
+  },
+  {
     // Control plane must not import the data plane (A1). Wiring happens in deps.ts / app.ts.
     files: ['apps/server/src/controlplane/**/*.ts'],
     rules: {

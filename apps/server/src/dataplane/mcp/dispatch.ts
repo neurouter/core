@@ -211,10 +211,6 @@ export class Dispatcher {
   }
 
   /** `search_tools` (§9.4): ACL before ranking (only the principal's visible tools are scored). v1 result + contract-2 draft. */
-  async searchTools(ctx: RunContext, args: Record<string, unknown>, surface: Surface): Promise<McpToolResult> {
-    return (await this.searchReply(ctx, args, surface)).result;
-  }
-
   private async searchReply(ctx: RunContext, args: Record<string, unknown>, surface: Surface): Promise<{ result: McpToolResult; draft: Draft }> {
     const start = this.d.now();
     const v2 = ctx.contract === 2;
@@ -230,7 +226,7 @@ export class Dispatcher {
     const format = args.format === 'json' || args.format === 'python' ? args.format : (v2 ? surface.mode === 'code' : surface.code) ? 'python' : 'json';
     const includeSchemas = v2 ? args.detail === 'full' : args.include_schemas !== false;
     // contract 2 asks for one more hit to know whether there are more
-    const res = await this.search(ctx, query, v2 ? limit + 1 : limit, format, includeSchemas, v2);
+    const res = await this.hits(ctx, query, v2 ? limit + 1 : limit, format, includeSchemas, v2);
     const auditId = newId();
     this.d.audit.record({ ...this.d.pipeline.auditBase(ctx), id: auditId, kind: 'tool_search', toolName: SEARCH_TOOLS, decision: 'allowed', status: 'ok', decisionReason: `search:${res.mode}`, params: { query, limit, format }, output: { names: res.tools.map((t) => t.name) }, latencyMs: this.d.now() - start });
     this.d.tracker.bump(ctx.taskId, { ops_count: 0 });
@@ -291,7 +287,14 @@ export class Dispatcher {
     return okDraft(data, { page: { count: 0, total: 0, has_more: false, next_cursor: null, scope: { query, limit } }, hint: hint.length <= BUDGET.hintChars ? hint : hint.slice(0, BUDGET.hintChars), meta });
   }
 
-  async search(ctx: RunContext, query: string, limit: number, format: 'json' | 'python', includeSchemas: boolean, v2 = false): Promise<{ tools: SearchItem[]; totalVisible: number; mode: string }> {
+  /** Ranked search hits as the console and contract 1 show them. */
+  async search(ctx: RunContext, query: string, limit: number, format: 'json' | 'python', includeSchemas: boolean): Promise<{ tools: SearchItem[]; totalVisible: number; mode: string }> {
+    const r = await this.hits(ctx, query, limit, format, includeSchemas, false);
+    return { ...r, tools: r.tools.map(({ tool: _t, destructive: _d, ...x }) => x) };
+  }
+
+  /** Ranked hits with the API tool behind each (internal: contract-2 search entries need examples and schemas). */
+  private async hits(ctx: RunContext, query: string, limit: number, format: 'json' | 'python', includeSchemas: boolean, v2: boolean): Promise<{ tools: SearchItem[]; totalVisible: number; mode: string }> {
     const visible = visibleTools(ctx).filter((t) => t.kind !== 'composite' || ctx.mode === 'code');
     const rowIds = ctx.bundle.build.toolRowIds;
     const allowed = new Map<string, string>();

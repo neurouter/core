@@ -33,7 +33,7 @@ describe('contract 2 (acme, mock)', () => {
 
   const setServerExposure = async (patch: Record<string, unknown>) => {
     const srv = (await s.services.servers.bySlug(DEFAULT_TENANT_ID, 'acme'))!;
-    const cur = parseExposure(srv.exposure) as Record<string, unknown>;
+    const cur: Record<string, unknown> = { ...parseExposure(srv.exposure) };
     const next = { ...cur, ...patch };
     for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
     await s.services.dbs.main.db.updateTable('servers').set({ exposure: JSON.stringify(next) }).where('id', '=', srv.id).execute();
