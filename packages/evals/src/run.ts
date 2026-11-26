@@ -1,6 +1,6 @@
 import { agentSystemPrompt } from './prompts.js';
 import { BEGIN_TASK_TOOL, checkAttempt, failedAnswerExpectations, primaryTool, workCalls, type CheckOptions } from './check.js';
-import { emptyJudgeUsage, judgeAttempt, judgeEquivalence, judgeTokens, needsJudge } from './judge.js';
+import { emptyJudgeUsage, judgeAttempt, judgeDecline, judgeEquivalence, judgeTokens, needsJudge } from './judge.js';
 import type { GroundTruth } from './groundtruth.js';
 import type { CheckResult, JudgeResult, JudgeUsage } from './types.js';
 import { fallbackUsed, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmToolResultBlock, type LlmToolUseBlock } from './llm/types.js';
@@ -358,6 +358,16 @@ export async function gradeAttempt(task: EvalTask, record: AttemptRecord, o: Gra
   }
   const base: CheckOptions = { ...(o.stateReader ? { stateReader: o.stateReader } : {}), judge, groundTruth: o.groundTruth ?? null };
   let check = await checkAttempt(task, record, base);
+  // impossible tasks: a decline the patterns did not recognize (no writes) goes to the decline judge (B1)
+  const undeclined = check.results.find((r) => r.assertion.type === 'unmet_need_reported_or_declined' && !r.passed && r.detail.startsWith('neither'));
+  if (o.llm && undeclined && judgeable && record.finalAnswer.trim()) {
+    try {
+      base.decline = await judgeDecline({ llm: o.llm, model, task, answer: record.finalAnswer, usage, ...(o.signal ? { signal: o.signal } : {}) });
+      check = await checkAttempt(task, record, base);
+    } catch (err) {
+      if (err instanceof LlmKeyError) throw err;
+    }
+  }
   const items = failedAnswerExpectations(task, check, o.groundTruth ?? null);
   if (o.llm && o.equivalenceJudge !== false && items.length && judgeable && record.finalAnswer.trim()) {
     try {

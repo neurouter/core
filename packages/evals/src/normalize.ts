@@ -22,8 +22,20 @@ const MONEY_FIELD = /(^|_)(amount|price|total|subtotal|balance|fee|cost|tax|amou
 const EPOCH_FIELD = /^(created|updated|expires_at|arrival_date|available_on|date|period_start|period_end|canceled_at|ended_at|start_date|due_date|paid_at|finalized_at|timestamp)$|_at$|_on$/i;
 const ISO_DATE = /^\d{4}-\d\d-\d\d(?:[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)?)?$/;
 
-export function normText(s: string): string {
+/**
+ * Typographic punctuation as ASCII: curly quotes and apostrophes (’ ‘ ʼ ′ → ', “ ” „ ″ → "), dashes and the minus
+ * sign (‐ ‑ ‒ – — ― − → -), non-breaking and narrow spaces. Models write "can’t" (U+2019) as often as "can't".
+ */
+export function normPunct(s: string): string {
   return s
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u02BC\uFF07]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\uFF02]/g, '"')
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, '-')
+    .replace(/[\u00A0\u2007\u202F\u2009\u200A]/g, ' ');
+}
+
+export function normText(s: string): string {
+  return normPunct(s)
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -89,6 +101,8 @@ function textStated(answer: string, exp: string): boolean {
   const e = normText(exp);
   if (!e) return false;
   if (a.includes(` ${e} `)) return true;
+  // one-word values in another form: plural ("day" = "every 50 days") and the interval adverbs ("daily")
+  if (/^\p{L}{3,}$/u.test(e) && wordForms(e).some((w) => a.includes(` ${w} `))) return true;
   // glued ids/names: "applepay" vs "apple pay", "HelloWorld" vs "hello-world"
   const glue = (s: string) => s.replace(/\s+/g, '');
   if (e.length >= 6 && !/\d/.test(e) && glue(a).includes(glue(e))) return true;
@@ -99,6 +113,14 @@ function textStated(answer: string, exp: string): boolean {
     return et.filter((t) => at.has(t)).length / et.length >= 0.8;
   }
   return false;
+}
+
+const INTERVAL_ADVERBS: Record<string, string[]> = { day: ['daily'], week: ['weekly'], month: ['monthly'], year: ['yearly', 'annually', 'annual'], hour: ['hourly'], minute: ['minutely'] };
+
+/** Other forms of a one-word value: its plural, and for interval units the adverb (`day` → `days`, `daily`). */
+function wordForms(w: string): string[] {
+  const out = [`${w}s`, /(s|x|z|ch|sh)$/.test(w) ? `${w}es` : '', /[^aeiou]y$/.test(w) ? `${w.slice(0, -1)}ies` : '', ...(INTERVAL_ADVERBS[w] ?? [])];
+  return out.filter(Boolean);
 }
 
 const NEG = /\b(not|no|isn'?t|is not|aren'?t|wasn'?t|never|non|un|in)\s*[-]?\s*$/i;

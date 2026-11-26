@@ -59,6 +59,8 @@ export interface RunContext {
   mockNamespace?: string;
   /** Exposure override (`X-Neurouter-Exposure: tools|code`), any credential; code falls back to tools when unavailable. */
   exposureOverride?: 'tools' | 'code';
+  /** Eval reference session (`X-Neurouter-Reference`, eval keys): results without the overlay `include` projection (B7). */
+  fullObjects?: boolean;
   /** Negotiated agent contract of the session (contract-v2 §1); absent = 1 (console and internal callers). */
   contract?: ContractVersion;
   /** `exposure.outputSchema` in effect for this session. */

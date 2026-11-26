@@ -31,7 +31,7 @@ import {
   type SuggestTool,
   type TaskRunResult,
 } from '@neurouter/evals';
-import { HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, PROVIDER_ENV_KEYS, type EvalCategory, type ToolDef } from '@neurouter/shared';
+import { HEADER_BUILD, HEADER_EXPOSURE, HEADER_MOCK_STATE, HEADER_REFERENCE, PROVIDER_ENV_KEYS, type EvalCategory, type ToolDef } from '@neurouter/shared';
 import type { ModelKeyPolicy, TenantResolver } from '../../kernel/tenancy/types.js';
 import type { AuditStore } from '../../kernel/audit/store.js';
 import type { EvalRunsTable, EvalSuitesTable, EvalTasksTable, MainDB, SuggestionsTable } from '../../kernel/db/schema.js';
@@ -236,7 +236,8 @@ export class EvalsService {
     return async () => {
       const name = withMockDataVersion(`gen:${key.id}:gt-${newId()}`, dv);
       const ns: MockNs = { tenantId: env.tenant_id, environmentId: env.id, name };
-      const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: 'tools' };
+      // full objects (B7): ground-truth paths may name fields the overlay's default projection leaves out
+      const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: 'tools', [HEADER_REFERENCE]: '1' };
       if (build) headers[HEADER_BUILD] = build;
       const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
       return {
@@ -626,7 +627,7 @@ export class EvalsService {
               served_by_model: r.servedByModel,
               fallback_used: r.fallbackUsed ? 1 : 0,
               task_id_neurouter: r.neurouterTaskId,
-              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes }),
+              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes, framingPassed: r.framingPassed }),
               created_at: this.d.clock.now(),
             })
             .execute();
@@ -680,7 +681,7 @@ export class EvalsService {
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
     const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.cache_read_tokens', 'r.cache_write_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
-      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
+      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number; framingPassed?: boolean | null } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
       return {
         key: `${r.key}|${r.model}|${r.mode}|${r.attempt}`,
         taskKey: r.key,
@@ -689,7 +690,8 @@ export class EvalsService {
         mode: r.mode,
         attempt: r.attempt,
         passed: r.passed === 1,
-        framingPassed: r.framing_ok === 1,
+        // null = framing not offered (contract 2): kept in the transcript blob, the framing_ok column is NOT NULL (B2)
+        framingPassed: tr && 'framingPassed' in tr ? (tr.framingPassed ?? null) : r.framing_ok === 1,
         assertionResults: parseJsonColumn(r.assertion_results) ?? [],
         judge: parseJsonColumn(r.judge),
         failureCause: (r.failure_cause as TaskRunResult['failureCause']) ?? null,

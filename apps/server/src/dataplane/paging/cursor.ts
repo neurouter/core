@@ -17,15 +17,18 @@ export type CursorPayload =
   | { k: 'o'; n: number }
   | { k: 'r'; h: string; n: number; t?: number | null; then?: Exclude<CursorPayload, { k: 'r' }> | null };
 
-/** What a cursor is bound to: it only works for the same tool, arguments, contract, tenant and credential. */
+/** What a cursor is bound to: it only works for the same tool, query arguments, contract, tenant and credential. */
 export interface CursorBinding {
   tenantId: string;
   credentialKey: string;
   tool: string;
-  /** the agent's arguments except the cursor itself */
+  /** the agent's query arguments: not the cursor itself, not the `fields` projection, not a default page size (`boundArgs`) */
   args: Record<string, unknown>;
   contract: number;
 }
+
+/** Bound arguments up to this size travel in the cursor, so a cursor sent with other arguments can name its own (B5). */
+const MAX_EMBEDDED_ARGS = 512;
 
 export type CursorProblem = 'malformed' | 'mismatch' | 'expired';
 
@@ -74,9 +77,31 @@ export class CursorCodec {
 
   encode(payload: CursorPayload | Record<string, unknown>, b: CursorBinding): string {
     const exp = Math.ceil((this.now() + this.ttlMs) / 1000);
+    // page cursors carry their bound arguments (when small) so a mismatch can suggest continuing with them; the MAC
+    // covers them. Confirm tokens (`ct_`) do not: they stay short, and their binding is never shown back
+    const args = this.prefix === PREFIX && JSON.stringify(b.args).length <= MAX_EMBEDDED_ARGS ? [b.args] : [];
     // nulls are left out (short cursors); a missing `then`/`t` reads as none
-    const body = Buffer.from(JSON.stringify([exp, payload], (_k, v: unknown) => (v === null ? undefined : v))).toString('base64url');
+    const body = Buffer.from(JSON.stringify([exp, payload, ...args], (_k, v: unknown) => (v === null ? undefined : v))).toString('base64url');
     return `${this.prefix}${body}.${this.mac(body, b).toString('base64url')}`;
+  }
+
+  /**
+   * The query arguments a cursor was issued for, when it carries them and they verify (same tool, credential, tenant;
+   * unaltered, unexpired): what to send with it to continue. Null otherwise.
+   */
+  boundArgs(cursor: string, b: Omit<CursorBinding, 'args'>): Record<string, unknown> | null {
+    const m = this.re.exec(cursor);
+    if (!m) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(Buffer.from(m[1]!, 'base64url').toString('utf8'));
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(parsed) || typeof parsed[0] !== 'number' || parsed[0] * 1000 <= this.now()) return null;
+    const args = parsed[2];
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
+    return timingSafeEqualBuf(this.mac(m[1]!, { ...b, args: args as Record<string, unknown> }), Buffer.from(m[2]!, 'base64url')) ? (args as Record<string, unknown>) : null;
   }
 
   /** Throws `CursorError` (malformed, mismatch = altered or other tool/arguments/credential, expired). */

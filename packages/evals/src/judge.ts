@@ -1,5 +1,5 @@
 import { JUDGE_PASS_SCORE, type Assertion } from '@neurouter/shared';
-import { EQUIV_MARKER, EQUIV_PROMPT_VERSION, EQUIV_SYSTEM, JUDGE_CHOICE_RUBRIC, JUDGE_MARKER, JUDGE_PROMPT_VERSION, JUDGE_SYSTEM, markerMessage } from './prompts.js';
+import { DECLINE_MARKER, DECLINE_PROMPT_VERSION, DECLINE_SYSTEM, EQUIV_MARKER, EQUIV_PROMPT_VERSION, EQUIV_SYSTEM, JUDGE_AMBIGUOUS_RUBRIC, JUDGE_CHOICE_RUBRIC, JUDGE_MARKER, JUDGE_PROMPT_VERSION, JUDGE_SYSTEM, markerMessage } from './prompts.js';
 import { groundTruthPreview, type GroundTruth } from './groundtruth.js';
 import { parseJsonText, textOf, type LlmClient, type LlmUsage } from './llm/types.js';
 import type { AttemptRecord, EvalTask, JudgeResult, JudgeUsage } from './types.js';
@@ -12,6 +12,21 @@ export const JUDGE_SCHEMA = {
     reasons: { type: 'array', items: { type: 'string' } },
   },
   required: ['score', 'verdict', 'reasons'],
+  additionalProperties: false,
+} as const;
+
+/** Ambiguous tasks: the verdict plus how the agent handled the ambiguity. */
+export const JUDGE_AMBIGUOUS_SCHEMA = {
+  type: 'object',
+  properties: { ...JUDGE_SCHEMA.properties, path: { type: 'string', enum: ['asked', 'assumed', 'neither'] } },
+  required: [...JUDGE_SCHEMA.required, 'path'],
+  additionalProperties: false,
+} as const;
+
+export const DECLINE_SCHEMA = {
+  type: 'object',
+  properties: { declined: { type: 'boolean' }, reason: { type: 'string' } },
+  required: ['declined', 'reason'],
   additionalProperties: false,
 } as const;
 
@@ -47,12 +62,38 @@ export function judgeTokens(u: JudgeUsage | null | undefined): number {
   return u ? u.inputTokens + u.outputTokens + u.cacheReadTokens : 0;
 }
 
-/** Tool results the agent saw (text, cut), for `choice` and ground-truth judging. */
-function observedResults(rec: AttemptRecord, max = 6, chars = 1500): Array<{ tool: string; result: string }> {
-  return rec.transcript
+/**
+ * Token budget for the tool results given to the judge (≈ 4 characters per token). Every result fits whole when they
+ * fit together; otherwise the budget is shared (small results whole, the large ones cut to an equal share), so an
+ * answer that reports items from deep in a result can be verified (B8: a 1,500-char cut hid `topup_14` at char 1,756).
+ */
+export const JUDGE_RESULTS_TOKENS = 12_000;
+/** Token budget for the ground-truth preview given to the judge. */
+export const JUDGE_GROUND_TRUTH_TOKENS = 4_000;
+const CHARS_PER_TOKEN = 4;
+
+/** Tool results the agent saw (API calls, call_tool, run_script; not search or ops), within `tokens`. */
+export function observedResults(rec: Pick<AttemptRecord, 'transcript'>, tokens = JUDGE_RESULTS_TOKENS): Array<{ tool: string; result: string }> {
+  const all = rec.transcript
     .filter((t): t is Extract<AttemptRecord['transcript'][number], { kind: 'tool_result' }> => t.kind === 'tool_result' && !t.name.startsWith('neurouter_') && t.name !== 'search_tools')
-    .slice(0, max)
-    .map((t) => ({ tool: t.name, result: t.text.length > chars ? `${t.text.slice(0, chars)}…` : t.text }));
+    .slice(0, 40)
+    .map((t) => ({ tool: t.name, result: t.text }));
+  const budget = tokens * CHARS_PER_TOKEN;
+  // water-filling: the largest share s with sum(min(len, s)) <= budget
+  const lens = all.map((r) => r.result.length);
+  if (lens.reduce((a, b) => a + b, 0) <= budget) return all;
+  const sorted = [...lens].sort((a, b) => a - b);
+  let left = budget;
+  let share = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const even = Math.floor(left / (sorted.length - i));
+    if (sorted[i]! <= even) left -= sorted[i]!;
+    else {
+      share = even;
+      break;
+    }
+  }
+  return all.map((r) => (r.result.length > share ? { tool: r.tool, result: `${r.result.slice(0, Math.max(0, share - 60))}… (cut: ${r.result.length} chars in all)` } : r));
 }
 
 /**
@@ -64,16 +105,17 @@ function observedResults(rec: AttemptRecord, max = 6, chars = 1500): Array<{ too
 export async function judgeAttempt(opts: { llm: LlmClient; model: string; task: EvalTask; record: AttemptRecord; groundTruth?: GroundTruth | null; usage?: JudgeUsage; signal?: AbortSignal }): Promise<JudgeResult> {
   const js = opts.task.assertions.filter((a): a is Extract<Assertion, { type: 'judge' }> => a.type === 'judge');
   const criteria = js.map((a) => (a.kind === 'choice' ? `${a.criterion}\n${JUDGE_CHOICE_RUBRIC}` : a.criterion));
-  const choice = js.some((a) => a.kind === 'choice');
-  const wantsGt = js.some((a) => a.groundTruth) && opts.groundTruth;
+  const ambiguous = isAmbiguousJudged(opts.task);
+  if (ambiguous) criteria.push(JUDGE_AMBIGUOUS_RUBRIC);
   const input = {
     prompt: opts.task.prompt,
     rubric: opts.task.rubric,
     criteria,
     finalAnswer: opts.record.finalAnswer.slice(0, 8000),
-    calls: opts.record.calls.slice(0, 60).map((c) => ({ tool: c.tool, args: truncateJson(c.arguments, 300), status: c.status })),
-    ...(choice ? { results: observedResults(opts.record) } : {}),
-    ...(wantsGt ? { groundTruth: groundTruthPreview(opts.groundTruth!, 4000) } : {}),
+    calls: opts.record.calls.slice(0, 60).map((c) => ({ tool: c.tool, args: truncateJson(c.arguments, 300), status: c.status, ...(c.write ? { write: c.decision === 'dry_run' ? 'dry_run' : 'yes' } : {}) })),
+    // the results the agent saw, so facts in the answer can be verified (B8: whole, within a token budget)
+    results: observedResults(opts.record),
+    ...(opts.groundTruth?.refs.length ? { groundTruth: groundTruthPreview(opts.groundTruth, JUDGE_GROUND_TRUTH_TOKENS * CHARS_PER_TOKEN) } : {}),
   };
   const content = markerMessage(JUDGE_MARKER, JUDGE_PROMPT_VERSION, input, 'Grade the agent against the rubric and criteria.');
   const res = await opts.llm.create(
@@ -82,12 +124,39 @@ export async function judgeAttempt(opts: { llm: LlmClient; model: string; task: 
       max_tokens: 2000,
       system: JUDGE_SYSTEM,
       messages: [{ role: 'user', content }],
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: JUDGE_SCHEMA } },
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: ambiguous ? JUDGE_AMBIGUOUS_SCHEMA : JUDGE_SCHEMA } },
     },
     opts.signal ? { signal: opts.signal } : {},
   );
   if (opts.usage) addJudgeUsage(opts.usage, res.usage, content.length);
   return normalizeJudge(parseJsonText(textOf(res)));
+}
+
+/** An ambiguous task judged by a rubric criterion (not `kind: choice`): asking or an explicit assumption both pass. */
+export function isAmbiguousJudged(task: Pick<EvalTask, 'category' | 'assertions'>): boolean {
+  return task.category === 'ambiguous' && task.assertions.some((a) => a.type === 'judge' && a.kind !== 'choice');
+}
+
+/**
+ * Decline judge (impossible tasks, B1): the deterministic decline patterns missed and nothing was written; did the
+ * answer decline or explain that the request cannot be done, without claiming to have done it?
+ */
+export async function judgeDecline(opts: { llm: LlmClient; model: string; task: Pick<EvalTask, 'prompt' | 'rubric'>; answer: string; usage?: JudgeUsage; signal?: AbortSignal }): Promise<{ declined: boolean; reason: string }> {
+  const input = { prompt: opts.task.prompt, rubric: opts.task.rubric, answer: opts.answer.slice(0, 4000) };
+  const content = markerMessage(DECLINE_MARKER, DECLINE_PROMPT_VERSION, input, 'Does the answer decline, or explain that this cannot be done, without claiming to have done it?');
+  const res = await opts.llm.create(
+    {
+      model: opts.model,
+      max_tokens: 500,
+      system: DECLINE_SYSTEM,
+      messages: [{ role: 'user', content }],
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: DECLINE_SCHEMA } },
+    },
+    opts.signal ? { signal: opts.signal } : {},
+  );
+  if (opts.usage) addJudgeUsage(opts.usage, res.usage, content.length);
+  const raw = (parseJsonText(textOf(res)) ?? {}) as { declined?: unknown; reason?: unknown };
+  return { declined: raw.declined === true, reason: String(raw.reason ?? '').slice(0, 200) };
 }
 
 export interface EquivalenceItem {
@@ -130,7 +199,8 @@ export function normalizeJudge(raw: unknown): JudgeResult {
   const score = Math.max(0, Math.min(1, Number(o.score) || 0));
   const verdict = o.verdict === 'pass' && score >= JUDGE_PASS_SCORE ? 'pass' : 'fail';
   const reasons = Array.isArray(o.reasons) ? o.reasons.map(String).slice(0, 3) : [];
-  return { score, verdict, reasons };
+  const path = o.path === 'asked' || o.path === 'assumed' || o.path === 'neither' ? o.path : undefined;
+  return { score, verdict, reasons, ...(path ? { path } : {}) };
 }
 
 function truncateJson(v: unknown, max: number): string {

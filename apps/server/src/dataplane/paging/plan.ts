@@ -206,6 +206,20 @@ export function itemsOf(v: unknown): unknown[] | null {
   return null;
 }
 
+/**
+ * The arguments a contract-2 cursor binds (B5): the query, not the projection. Left out: the cursor itself, `fields`
+ * (a projection; it may change between pages), and a page size equal to the tool's default (`{}` and `{limit: 30}`
+ * are the same query when 30 is the default). Undefined values are dropped.
+ */
+export function boundArgs(t: ToolDef, plan: PagingPlan, args: Record<string, unknown>): Record<string, unknown> {
+  const drop = new Set([plan.names.cursor, plan.names.fields].filter((x): x is string => Boolean(x)));
+  const props = (t.inputSchema.properties ?? {}) as Record<string, { default?: unknown }>;
+  const sizeDefault = plan.size ? props[plan.size.arg]?.default : undefined;
+  return Object.fromEntries(
+    Object.entries(args).filter(([k, v]) => v !== undefined && !drop.has(k) && !(plan.names.limit && k === plan.names.limit && sizeDefault !== undefined && Number(v) === Number(sizeDefault))),
+  );
+}
+
 /** Puts a page position into the spec arguments (after validation). `extraQuery` takes Link parameters no argument maps to. */
 export function applyPosition(t: ToolDef, plan: PagingPlan, specArgs: Record<string, unknown>, p: Exclude<CursorPayload, { k: 'r' }>): { extraQuery: Record<string, string | string[]> } {
   const extraQuery: Record<string, string | string[]> = {};

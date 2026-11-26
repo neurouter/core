@@ -42,7 +42,7 @@ export const OPS_DEFINITIONS: Record<OpsOp, Omit<OpsToolDefinition, 'name' | 'py
   report: {
     title: 'Report to Neurouter',
     description:
-      'Tell Neurouter how the task ends or what is missing. Optional. Use kind=unmet_need when no tool can do what the user asked, blocked when you need the user (ambiguous request, approval, missing access), tool_problem when a tool misbehaved, done when finished. Example: neurouter_report({"kind":"unmet_need","text":"run the test suite","attempted":["search_tools"]})',
+      'Tell Neurouter how the task ends or what is missing. Optional. Use kind=unmet_need when no tool can do what the user asked, blocked when you need the user (an ambiguous request: state your plan and ask before any write; approval; missing access), tool_problem when a tool misbehaved, done when finished. Example: neurouter_report({"kind":"unmet_need","text":"run the test suite","attempted":["search_tools"]})',
     inputSchema: {
       type: 'object',
       properties: {

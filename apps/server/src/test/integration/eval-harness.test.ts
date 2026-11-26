@@ -63,6 +63,49 @@ describe('eval harness (calibration, redaction, run cap)', () => {
     for (const a of audit) expect(a.params_redacted).not.toContain('hunter2');
   }, 120_000);
 
+  it('B7: ground truth uses full objects, not the overlay include; a stored $from path into a dropped field resolves', async () => {
+    // P6 (GitHub, 0.3.0): repos/list-for-user's include has no `owner`; the 0.2.2 migrator bound issues_get_label.owner to
+    // {"$from": "ref[0].data[0].owner.login"}, which resolved to nothing through shaping: 3 valid tasks rejected
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const spec = readFileSync(resolve(import.meta.dirname, '../../../../../examples/petstore/openapi.yaml'));
+    const overlay = 'overlay: 1\ntools:\n  "operationId:findPetsByStatus":\n    response:\n      include: ["[].id", "[].name"]\n';
+    const created = await s.services.servers.create({ tenantId: DEFAULT_TENANT_ID, slug: 'pets-b7', name: 'pets', spec: { bytes: spec, sourceUrl: null }, specSource: { path: 'petstore' }, createdBy: null, overlay: { yaml: overlay, source: 'file', message: 'b7' }, exposure: { contract: 2 } });
+    expect(created.build.build.status).toBe('ok');
+    const ev = s.services.evals;
+    const srvId = created.server.id;
+    const env = (await s.services.servers.environments(srvId)).find((e) => e.slug === 'mock')!;
+    const byTag = task({
+      key: 'tagged',
+      category: 'multi',
+      prompt: 'List available pets, then find pets with the first pet\'s first tag',
+      referenceCalls: [
+        { tool: 'find_pets_by_status', arguments: { status: 'available' }, required: ['status'] },
+        { tool: 'find_pets_by_tags', arguments: { tags: [{ $from: 'ref[0].data[0].tags[0].name' }] }, required: ['tags'] },
+      ],
+      assertions: [{ type: 'called', tool: 'find_pets_by_status', args: { status: 'available' } }, { type: 'called', tool: 'find_pets_by_tags', args: { tags: [{ $from: 'ref[0].data[0].tags[0].name' }] } }],
+    });
+    const suite = await ev.saveSuite(DEFAULT_TENANT_ID, srvId, null, [byTag], { mockDataVersion: 2 }, null, true);
+    const cal = await ev.calibrateSuite(DEFAULT_TENANT_ID, srvId, suite.id, { environmentId: env.id });
+    expect(cal.tasks[0], JSON.stringify(cal.tasks[0])).toMatchObject({ status: 'passed' });
+    const runner = await ev.referenceRunner(DEFAULT_TENANT_ID, srvId, 2, env.id);
+    try {
+      const gt = await runner.groundTruth(runner.resolve([byTag])[0]!);
+      const first = (gt.refs[0]!.data as Array<Record<string, unknown>>)[0]!;
+      expect(Object.keys(first)).toContain('tags');
+      expect(gt.refs[1]).toMatchObject({ ok: true });
+      // an unresolvable $from path is reported, not sent as a missing argument
+      const broken = await runner.groundTruth({ ...byTag, referenceCalls: [byTag.referenceCalls[0]!, { tool: 'find_pets_by_tags', arguments: { tags: [{ $from: 'ref[0].data[0].nope.name' }] } }] });
+      expect(broken.refs[1]).toMatchObject({ ok: false });
+      expect(broken.refs[1]!.error).toMatch(/\$from ref\[0\]\.data\[0\]\.nope\.name does not resolve/);
+    } finally {
+      await runner.close();
+    }
+    // the agent still gets the overlay's default projection
+    const tools = (await s.services.builds.tools(created.build.build.id)).find((t) => t.name === 'find_pets_by_status')!;
+    expect(tools.shaping?.include).toEqual(['[].id', '[].name']);
+  }, 120_000);
+
   it('--max-run-tokens stops starting attempts and marks the run incomplete', async () => {
     const ev = s.services.evals;
     const srv = (await s.services.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!;

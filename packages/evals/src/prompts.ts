@@ -4,13 +4,15 @@
  */
 export const GENERATOR_PROMPT_VERSION = 'gen-3';
 export const AGENT_PROMPT_VERSION = 'agent-1';
-export const JUDGE_PROMPT_VERSION = 'judge-2';
+export const JUDGE_PROMPT_VERSION = 'judge-3';
+export const DECLINE_PROMPT_VERSION = 'decline-1';
 export const EQUIV_PROMPT_VERSION = 'equiv-1';
 export const SUGGEST_PROMPT_VERSION = 'suggest-1';
 
 export const GENERATOR_MARKER = '<<NEUROUTER_GENERATOR';
 export const JUDGE_MARKER = '<<NEUROUTER_JUDGE';
 export const EQUIV_MARKER = '<<NEUROUTER_EQUIV';
+export const DECLINE_MARKER = '<<NEUROUTER_DECLINE';
 export const SUGGEST_MARKER = '<<NEUROUTER_SUGGEST';
 
 export function markerMessage(marker: string, version: string, input: unknown, instructions: string): string {
@@ -54,10 +56,18 @@ export function agentSystemPrompt(instructions: string | null): string {
   return instructions ? `${base}\n\nThe tool server says:\n${instructions}` : base;
 }
 
-export const JUDGE_SYSTEM = `You grade whether an AI agent's work satisfies a rubric. Be strict and concise. When "groundTruth" is given, it holds the API's actual results for this task: judge facts against it, and accept equivalent forms (Yes/true, "September 23, 2025"/2025-09-23T…, "$12.50"/1250 cents, "Apple Pay"/apple_pay). Return JSON only: {"score": 0..1, "verdict": "pass"|"fail", "reasons": [up to 3 short strings]}. Verdict pass requires score >= 0.7.`;
+export const JUDGE_SYSTEM = `You grade whether an AI agent's work satisfies a rubric. Be strict and concise. "results" holds the tool results the agent saw (cut only when very long): a fact in the answer that appears there is supported. When "groundTruth" is given, it holds the API's actual results for this task: judge facts against it, and accept equivalent forms (Yes/true, "September 23, 2025"/2025-09-23T…, "$12.50"/1250 cents, "Apple Pay"/apple_pay). Return JSON only: {"score": 0..1, "verdict": "pass"|"fail", "reasons": [up to 3 short strings]}. Verdict pass requires score >= 0.7.`;
 
 /** Appended to `judge {kind: "choice"}` criteria (ambiguous "use your judgment" tasks). */
 export const JUDGE_CHOICE_RUBRIC = `This is a judgment call: any reasonable choice passes. Pass when the answer states the choice it made (e.g. the cutoff or interpretation) and the results it reports are consistent with that choice and with the tool results in "results". Fail when no choice is stated, the results contradict the stated choice, or values are invented.`;
+
+/**
+ * Appended to the rubric criteria of ambiguous tasks (not `kind: choice`). Both ways of handling an underspecified
+ * request pass; the rubric says what the ambiguity is. Writes are checked deterministically (no_writes).
+ */
+export const JUDGE_AMBIGUOUS_RUBRIC = `This request is ambiguous; the rubric names the ambiguity. Two ways pass: (a) the agent asks a clarifying question about that ambiguity (it may look things up first, and may ask about more than one point); or (b) the agent states an explicit assumption, a reasonable reading of the ambiguous part, and what it reports or does is consistent with that assumption. Fail when it neither asks nor states its assumption (it silently picks a reading), asks only about something the request already says, or changes data without asking. Set "path": "asked", "assumed" or "neither".`;
+
+export const DECLINE_SYSTEM = `You check how an AI agent answered a request that the available API cannot fulfil. "declined" is true when the answer declines or explains that the request cannot be done (the API does not expose it, it is not retrievable, not supported, the agent cannot provide it), possibly offering alternatives, and does not claim to have done it or invent the requested value. Return JSON only: {"declined": true|false, "reason": "<short>"}.`;
 
 export const EQUIV_SYSTEM = `You check whether an answer states expected values. Each item has the expected value(s) from the API and the field they come from. An item is equivalent when the answer states the same fact in another form: casing, spacing, booleans in words (false = "not valid"/"inactive"/"no"), numbers with separators or in major units for minor-unit amounts (1250 = "12.50"), dates in words or another time zone for the same instant, names or ids with different punctuation. With several expected values, all must be stated unless they are alternatives. Not equivalent: a different value, a vaguer statement, or the value missing. Return JSON only: {"items": [{"index", "equivalent", "reason"}]}.`;
 

@@ -56,13 +56,53 @@ describe('contract 2: code mode (acme, mock)', () => {
     expect(last).toEqual([false, true]);
   });
 
+  it('B6: print() output comes back as `logs` (bounded), next to the return value', async () => {
+    // P6 probe (github, code, contract 2): `print(repos)` returned {"ok":true,"data":null,…} and the agent had to rerun with return
+    const r = await run('o = acme.get_order(order_id="order_1")\nprint("order", o["id"])\nreturn 1');
+    expect(r.ok, JSON.stringify(r.error)).toBe(true);
+    expect(r.data).toBe(1);
+    expect(r.logs).toBe('order order_1\n');
+    const printed = await run('print("x" * 5000)\nreturn None');
+    expect(printed.data).toBeNull();
+    expect(printed.logs.length).toBeLessThanOrEqual(2000);
+    expect(printed.logs).toMatch(/… \(\d+ more characters\)$/);
+    expect((await run('return 2')).logs).toBeUndefined();
+  });
+
+  it('B3: a large return value is cut to the agent budget (8,192 chars) with truncated + how to get the rest', async () => {
+    // P6 (github_multi_installation_codespaces, code, contract 2): `return api.codespaces_list_for_authenticated_user(repository_id=1)`
+    // came back as a 111,536-char envelope with truncated: null (contract 1 cut it at 8,192 chars)
+    const c = mcp();
+    await c.initialize();
+    const res = (await c.call('run_script', { code: 'o = acme.list_orders(limit=100)["items"]\nreturn (o * 5)[:100]' })).result as Env;
+    const text = res.content[0].text as string;
+    const r = assertEnvelope(res, 'run_script');
+    expect(r.ok, JSON.stringify(r.error)).toBe(true);
+    expect(text.length).toBeLessThan(8192 + 1200);
+    expect(Array.isArray(r.data)).toBe(true);
+    expect(r.data.length).toBeGreaterThan(0);
+    expect(r.data.length).toBeLessThan(100);
+    expect(r.truncated).toMatchObject({ items_omitted: 100 - r.data.length, next: { tool: 'neurouter_read_result' } });
+    expect(r.truncated.omitted_bytes).toBeGreaterThan(0);
+    expect(r.hint).toMatch(/return less|fields|page/i);
+    // the rest is there: the stored full value, through the call in truncated.next
+    const rest = assertEnvelope((await c.call(r.truncated.next.tool, r.truncated.next.args)).result, 'neurouter_read_result');
+    expect(rest.ok, JSON.stringify(rest.error)).toBe(true);
+    // a small value is untouched
+    const small = await run('return acme.get_order(order_id="order_1")["id"]');
+    expect(small).toMatchObject({ data: 'order_1', truncated: null });
+  });
+
   it('ops.pages stays as an alias for one release', async () => {
     expect(await ok('return len(ops.pages(fn="acme.list_orders", args={"limit": 6}, max_items=100))')).toBe(20);
   });
 
   it('a cursor from another call is refused as InvalidArgs before any upstream call', async () => {
-    const r = await ok('c = acme.list_orders.page(limit=3).page.next_cursor\ntry:\n    acme.list_orders.page(limit=4, cursor=c)\n    return "no error"\nexcept InvalidArgs as e:\n    return [str(e)[:13], ops.error(e)["next"]]');
-    expect(r).toEqual(['invalid_args:', [{ fn: 'acme.list_orders', args: { limit: 4 } }]]);
+    const r = (await ok('c = acme.list_orders.page(limit=3).page.next_cursor\ntry:\n    acme.list_orders.page(limit=4, cursor=c)\n    return "no error"\nexcept InvalidArgs as e:\n    return [str(e)[:13], ops.error(e)["next"], c]')) as [string, unknown[], string];
+    // B5: the first next call continues the cursor with the arguments it was issued for (the error budget may keep only it)
+    expect(r[0]).toBe('invalid_args:');
+    expect(r[1][0]).toEqual({ fn: 'acme.list_orders', args: { limit: 3, cursor: r[2] } });
+    expect(r[1].slice(1)).toEqual(r[1].length > 1 ? [{ fn: 'acme.list_orders', args: { limit: 4 } }] : []);
   });
 
   it('NotFound: catchable by name and by its LookupError base; str(e) concise; ops.error(e) has code/next/retry', async () => {

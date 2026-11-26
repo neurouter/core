@@ -2,8 +2,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   buildReport,
   migrateSuite,
+  regradeByCategory,
   regradeSummary,
   regradeTranscripts,
+  renderRegradeCategories,
   renderCalibration,
   renderMarkdown,
   renderTable,
@@ -47,6 +49,7 @@ interface EvalOpts {
   regrade?: string;
   judgeModel?: string;
   maxJudgeTokens?: string;
+  contract?: string;
 }
 
 const positiveInt = (v: string | undefined, flag: string): number | undefined => {
@@ -67,6 +70,9 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
   const maxJudgeTokens = positiveInt(o.maxJudgeTokens, '--max-judge-tokens') ?? 300_000;
   if (o.regrade && !o.suite) throw new Error('--regrade <transcripts.json> needs --suite <suite.json> (the suite the transcripts ran, or its migrated version)');
   if (o.migrateSuite && o.suite) throw new Error('pass either --migrate-suite <old.json> or --suite <file>');
+  if (o.contract !== undefined && o.contract !== '1' && o.contract !== '2') throw new Error('--contract must be 1 or 2');
+  if (o.contract !== undefined && o.config) throw new Error('--contract applies to the server eval creates from --spec; with --config the server\'s exposure.contract decides');
+  const contractFlag = o.contract === undefined ? undefined : (Number(o.contract) as 1 | 2);
   const env = serverEnv({ inMemory: !o.config, port: 0, host: '127.0.0.1', ...(o.config ? { config: o.config, data: './.neurouter' } : {}), ...(o.embeddings ? { embeddings: true } : {}) });
   env.PORT = '0';
   delete env.PUBLIC_URL;
@@ -90,12 +96,15 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     } else {
       const bytes = await readSpec(o.spec!);
       slug = 'api';
-      const created = await s.servers.create({ tenantId: tenant, slug, name: o.spec!.split('/').pop() ?? 'API', spec: { bytes, sourceUrl: /^https?:/.test(o.spec!) ? o.spec! : null }, specSource: { path: o.spec }, createdBy: null, overlay: o.overlay ? { yaml: readFileSync(o.overlay, 'utf8'), source: 'file', message: o.overlay } : null });
+      const created = await s.servers.create({ tenantId: tenant, slug, name: o.spec!.split('/').pop() ?? 'API', spec: { bytes, sourceUrl: /^https?:/.test(o.spec!) ? o.spec! : null }, specSource: { path: o.spec }, createdBy: null, overlay: o.overlay ? { yaml: readFileSync(o.overlay, 'utf8'), source: 'file', message: o.overlay } : null, ...(contractFlag ? { exposure: { contract: contractFlag } } : {}) });
       serverId = created.server.id;
       if (created.build.build.status !== 'ok') throw new Error(`spec does not compile: ${created.build.result.diagnostics.filter((d) => d.severity === 'error').map((d) => d.message).join('; ')}`);
     }
     const envRow = (await s.servers.environments(serverId)).find((e) => e.slug === o.env);
     if (!envRow) throw new Error(`unknown environment ${o.env}`);
+    // the agent contract the eval's MCP sessions get (the eval client does not negotiate one): environment, else server
+    const contract = contractOfServer((await s.servers.get(tenant, serverId)).exposure, envRow);
+    console.error(`agent contract ${contract} (${contractFlag ? '--contract' : o.config ? 'the server\'s exposure.contract' : 'NEUROUTER_NEW_SERVER_CONTRACT'})`);
     // migrate a 0.2.1 suite file: v1 ground truth from the mock, then the calibration gate below
     if (o.migrateSuite) {
       const old = JSON.parse(readFileSync(o.migrateSuite, 'utf8')) as SuiteFile;
@@ -179,7 +188,7 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
       return;
     }
     if (o.regrade) {
-      await regrade(s, tenant, serverId, suiteId, envRow.id, o, maxJudgeTokens);
+      await regrade(s, tenant, serverId, suiteId, envRow.id, o, maxJudgeTokens, contract);
       return;
     }
     const modes = o.modes.split(',').map((m) => m.trim()) as Array<'tool' | 'code'>;
@@ -198,7 +207,7 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     const keyById = new Map(taskRows.map((t) => [t.id, t.key]));
     const report = buildReport({
       server: { slug, name: slug },
-      run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString() },
+      run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString(), contract },
       score,
       suggestions: suggestions.map((x) => ({ cause: x.cause as never, kind: x.kind, tools: JSON.parse(x.tools) as string[], affectedTaskKeys: (JSON.parse(x.affected_task_ids) as string[]).map((id) => keyById.get(id) ?? id), overlayPatch: (JSON.parse(x.overlay_patch) as { yaml: string }).yaml, overlayOps: [], specPatch: x.spec_patch, rationale: x.rationale, predictedDelta: x.predicted_delta })),
       results,
@@ -227,7 +236,20 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
  * `eval --suite <suite> --regrade <transcripts.json>`: re-scores recorded attempts with this grader
  * (ground truth from the mock with the suite's data version), without running agents.
  */
-async function regrade(s: RunningServer['services'], tenant: string, serverId: string, suiteId: string, envId: string, o: EvalOpts, maxJudgeTokens: number): Promise<void> {
+/** The contract of the environment (`discovery_override.contract`, neurouter.yaml), else `exposure.contract` of the server; absent = 1. */
+function contractOfServer(serverExposure: string | null, env: { discovery_override?: string | null }): 1 | 2 {
+  const read = (j: string | null | undefined): unknown => {
+    try {
+      return j ? (JSON.parse(j) as { contract?: unknown }).contract : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const c = read(env.discovery_override) ?? read(serverExposure);
+  return c === 2 ? 2 : 1;
+}
+
+async function regrade(s: RunningServer['services'], tenant: string, serverId: string, suiteId: string, envId: string, o: EvalOpts, maxJudgeTokens: number, contract: 1 | 2): Promise<void> {
   const { taskFromRow } = await import('@neurouter/server');
   const meta = s.evals.suiteMeta(await s.evals.suiteOf(tenant, serverId, suiteId));
   const runner = await s.evals.referenceRunner(tenant, serverId, meta.mockDataVersion, envId);
@@ -239,12 +261,14 @@ async function regrade(s: RunningServer['services'], tenant: string, serverId: s
     const llm = o.judgeModel ? await s.evals.llm(tenant, [o.judgeModel]) : null;
     const out = await regradeTranscripts(entries, { tasks: new Map(tasks.map((t) => [t.key, t])), groundTruth: (t) => runner.groundTruth(t), llm, ...(o.judgeModel ? { judgeModel: o.judgeModel } : {}), maxJudgeTokens });
     const sum = regradeSummary(out.rows);
+    const categories = regradeByCategory(out.rows);
     const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;
+    console.log(`${renderRegradeCategories(categories)}\n`);
     console.log(`re-graded ${sum.attempts} attempts: pass rate ${pct(sum.oldPassRate)} → ${pct(sum.newPassRate)} (${sum.flipsUp} fail→pass, ${sum.flipsDown} pass→fail, ${sum.excluded} provider refusals excluded, ${sum.overBudget} over budget, ${sum.matchedByJudge} matched by judge)`);
     const u = out.judgeUsage;
     console.log(`judge usage: ${u.calls} calls, ${u.inputTokens + u.cacheReadTokens + u.outputTokens} tokens (cap ${maxJudgeTokens})`);
     if (out.skippedTasks.length) console.log(`not re-graded (task not in the suite or disabled): ${out.skippedTasks.join(', ')}`);
-    if (o.out) writeFileSync(o.out, JSON.stringify({ summary: sum, judgeUsage: u, skippedTasks: out.skippedTasks, rows: out.rows }, null, 2));
+    if (o.out) writeFileSync(o.out, JSON.stringify({ contract, summary: sum, categories, judgeUsage: u, skippedTasks: out.skippedTasks, rows: out.rows }, null, 2));
   } finally {
     await runner.close();
   }

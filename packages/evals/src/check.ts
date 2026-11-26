@@ -1,7 +1,7 @@
 import { JUDGE_PASS_SCORE, type Assertion, type FailureCause } from '@neurouter/shared';
 import { isIncidentalArg, runawayCeiling, upstreamCalls } from './budget.js';
 import { groundTruthForCalls, hasWildcard, isFromRef, parseGroundTruthPath, resolveArgs, resolvePath, type GroundTruth } from './groundtruth.js';
-import { answerHas, type MatchHow } from './normalize.js';
+import { answerHas, normPunct, type MatchHow } from './normalize.js';
 import type { AssertionResult, AttemptRecord, CheckResult, EvalTask, JudgeResult, ObservedCall } from './types.js';
 
 export const UNMET_NEED_TOOL = 'neurouter_report_unmet_need';
@@ -26,6 +26,8 @@ export interface CheckOptions {
   groundTruth?: GroundTruth | null;
   /** Equivalence judge verdicts for failed `answer_contains` assertions, by assertion index. */
   equivalence?: Record<number, { equivalent: boolean; reason: string }> | null;
+  /** Decline judge verdict (impossible tasks whose answer the decline patterns did not recognize). */
+  decline?: { declined: boolean; reason: string } | null;
 }
 
 const isOps = (tool: string) => tool.startsWith('neurouter_');
@@ -98,7 +100,17 @@ function hasRedacted(v: unknown): boolean {
   return isRecord(v) && Object.values(v).some(hasRedacted);
 }
 
-const DECLINE_RE = /\b(can(?:no|')t|cannot|unable|not (?:able|possible|supported|available)|no (?:tool|way|capability)|isn'?t (?:possible|supported)|don'?t have (?:a|any|the) (?:tool|way))\b/i;
+/**
+ * An explicit refusal or "the API cannot do this" statement. Matched on `normPunct(answer)`: gpt-6-luna writes
+ * "can’t" (U+2019) as often as "can't" (P6, B1).
+ */
+const DECLINE_RE =
+  /\b(can(?:no|')?t|cannot|could(?:n't| not)|unable|won't be able|not (?:able|possible|supported|available|exposed|retrievable|recoverable|accessible|stored|provided|returned)|no (?:tool|way|capability|api|endpoint|function|operation)s?\b|(?:is|are|was)(?:n't| not) (?:possible|supported|available|exposed|retrievable|recoverable|stored|returned|provided)|(?:do|does|did)(?:n't| not) (?:have|expose|provide|return|offer|support|store|reveal|retain|keep))\b/i;
+
+/** The answer declines or says the API cannot do it (typographic apostrophes normalized). */
+export function declinedInText(answer: string): boolean {
+  return DECLINE_RE.test(normPunct(answer));
+}
 
 function checkOne(a: Assertion, idx: number, rec: AttemptRecord, opts: CheckOptions, gt: GroundTruth | null): Promise<AssertionResult> | AssertionResult {
   const r = (passed: boolean, detail: string, extra: Partial<AssertionResult> = {}): AssertionResult => ({ assertion: a, passed, detail, ...extra });
@@ -159,8 +171,9 @@ function checkOne(a: Assertion, idx: number, rec: AttemptRecord, opts: CheckOpti
       const reported = rec.calls.some((c) => isUnmetNeedReport(c.tool, c.arguments) && c.status === 'ok') || rec.agentCalls.some((c) => isUnmetNeedReport(c.name, c.arguments) && !c.isError);
       const wrote = rec.calls.some(effectiveWrite);
       if (reported) return r(true, 'unmet need reported');
-      if (!wrote && DECLINE_RE.test(rec.finalAnswer)) return r(true, 'declined without writing');
-      return r(false, wrote ? 'wrote instead of declining' : 'neither reported nor declined');
+      if (!wrote && declinedInText(rec.finalAnswer)) return r(true, 'declined without writing');
+      if (!wrote && opts.decline?.declined) return r(true, `declined without writing (judge: ${opts.decline.reason})`);
+      return r(false, wrote ? 'wrote instead of declining' : `neither reported nor declined${opts.decline ? ` (judge: ${opts.decline.reason})` : ''}`);
     }
     case 'framing':
       if (rec.framingAvailable === false) return r(true, 'n/a: the server does not offer begin/end task framing (contract 2)');
@@ -228,12 +241,13 @@ function checkAnswer(a: Extract<Assertion, { type: 'answer_contains' }>, idx: nu
   const missing = expected.filter((_, i) => hows[i] === null).map((e) => e.value);
   const passed = mode === 'all' ? missing.length === 0 : found.length > 0;
   const show = (vs: unknown[]) => JSON.stringify(vs.slice(0, 8)).slice(0, 240) + (vs.length > 8 ? ` (+${vs.length - 8})` : '');
+  const fromGt = source === 'ground truth';
   if (passed) {
     const how: MatchHow = hows.some((h) => h === 'normalized') ? 'normalized' : 'literal';
-    return r(true, `answer states ${show(found.map((e) => e.value))} (${source}, ${how})`, { matchedBy: how });
+    return r(true, `answer states ${show(found.map((e) => e.value))} (${source}, ${how})`, { matchedBy: how, groundTruth: fromGt });
   }
   const eq = opts.equivalence?.[idx];
-  if (eq?.equivalent && !literalOnly) return r(true, `judge: equivalent to ${show(expected.map((e) => e.value))} (${eq.reason})`, { matchedBy: 'judge' });
+  if (eq?.equivalent && !literalOnly) return r(true, `judge: equivalent to ${show(expected.map((e) => e.value))} (${eq.reason})`, { matchedBy: 'judge', groundTruth: fromGt });
   return r(false, `answer ${mode === 'all' ? 'misses' : 'states none of'} ${show(mode === 'all' ? missing : expected.map((e) => e.value))} (${source})${eq ? `; judge: ${eq.reason}` : ''}`);
 }
 
@@ -265,6 +279,48 @@ export function workCalls(rec: Pick<AttemptRecord, 'toolCallsByAgent' | 'agentCa
   return Math.max(0, rec.toolCallsByAgent - rec.agentCalls.filter((c) => c.name === 'search_tools').length);
 }
 
+/**
+ * B9: a `called {tool, args}` that failed only because the agent's call was broader passes when the outcome matches.
+ * The agent called the tool successfully with none of the required values contradicted (they are absent: it listed
+ * everything, every page, and filtered client-side), and every answer check of the task passed on ground-truth values.
+ * A call with another value for a required argument (another id, another currency) never qualifies.
+ */
+function equivalentPaths(task: EvalTask, rec: AttemptRecord, results: AssertionResult[], gt: GroundTruth | null): AssertionResult[] {
+  const answers = results.filter((x) => x.assertion.type === 'answer_contains');
+  if (!gt || !answers.length || !answers.every((x) => x.passed) || !answers.some((x) => x.groundTruth)) return results;
+  return results.map((x) => {
+    const a = x.assertion;
+    if (x.passed || a.type !== 'called' || !a.args || a.argsMatch === 'exact') return x;
+    const names = [a.tool, ...(a.anyOf ?? []).map((y) => y.tool)];
+    const want = requiredArgs(a.args, gt);
+    const broader = rec.calls.filter(
+      (c) => names.includes(c.tool) && (c.status === 'ok' || c.decision === 'dry_run') && Object.entries(want).every(([k, v]) => c.arguments[k] === undefined || argsMatchNormalized(v, c.arguments[k])),
+    );
+    if (broader.length < (a.minTimes ?? 1)) return x;
+    const omitted = Object.keys(want).filter((k) => broader.every((c) => c.arguments[k] === undefined));
+    return { ...x, passed: true, waived: 'equivalent_path', detail: `${a.tool} called ${broader.length}× without ${omitted.join(', ') || 'the required arguments'} (an equivalent path: the answer matches the ground truth); as written: ${x.detail}` };
+  });
+}
+
+/**
+ * Ambiguous tasks: asking a clarifying question, or stating an explicit, reasonable assumption and acting consistently
+ * with it, both pass (the judge decides, against the task's rubric, and says which). A judge pass waives the
+ * "ask before any call" budget (`max_calls` 0 / hard) and `not_called` on tools the agent only read with; writes still
+ * fail (`no_writes`, and `not_called` on a tool it wrote with).
+ */
+function waiveAmbiguous(task: EvalTask, rec: AttemptRecord, results: AssertionResult[], judge: JudgeResult | null): void {
+  if (task.category !== 'ambiguous' || !judge || judge.verdict !== 'pass' || judge.score < JUDGE_PASS_SCORE || judge.path === 'neither') return;
+  if (rec.calls.some(effectiveWrite)) return;
+  const how = judge.path === 'assumed' ? 'stated an explicit assumption' : 'asked a clarifying question';
+  results.forEach((x, i) => {
+    const a = x.assertion;
+    if (x.passed) return;
+    if (a.type === 'max_calls' && (a.n === 0 || a.hard === true)) results[i] = { ...x, passed: true, waived: 'ambiguous', detail: `${x.detail}; waived: the agent ${how} and wrote nothing (judge)` };
+    else if (a.type === 'not_called' && rec.calls.filter((c) => c.tool === a.tool).every((c) => !c.write || c.decision === 'dry_run'))
+      results[i] = { ...x, passed: true, waived: 'ambiguous', detail: `${x.detail} (reads only); waived: the agent ${how} and wrote nothing (judge)` };
+  });
+}
+
 /** begin_task before the first API call and end_task after the last one. */
 export function framingOk(rec: AttemptRecord): boolean {
   const seq = rec.agentCalls.map((c) => c.name);
@@ -282,7 +338,8 @@ export function framingOk(rec: AttemptRecord): boolean {
  */
 export async function checkAttempt(task: EvalTask, rec: AttemptRecord, opts: CheckOptions = {}): Promise<CheckResult> {
   const gt = opts.groundTruth ? groundTruthForCalls(opts.groundTruth, task.referenceCalls, rec.calls) : null;
-  const results = await Promise.all(task.assertions.map((a, i) => checkOne(a, i, rec, opts, gt)));
+  const results = equivalentPaths(task, rec, await Promise.all(task.assertions.map((a, i) => checkOne(a, i, rec, opts, gt))), gt);
+  waiveAmbiguous(task, rec, results, opts.judge ?? null);
   const scored = results.filter((x) => x.assertion.type !== 'framing');
   const framing = results.find((x) => x.assertion.type === 'framing');
   const hardFail = rec.endReason === 'error' || rec.endReason === 'refusal' || rec.endReason === 'cancelled';
@@ -327,7 +384,7 @@ export function classifyFailure(task: EvalTask, rec: AttemptRecord, check: Pick<
   if (required.some((a) => api.some((c) => namesOf(a).includes(c.tool) && c.decision.startsWith('denied_')))) return 'policy_blocked';
   if (failedCalled.some((a) => api.some((c) => namesOf(a).includes(c.tool) && (c.status === 'invalid_args' || (a.args !== undefined && !argsMatchNormalized(requiredArgs(a.args, null), c.arguments)))))) return 'bad_arguments';
   if (failedCalled.some((a) => !api.some((c) => namesOf(a).includes(c.tool))) && api.some((c) => !required.some((a) => namesOf(a).includes(c.tool)))) return 'wrong_tool';
-  if (task.category === 'impossible' && (api.some(effectiveWrite) || (!DECLINE_RE.test(rec.finalAnswer) && api.some((c) => c.status === 'ok')))) return 'hallucinated';
+  if (task.category === 'impossible' && (api.some(effectiveWrite) || (!declinedInText(rec.finalAnswer) && api.some((c) => c.status === 'ok')))) return 'hallucinated';
   if (task.category !== 'impossible' && rec.calls.some((c) => isUnmetNeedReport(c.tool, c.arguments))) return 'missing_capability';
   const nonFraming = check.results.filter((x) => x.assertion.type !== 'framing');
   if (nonFraming.every((x) => x.passed) && check.framingPassed === false) return 'no_framing';

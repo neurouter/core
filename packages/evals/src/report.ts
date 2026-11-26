@@ -1,3 +1,4 @@
+import { attemptTokens } from './score.js';
 import type { Suggestion } from './suggest.js';
 import type { JudgeUsage, ReadinessScore, SuiteCalibration, TaskRunResult } from './types.js';
 
@@ -5,8 +6,11 @@ import type { JudgeUsage, ReadinessScore, SuiteCalibration, TaskRunResult } from
 export interface EvalReport {
   version: 1;
   server: { slug: string; name: string };
-  run: { id: string | null; models: string[]; modes: string[]; repeats: number; environment: string; buildHash: string | null; provider: string; startedAt: string; endedAt: string };
+  /** `contract`: the agent contract the eval server served (1 or 2). */
+  run: { id: string | null; models: string[]; modes: string[]; repeats: number; environment: string; buildHash: string | null; provider: string; startedAt: string; endedAt: string; contract?: 1 | 2 | null };
   score: ReadinessScore;
+  /** Per (model, mode, category): counted attempts (no provider refusals), passes, success, tokens per attempt. */
+  categories: CategoryRow[];
   tasks: Array<{ key: string; category: string; prompt: string; cells: Array<{ model: string; mode: string; passes: number; attempts: number; failureCause: string | null; overBudget: number; refusals: number; matchedByJudge: number }> }>;
   topFailures: Array<{ taskKey: string; model: string; mode: string; cause: string | null; detail: string }>;
   suggestions: Suggestion[];
@@ -24,8 +28,38 @@ export interface EvalReport {
   calibration?: Pick<SuiteCalibration, 'mockDataVersion' | 'passed' | 'rejected' | 'flagged' | 'model'> & { tasks: SuiteCalibration['tasks'] };
 }
 
+export interface CategoryRow {
+  model: string;
+  mode: string;
+  category: string;
+  attempts: number;
+  passes: number;
+  successRate: number;
+  tokensPerAttempt: number;
+}
+
+const CATEGORY_ORDER = ['single', 'multi', 'ambiguous', 'impossible'];
+
+/** Success and cost per category of every (model, mode) cell; provider refusals and fallback-served attempts excluded. */
+export function categoryRows(results: TaskRunResult[]): CategoryRow[] {
+  const m = new Map<string, CategoryRow & { tokens: number }>();
+  for (const r of results) {
+    if (r.failureCause === 'provider_refusal' || r.fallbackUsed) continue;
+    const k = `${r.model}|${r.mode}|${r.category}`;
+    const c = m.get(k) ?? { model: r.model, mode: r.mode, category: r.category, attempts: 0, passes: 0, successRate: 0, tokensPerAttempt: 0, tokens: 0 };
+    c.attempts++;
+    if (r.passed) c.passes++;
+    c.tokens += attemptTokens(r);
+    m.set(k, c);
+  }
+  const rank = (c: string) => (CATEGORY_ORDER.indexOf(c) + 1 || 9);
+  return [...m.values()]
+    .map(({ tokens, ...c }) => ({ ...c, successRate: c.attempts ? c.passes / c.attempts : 0, tokensPerAttempt: c.attempts ? Math.round(tokens / c.attempts) : 0 }))
+    .sort((a, b) => a.model.localeCompare(b.model) || a.mode.localeCompare(b.mode) || rank(a.category) - rank(b.category));
+}
+
 export function buildReport(
-  input: Omit<EvalReport, 'version' | 'tasks' | 'topFailures' | 'usage' | 'generator' | 'judgeUsage' | 'providerRefusals' | 'incomplete' | 'calibration'> & {
+  input: Omit<EvalReport, 'version' | 'tasks' | 'topFailures' | 'usage' | 'generator' | 'judgeUsage' | 'providerRefusals' | 'incomplete' | 'calibration' | 'categories'> & {
     generator?: EvalReport['generator'];
     incomplete?: EvalReport['incomplete'];
     calibration?: EvalReport['calibration'];
@@ -69,15 +103,21 @@ export function buildReport(
   }
   const providerRefusals = input.results.filter((r) => r.failureCause === 'provider_refusal').length;
   const { results: _r, prompts: _p, judgeModel: _j, ...rest } = input;
-  return { version: 1, ...rest, tasks, topFailures, usage, judgeUsage, providerRefusals };
+  return { version: 1, ...rest, categories: categoryRows(input.results), tasks, topFailures, usage, judgeUsage, providerRefusals };
 }
 
 export function renderMarkdown(rep: EvalReport): string {
   const s = rep.score;
   const lines: string[] = [];
   lines.push(`## Neurouter agent-readiness: ${rep.server.name} — **${s.headline}/100** (${s.band.replace('_', ' ')})`, '');
+  const cats = rep.categories ?? [];
+  if (cats.length) {
+    lines.push('| Model | Mode | Category | Success | Attempts | Tokens / attempt |', '|---|---|---|---:|---:|---:|');
+    for (const c of cats) lines.push(`| ${c.model} | ${c.mode} | ${c.category} | ${c.passes}/${c.attempts} (${Math.round(c.successRate * 100)}%) | ${c.attempts} | ${c.tokensPerAttempt} |`);
+    lines.push('');
+  }
   lines.push(`- Recommended mode: **${s.recommendedMode ?? 'n/a'}** — ${s.recommendationText}`);
-  lines.push(`- Confidence: ${s.confidence}; models: ${rep.run.models.join(', ')}; modes: ${rep.run.modes.join(', ')}; repeats: ${rep.run.repeats}; environment: ${rep.run.environment}${rep.run.provider === 'stub' ? ' (**stub provider — not a real model**)' : ''}`, '');
+  lines.push(`- Confidence: ${s.confidence}; models: ${rep.run.models.join(', ')}; modes: ${rep.run.modes.join(', ')}; repeats: ${rep.run.repeats}; environment: ${rep.run.environment}${rep.run.contract ? `; agent contract ${rep.run.contract}` : ''}${rep.run.provider === 'stub' ? ' (**stub provider — not a real model**)' : ''}`, '');
   lines.push('| Model | Mode | Score | Success | Avg tokens | of which cached | Tokens / multi-step task | Avg calls | Avg latency | Flaky |', '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|');
   for (const c of s.cells)
     lines.push(`| ${c.model} | ${c.mode}${c.best ? ' ★' : ''} | ${c.score} | ${Math.round(c.successRate * 100)}% | ${Math.round(c.avgTokens)} | ${Math.round(c.avgCachedTokens ?? 0)} | ${c.avgTokensMulti === null ? '–' : Math.round(c.avgTokensMulti)} | ${c.avgCalls.toFixed(1)} | ${Math.round(c.avgLatencyMs)} ms | ${c.flakyTasks} |`);
@@ -114,16 +154,21 @@ export function renderMarkdown(rep: EvalReport): string {
 /** Plain-text table for the terminal. */
 export function renderTable(rep: EvalReport): string {
   const s = rep.score;
+  const cats = rep.categories ?? [];
+  const catRows = [['model', 'mode', 'category', 'success', 'attempts', 'tokens/attempt'], ...cats.map((c) => [c.model, c.mode, c.category, `${c.passes}/${c.attempts} (${Math.round(c.successRate * 100)}%)`, String(c.attempts), String(c.tokensPerAttempt)])];
+  const cw = catRows[0]!.map((_, i) => Math.max(...catRows.map((r) => r[i]!.length)));
+  const catTable = cats.length ? `${catRows.map((r) => r.map((x, i) => x.padEnd(cw[i]!)).join('  ').trimEnd()).join('\n')}\n\n` : '';
   const rows = [['model', 'mode', 'score', 'success', 'tokens', 'cached', 'tokens/multi', 'calls'], ...s.cells.map((c) => [c.model, c.mode + (c.best ? '*' : ''), String(c.score), `${Math.round(c.successRate * 100)}%`, String(Math.round(c.avgTokens)), String(Math.round(c.avgCachedTokens ?? 0)), c.avgTokensMulti === null ? '-' : String(Math.round(c.avgTokensMulti)), c.avgCalls.toFixed(1)])];
   const w = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
   const table = rows.map((r) => r.map((x, i) => x.padEnd(w[i]!)).join('  ')).join('\n');
   const fails = rep.topFailures.slice(0, 5).map((f) => `  - ${f.taskKey} [${f.mode}] ${f.cause ?? ''}`).join('\n');
   const judge = Object.values(rep.judgeUsage ?? {}).reduce((a, u) => a + u.inputTokens + u.cacheReadTokens + u.outputTokens, 0);
   const notes = [
+    rep.run.contract ? `agent contract ${rep.run.contract}` : '',
     rep.incomplete ? `INCOMPLETE: ${rep.incomplete.reason} (${rep.incomplete.attemptsRun}/${rep.incomplete.attemptsPlanned} attempts)` : '',
     rep.providerRefusals ? `${rep.providerRefusals} provider refusal(s) excluded` : '',
     judge ? `judge tokens: ${judge}` : '',
     rep.calibration?.rejected ? `${rep.calibration.rejected} task(s) rejected by calibration` : '',
   ].filter(Boolean);
-  return `${table}\n\nHeadline: ${s.headline}/100 (${s.band}) · recommended: ${s.recommendedMode ?? 'n/a'} · ${s.recommendationText}${notes.length ? `\n${notes.join(' · ')}` : ''}${fails ? `\nTop failures:\n${fails}` : ''}\n`;
+  return `${catTable}${table}\n\nHeadline: ${s.headline}/100 (${s.band}) · recommended: ${s.recommendedMode ?? 'n/a'} · ${s.recommendationText}${notes.length ? `\n${notes.join(' · ')}` : ''}${fails ? `\nTop failures:\n${fails}` : ''}\n`;
 }

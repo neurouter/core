@@ -45,6 +45,8 @@ export interface CodeLimits {
   maxMemoryMb: number;
   maxConcurrentCalls: number;
   maxResultBytes: number;
+  /** agent-facing run_script result budget in characters (default `SCRIPT_RESULT_CHARS`, 8,192) */
+  resultChars?: number;
 }
 
 export interface EnvLimits {

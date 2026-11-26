@@ -33,7 +33,7 @@ import { errorDraft, okDraft, type Draft, type ErrorSpec } from '../envelope/dra
 import { clippedView, isListTool, listView, untrustedPaths, type ListPaging } from '../envelope/page.js';
 import { CursorError, isNeurouterCursor, type CursorBinding, type CursorCodec, type CursorPayload } from '../paging/cursor.js';
 import { projectFields } from '../paging/fields.js';
-import { applyPosition, itemsOf, nextSignals, pagingPlan, splitArgs, type NextSignals, type PagingPlan } from '../paging/plan.js';
+import { applyPosition, boundArgs, itemsOf, nextSignals, pagingPlan, splitArgs, type NextSignals, type PagingPlan } from '../paging/plan.js';
 import { nounOf, pathId } from '../envelope/relations.js';
 import { NO_RESULT, v1Result } from '../envelope/v1.js';
 import type { TaskTracker } from '../tasks/tracker.js';
@@ -321,11 +321,20 @@ export class Pipeline {
       const cursorArg = plan.names.cursor!;
       const first = Object.fromEntries(Object.entries(rawArgs).filter(([k]) => k !== cursorArg));
       if (isNeurouterCursor(own.cursor) && this.d.cursors) {
+        const binding = this.cursorBinding(ctx, tool, rawArgs, plan);
         try {
-          position = this.d.cursors.decode(own.cursor, this.cursorBinding(ctx, tool, rawArgs, cursorArg));
+          position = this.d.cursors.decode(own.cursor, binding);
         } catch (err) {
           const problem = err instanceof CursorError ? err.problem : 'malformed';
           step('arguments', 'fail', `cursor ${problem}`);
+          // other query arguments than the cursor's: continuing it keeps the cursor (its own arguments, this projection)
+          const bound = problem === 'mismatch' ? this.d.cursors.boundArgs(own.cursor, binding) : null;
+          if (bound) {
+            const keep = { ...bound, ...(own.fields ? { [plan.names.fields]: own.fields } : {}), [cursorArg]: own.cursor };
+            const changed = [...new Set([...Object.keys(bound), ...Object.keys(binding.args)])].filter((k) => JSON.stringify(bound[k]) !== JSON.stringify(binding.args[k]));
+            const why = `was issued for other arguments (${changed.join(', ').slice(0, 60)})`;
+            return fail('allowed', 'invalid_args', 'invalid_args', `The cursor ${why}; ${tool.name} was not called.`, { errors: 'cursor mismatch' }, { spec: { text: `The cursor ${why}; nothing was called. Continue it with its arguments (error.next[0]), or start the new query on page 1.`, issues: [{ path: `/${cursorArg}`, keyword: 'cursor', params: {}, message: why }], next: [{ tool: tool.name, args: keep }, { tool: tool.name, args: first }] } });
+          }
           const why = problem === 'expired' ? 'expired (cursors last 1 hour)' : problem === 'mismatch' ? 'belongs to another tool, other arguments or another credential, or was altered' : 'is not a page.next_cursor';
           return fail('allowed', 'invalid_args', 'invalid_args', `The cursor ${why}; ${tool.name} was not called.`, { errors: `cursor ${problem}` }, { spec: { text: `The cursor ${why}; nothing was called. Repeat the first call, or pass the same other arguments.`, issues: [{ path: `/${cursorArg}`, keyword: 'cursor', params: {}, message: why }], next: [{ tool: tool.name, args: first }] } });
         }
@@ -567,7 +576,9 @@ export class Pipeline {
       // and run_script's result-size limit bounds what it returns. Tool-mode results keep both limits.
       // Contract 2 `fields` replaces the overlay `include` (the default set) and is applied after shaping, on the
       // agent-visible names; a projection gets the whole 64 KB tool-mode budget.
-      shaped = own?.fields ? this.shapeFields(body, tool, own.fields, plan!.list) : shapeResponse(body, tool.shaping, ctx.via === 'script' ? { limits: false } : { maxBytes: 64 * 1024 });
+      // eval reference calls (ground truth) get full objects: the overlay's default projection is the agent's default, not the truth (B7)
+      const shaping = ctx.fullObjects && tool.shaping?.include ? { ...tool.shaping, include: undefined } : tool.shaping;
+      shaped = own?.fields ? this.shapeFields(body, tool, own.fields, plan!.list) : shapeResponse(body, shaping, ctx.via === 'script' ? { limits: false } : { maxBytes: 64 * 1024 });
       value = shaped.value;
       if (shaped.truncated) {
         const handle = await this.d.pages.store(ctx.tenantId, ctx.credentialKey, shaped.full);
@@ -618,16 +629,16 @@ export class Pipeline {
     return { ok: true, unknown: false, decision, status: 'ok', value, result: v1Result(text, wrapStructured(value), meta), auditId, tool, draft, ...(signals ? { paging: { more: signals.more, next: signals.next } } : {}) };
   }
 
-  /** What a contract-2 cursor of this call is bound to (the agent's arguments except the cursor). */
-  private cursorBinding(ctx: RunContext, tool: ToolDef, rawArgs: Record<string, unknown>, cursorArg: string): CursorBinding {
-    return { tenantId: ctx.tenantId, credentialKey: ctx.credentialKey, tool: tool.name, args: Object.fromEntries(Object.entries(rawArgs).filter(([k]) => k !== cursorArg && rawArgs[k] !== undefined)), contract: 2 };
+  /** What a contract-2 cursor of this call is bound to: the agent's query arguments (`boundArgs`: no cursor, no `fields`). */
+  private cursorBinding(ctx: RunContext, tool: ToolDef, rawArgs: Record<string, unknown>, plan: PagingPlan): CursorBinding {
+    return { tenantId: ctx.tenantId, credentialKey: ctx.credentialKey, tool: tool.name, args: boundArgs(tool, plan, rawArgs), contract: 2 };
   }
 
   /** The encoder for `page.next_cursor` of this call (null without a codec or outside contract 2). */
   private cursorEncoder(ctx: RunContext, tool: ToolDef, rawArgs: Record<string, unknown>, plan: PagingPlan | null): (p: CursorPayload) => string | null {
     const codec = this.d.cursors;
     if (!codec || !plan?.names.cursor || ctx.contract !== 2) return () => null;
-    const binding = this.cursorBinding(ctx, tool, rawArgs, plan.names.cursor);
+    const binding = this.cursorBinding(ctx, tool, rawArgs, plan);
     return (p) => codec.encode(p, binding);
   }
 
@@ -663,7 +674,9 @@ export class Pipeline {
     }
     h.step('routing', 'pass', 'result page');
     const rest = list.slice(pos.n);
-    const remainder = Array.isArray(full) ? rest : Object.fromEntries(Object.entries(full as Record<string, unknown>).map(([k, v]) => [k, v === list ? rest : v]));
+    const cut = Array.isArray(full) ? rest : Object.fromEntries(Object.entries(full as Record<string, unknown>).map(([k, v]) => [k, v === list ? rest : v]));
+    // `fields` is not bound into the cursor (B5): this page's projection applies to the stored items
+    const remainder = fields?.length ? projectFields(cut, fields, true) : cut;
     const { maxItems, maxBytes } = tool.shaping ?? {};
     const shaped = shapeResponse(remainder, { ...(maxItems !== undefined ? { maxItems } : {}), ...(maxBytes !== undefined ? { maxBytes: fields ? Math.max(maxBytes, 64 * 1024) : maxBytes } : {}) }, { maxBytes: 64 * 1024 });
     h.step('response', 'pass', 'result page');

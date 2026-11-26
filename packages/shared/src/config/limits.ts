@@ -14,6 +14,8 @@ export const CodeLimits = z.object({
   maxMemoryMb: z.number().int().min(8).max(4096),
   maxConcurrentCalls: z.number().int().min(1).max(64),
   maxResultBytes: z.number().int().min(1024).max(64 * 1024 * 1024),
+  /** What an agent gets back from run_script (characters, both contracts); larger values are cut with a `truncated` marker. Default `SCRIPT_RESULT_CHARS`. */
+  resultChars: z.number().int().min(512).max(1_048_576).optional(),
 });
 export type CodeLimits = z.infer<typeof CodeLimits>;
 
@@ -48,6 +50,9 @@ export const DEFAULT_LIMITS: Limits = {
   code: DEFAULT_CODE_LIMITS,
 };
 
+/** Default agent-facing budget of a run_script result (characters; contract 1 has always cut its text here). */
+export const SCRIPT_RESULT_CHARS = 8192;
+
 /** Fixed code-mode limits that are not configurable per environment (§10.5). */
 export const CODE_FIXED_LIMITS = { maxSourceBytes: 16_384, maxLines: 400, maxNesting: 12, maxRecursionDepth: 200, maxPrintBytes: 16_384, maxConcurrentRunsPerPrincipal: 2 } as const;
 
@@ -75,9 +80,11 @@ export function clampCodeLimits(limits: CodeLimits, cap: CodeLimits): { limits: 
   const out = { ...limits };
   const over: Array<{ field: keyof CodeLimits; value: number; cap: number }> = [];
   for (const k of Object.keys(cap) as Array<keyof CodeLimits>) {
-    if (typeof out[k] === 'number' && out[k] > cap[k]) {
-      over.push({ field: k, value: out[k], cap: cap[k] });
-      out[k] = cap[k];
+    const v = out[k];
+    const c = cap[k];
+    if (typeof v === 'number' && typeof c === 'number' && v > c) {
+      over.push({ field: k, value: v, cap: c });
+      out[k] = c;
     }
   }
   return { limits: out, over };

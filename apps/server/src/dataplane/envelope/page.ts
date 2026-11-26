@@ -19,13 +19,27 @@ type Schema = Record<string, unknown>;
 /** Keys a list wrapper may carry next to its array (totals, cursors, links): `{total_count, items}`, `{data, has_more}`. */
 const WRAPPER_KEY = /^(total|count|next|prev|previous|cursor|page|more|has_?more|offset|limit|links?|meta|incomplete_results|object|url|start|end|size)|(total|count|cursor|token|page|url|more)$/i;
 
+/**
+ * An item count next to the array (`total_count`, `count`): with it, an object with exactly one array property is a list
+ * even when it carries other keys (GitHub `{total_count, repository_selection, repositories}`, B4). Not `total`: an
+ * order's `total` is money, and an order with line `items` is an entity.
+ */
+const COUNT_KEY = /(^|_)count$/i;
+
+/** A wrapper's keys: one array, the others totals/cursors/links, or any keys next to an item count. */
+function wrapperKeys(keys: string[], isArray: (k: string) => boolean): boolean {
+  const arrays = keys.filter(isArray);
+  if (arrays.length !== 1) return false;
+  return keys.every((k) => isArray(k) || WRAPPER_KEY.test(k)) || keys.some((k) => !isArray(k) && COUNT_KEY.test(k));
+}
+
 /** The list inside a value: the root array, or the only array property of a list wrapper. */
 export function listIn(v: unknown): unknown[] | null {
   if (Array.isArray(v)) return v;
   if (v && typeof v === 'object') {
-    const entries = Object.entries(v as Record<string, unknown>);
-    const arrays = entries.filter(([, x]) => Array.isArray(x));
-    if (arrays.length === 1 && entries.every(([k, x]) => Array.isArray(x) || WRAPPER_KEY.test(k))) return arrays[0]![1] as unknown[];
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (wrapperKeys(keys, (k) => Array.isArray(o[k]))) return keys.map((k) => o[k]).find(Array.isArray) as unknown[];
   }
   return null;
 }
@@ -35,8 +49,8 @@ function schemaIsList(s: Schema | undefined): boolean | null {
   if (s.type === 'array') return true;
   const props = s.properties && typeof s.properties === 'object' ? Object.entries(s.properties as Record<string, Schema>) : null;
   if (!props) return s.type === 'object' ? false : null;
-  const arrays = props.filter(([, p]) => p && p.type === 'array');
-  return arrays.length === 1 && props.every(([k, p]) => (p && p.type === 'array') || WRAPPER_KEY.test(k));
+  const byKey = new Map(props);
+  return wrapperKeys([...byKey.keys()], (k) => byKey.get(k)?.type === 'array');
 }
 
 /**

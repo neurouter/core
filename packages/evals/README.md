@@ -22,9 +22,9 @@ A task has a prompt, a rubric, **reference calls** (a correct path through the A
 | `state {resource, where, expect}` | The mock's data afterwards matches. |
 | `answer_contains {from \| anyOf, match?, kind?}` | The final answer states the expected value(s), see [Answer matching](#answer-matching). |
 | `answer_matches {regex}` | The final answer matches the regex. |
-| `unmet_need_reported_or_declined` | The agent reported an unmet need (`neurouter_report_unmet_need`, or contract 2's `neurouter_report` with `kind: unmet_need`), or declined without writing. |
+| `unmet_need_reported_or_declined` | The agent reported an unmet need (`neurouter_report_unmet_need`, or contract 2's `neurouter_report` with `kind: unmet_need`), or declined without writing: an explicit refusal or "the API does not expose / cannot …" (typographic quotes and dashes normalized, so "can’t" counts), else a decline judge decides (no writes only). |
 | `framing` | Contract 1: `neurouter_begin_task` first, `end_task` last. Scored separately; **n/a** on contract 2 (no framing tools), where the component is left out and the weights renormalize. |
-| `judge {criterion, groundTruth?, kind?}` | The LLM judge's verdict (score ≥ 0.7). `groundTruth`: the judge also gets the task's expected values. `kind: choice`: see below. |
+| `judge {criterion, groundTruth?, kind?}` | The LLM judge's verdict (score ≥ 0.7). The judge gets the tool results the agent saw (whole, within 12,000 tokens shared across results) and the ground truth when there is one. `kind: choice` and ambiguous tasks: see below. |
 
 Calls are read from Neurouter's audit log (including calls inside `run_script`), so tool mode and code
 mode are checked the same way. The audit log stores arguments redacted (`secret_name`, `card`, …); the
@@ -34,7 +34,10 @@ and dropped when the attempt ends. The audit log itself stays redacted.
 ### Ground truth
 
 Expected values are computed at run time: the task's reference calls run against a fresh mock namespace
-with the **same seed and data version** as the agent's, through the same MCP pipeline (shaping, contract).
+with the **same seed and data version** as the agent's, through the same MCP pipeline (contract, redaction, limits)
+but with **full objects**: the overlay's default projection (`response.include`) is the agent's default, not the
+truth, so paths into fields the agent can request with `fields` resolve. A `$from` path that resolves to nothing is
+reported as a failed reference call (the call is not sent without the argument).
 Assertions name values of that outcome by path instead of freezing literals:
 
 ```json
@@ -65,6 +68,16 @@ endpoints) are added automatically.
 "Use your judgment" tasks (an ambiguous prompt that leaves a cutoff or interpretation to the agent)
 never pin a value: they get `judge {kind: "choice"}`, which passes when the answer states the choice it
 made and the reported results are consistent with that choice and with the tool results the agent saw.
+
+Other ambiguous tasks ("ask before acting" rubrics) pass either way a careful agent handles them: it **asks a
+clarifying question** about the ambiguity the rubric names, or it **states an explicit, reasonable assumption** and
+acts consistently with it. The judge says which (`judge.path`: `asked`, `assumed`, `neither`). A judge pass waives
+the task's "no calls before asking" budget (`max_calls` 0 / hard) and `not_called` on tools the agent only read with;
+a write still fails (`no_writes`).
+
+A `called {tool, args}` check also passes on an **equivalent path**: the agent called the tool successfully with
+none of the required values contradicted (it listed everything, or every page, and filtered client-side) and every
+answer check passed on ground-truth values. A call with another value for a required argument never qualifies.
 
 ### Answer matching
 
@@ -179,6 +192,10 @@ judgment" tasks, ground truth for judges whose criteria name values. It records 
 
 `neurouter eval --spec <spec> --suite suite.json --regrade transcripts.json [--judge-model m] [--max-judge-tokens n]`
 re-scores the attempts of an `--transcripts` file with the current grader, without running agents. It
-reuses the recorded rubric verdicts (re-judging only new `choice` criteria and failed verdicts of criteria
-that now get the ground truth), recovers redacted arguments from the agent's own tool-mode calls, and
-caps judge tokens (default 300,000).
+reuses the recorded rubric verdicts that passed (re-judging failed verdicts, which now see whole tool results and the
+ground truth, and ambiguous tasks, whose criterion changed in 0.3.1), recovers redacted arguments from the agent's own
+tool-mode calls, and caps judge tokens (default 300,000). It prints a per-category table (old vs new passes and tokens
+per attempt) first; `--out` writes it with every row.
+
+`--contract 1|2` pins the agent contract of the server `eval --spec` creates (default: `NEUROUTER_NEW_SERVER_CONTRACT`,
+2); reports record it as `run.contract` and start with a per-category success and tokens-per-attempt table.

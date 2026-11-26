@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { generateOpsStub, generateOpsStubV2, generateStubs, NR_HOST_STUBS, pyArgMap, pyCallText, pyNameMap, scriptApi, scriptCommonTypeStubs, scriptErrorType, scriptPrelude } from '@neurouter/compiler';
+import { generateOpsStub, generateOpsStubV2, generateStubs, NR_HOST_STUBS, pyArgMap, pyCallText, pyNameMap, scriptApi, scriptCommonTypeStubs, scriptErrorType, scriptPrelude, shapeResponse } from '@neurouter/compiler';
 import type { Executor, HostCallResult, RunResult } from '@neurouter/executor';
-import { META_CALL_ID, META_PLANNED_CHANGES, META_RESULT_HANDLE, META_TASK_ID, META_TRUNCATED, SCRIPT_BUILTIN_ALTERNATIVES, scriptBuiltinsLine, type ErrorCode, type ScriptStatus, type ToolDef } from '@neurouter/shared';
+import { META_CALL_ID, META_PLANNED_CHANGES, META_RESULT_HANDLE, META_TASK_ID, META_TRUNCATED, opsMcpName, READ_RESULT, SCRIPT_BUILTIN_ALTERNATIVES, SCRIPT_RESULT_CHARS, scriptBuiltinsLine, type ErrorCode, type ScriptStatus, type ToolDef } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import type { MainDB } from '../../kernel/db/schema.js';
 import { sha256Hex } from '../../kernel/lib/crypto.js';
@@ -16,7 +16,7 @@ import { errorResult } from '../pipeline/errors.js';
 import { errorDraft, okDraft, type Draft, type ErrorSpec } from '../envelope/draft.js';
 import { errorInfoFor } from '../envelope/render.js';
 import { closestNames } from '../envelope/relations.js';
-import type { Call, EnvelopeErrorCode, ErrorInfo } from '../envelope/types.js';
+import type { Call, EnvelopeErrorCode, ErrorInfo, Truncated } from '../envelope/types.js';
 import { NO_RESULT, v1Result } from '../envelope/v1.js';
 import { envLabel, killSwitchFor, resolveVisibleTool, writeEnabled, type Confirmer, type McpToolResult, type Pipeline, type PlannedChange } from '../pipeline/pipeline.js';
 import type { OpsTools } from '../ops/ops.js';
@@ -25,8 +25,15 @@ import { validateScript } from './validate.js';
 import { writePlan, type ConfirmTokens } from '../pipeline/confirm-token.js';
 import { CursorError, isNeurouterCursor, type CursorCodec, type CursorPayload } from '../paging/cursor.js';
 import { exampleArgs, propsOf } from '../envelope/relations.js';
-import { itemsOf, pagingPlan } from '../paging/plan.js';
+import { boundArgs, itemsOf, pagingPlan } from '../paging/plan.js';
 import { wrapScript } from './wrap.js';
+
+/** A contract-2 run_script value cut to the agent budget (B3). */
+interface AgentCut {
+  value: unknown;
+  truncated: Truncated;
+  hint: string;
+}
 
 /** Ops helpers forwarded to the host (parallel / days_since / now run inside the executor). */
 export const SCRIPT_OPS = ['log_decision', 'report_unmet_need', 'report_issue'] as const;
@@ -349,6 +356,28 @@ export class ScriptRunner {
   }
 
   /**
+   * Contract 2 (B3): a return value over the agent budget (`limits.code.resultChars`, default 8,192 characters, the
+   * contract-1 cut) is cut like a tool result (a prefix of the list, or clipped fields), the whole value is stored for
+   * `neurouter_read_result` (1 h), and the hint says how to need less. Null when it fits.
+   */
+  private async agentCut(ctx: RunContext, value: unknown, chars: number): Promise<AgentCut | null> {
+    const json = JSON.stringify(value) ?? 'null';
+    if (json.length <= chars) return null;
+    const shaped = shapeResponse(value, {}, { maxBytes: chars });
+    const t = shaped.truncated;
+    if (!t) return null;
+    const handle = await this.d.pages.store(ctx.tenantId, ctx.credentialKey, value);
+    const truncated: Truncated = {
+      ...(t.totalItems !== undefined && t.returnedItems !== undefined ? { items_omitted: t.totalItems - t.returnedItems } : {}),
+      ...(t.fields?.length ? { fields: t.fields.slice(0, 20) } : {}),
+      omitted_bytes: Math.max(0, t.totalBytes - t.returnedBytes),
+      next: { tool: opsMcpName(READ_RESULT), args: { handle } },
+    };
+    const shown = t.totalItems !== undefined ? `${t.returnedItems} of ${t.totalItems} items` : `${t.returnedBytes} of ${t.totalBytes} bytes`;
+    return { value: shaped.value, truncated, hint: `Result cut to ${chars} chars (${shown}). Return less: filter or count in the script, pass fields=[…] to the calls, or page with fn.page(); truncated.next has the rest.` };
+  }
+
+  /**
    * Contract-2 form of a run: `data` = the script's return value (dry run: `{result, plan}`), `truncated` when
    * the value is over the result limit, `state.left` / `script_calls`, and errors without tracebacks (a tool
    * error the script did not catch keeps its code and next calls).
@@ -356,7 +385,7 @@ export class ScriptRunner {
   private scriptDraft(
     ctx: RunContext,
     status: ScriptStatus,
-    body: { error?: Record<string, unknown>; truncated?: boolean; preview?: unknown; valueBytes?: number },
+    body: { error?: Record<string, unknown>; truncated?: boolean; preview?: unknown; valueBytes?: number; stdout?: string; agentCut?: AgentCut | null },
     value: unknown,
     mode: 'dry_run' | 'execute',
     planned: PlannedChange[],
@@ -368,13 +397,18 @@ export class ScriptRunner {
   ): Draft {
     const scriptCode = src.code;
     const scriptInputs = src.inputs;
-    const extra = { left: budget.left, scriptCalls: budget.calls, meta, ...(mode === 'dry_run' ? { flags: ['dry_run' as const] } : {}), ...(planned.length ? { write: true } : {}) };
+    // print() output comes back as `logs` (B6; the renderer bounds it)
+    const extra = { left: budget.left, scriptCalls: budget.calls, meta, ...(mode === 'dry_run' ? { flags: ['dry_run' as const] } : {}), ...(planned.length ? { write: true } : {}), ...(body.stdout ? { logs: body.stdout } : {}) };
     if (status === 'ok') {
       const plan = this.planOf(ctx, planned);
       // contract 2 outside prod: a dry run that plans destructive calls also hands back the confirmed run (D5)
       const destructive = ctx.contract === 2 && this.d.confirms && ctx.bundle.environment.writes.confirm === 'none' ? planned.filter((p) => ctx.bundle.build.tools.find((t) => t.name === p.tool)?.risk.destructive) : [];
       const next = mode === 'dry_run' && destructive.length ? { tool: callAs.name, args: { ...withoutConfirm(callAs.args), mode: 'execute', confirm: this.d.confirms!.mint(this.scriptBinding(ctx, scriptCode, scriptInputs, callAs, destructive)) } } : null;
-      const data = mode === 'dry_run' ? { result: value, plan, ...(next ? { next } : {}) } : value;
+      const cut = body.agentCut ?? null;
+      const shownValue = cut ? cut.value : value;
+      const data = mode === 'dry_run' ? { result: shownValue, plan, ...(next ? { next } : {}) } : shownValue;
+      // over the agent budget (B3): the first part, `truncated` with the stored whole value, and how to need less
+      if (cut) return okDraft(data, { ...extra, truncated: cut.truncated, hint: cut.hint });
       if (!body.truncated) return okDraft(data, extra);
       const shown = typeof body.preview === 'string' ? Buffer.byteLength(body.preview) : 0;
       return okDraft(data, {
@@ -452,7 +486,7 @@ export class ScriptRunner {
       const problem = (() => {
         if (!this.d.cursors) return 'is not available here';
         try {
-          position = this.d.cursors.decode(cursor, { tenantId: ctx.tenantId, credentialKey: ctx.credentialKey, tool: t.name, args: Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined)), contract: 2 });
+          position = this.d.cursors.decode(cursor, { tenantId: ctx.tenantId, credentialKey: ctx.credentialKey, tool: t.name, args: boundArgs(t, plan, args), contract: 2 });
           return null;
         } catch (err) {
           const p = err instanceof CursorError ? err.problem : 'malformed';
@@ -461,7 +495,12 @@ export class ScriptRunner {
       })();
       if (problem) {
         onBlocked();
-        return refuse(await errorInfoFor(ctx, { code: 'invalid_args', message: '', text: `The cursor ${problem}; nothing was called. Call again without it, with the same other arguments.`, name: t.name, tool: t, args, issues: [{ path: '/cursor', keyword: 'cursor', params: {}, message: problem }], next: [{ tool: t.name, args }] }));
+        // other query arguments than the cursor's (B5): the first next call continues the cursor with its own arguments
+        const binding = { tenantId: ctx.tenantId, credentialKey: ctx.credentialKey, tool: t.name, contract: 2 };
+        const bound = this.d.cursors && problem.startsWith('belongs') ? this.d.cursors.boundArgs(cursor, binding) : null;
+        const keep = bound ? [{ tool: t.name, args: { ...bound, ...(args.fields !== undefined ? { fields: args.fields } : {}), cursor } }] : [];
+        const text = bound ? `The cursor belongs to other arguments; nothing was called. Continue it with its own arguments (next[0]), or call again without it.` : `The cursor ${problem}; nothing was called. Call again without it, with the same other arguments.`;
+        return refuse(await errorInfoFor(ctx, { code: 'invalid_args', message: '', text, name: t.name, tool: t, args, issues: [{ path: '/cursor', keyword: 'cursor', params: {}, message: problem }], next: [...keep, { tool: t.name, args }] }));
       }
     }
     const out = await this.d.pipeline.invoke(ctx, t.name, args, { planned, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
@@ -566,8 +605,10 @@ export class ScriptRunner {
       }
       const isError = status !== 'ok';
       const text = JSON.stringify(structured);
-      const draft = this.scriptDraft(ctx, status, body, value ?? null, mode, planned, callAs, { calls, left: { calls: Math.max(0, lim.maxToolCalls - calls), seconds: Math.max(0, Math.floor((lim.wallTimeSec * 1000 - (ended - started)) / 1000)) } }, innerErrors, { [META_CALL_ID]: auditId, [META_TASK_ID]: taskId, 'dev.neurouter/script-run-id': runId }, { code, inputs });
-      return { status, planned, result: v1Result(text.length > 8192 ? `${text.slice(0, 8150)}… (truncated preview)` : text, structured, meta, isError), draft };
+      const resultChars = lim.resultChars ?? SCRIPT_RESULT_CHARS;
+      const agentCut = ctx.contract === 2 && status === 'ok' && !body.truncated ? await this.agentCut(ctx, value ?? null, resultChars) : null;
+      const draft = this.scriptDraft(ctx, status, { ...body, agentCut }, value ?? null, mode, planned, callAs, { calls, left: { calls: Math.max(0, lim.maxToolCalls - calls), seconds: Math.max(0, Math.floor((lim.wallTimeSec * 1000 - (ended - started)) / 1000)) } }, innerErrors, { [META_CALL_ID]: auditId, [META_TASK_ID]: taskId, 'dev.neurouter/script-run-id': runId }, { code, inputs });
+      return { status, planned, result: v1Result(text.length > resultChars ? `${text.slice(0, resultChars - 42)}… (truncated preview)` : text, structured, meta, isError), draft };
     };
     /** contract 2: the error objects raised into the script (by JSON message), so an uncaught one becomes the run's error */
     const innerErrors = new Map<string, InnerError>();

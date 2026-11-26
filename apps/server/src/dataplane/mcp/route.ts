@@ -2,7 +2,7 @@ import type { TenantResolver } from '../../kernel/tenancy/types.js';
 import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createMcpHandler, inputRequired, inputResponse, ProtocolError, Server, type McpHttpHandler, type McpRequestContext, type ServerContext, type ServerEventBus } from '@modelcontextprotocol/server';
-import { CONTRACT_VERSIONS, HEADER_BUILD, HEADER_CONTRACT, HEADER_EXPOSURE, HEADER_MOCK_STATE, META_CONTRACT, META_TASK_ID, type ContractVersion } from '@neurouter/shared';
+import { CONTRACT_VERSIONS, HEADER_BUILD, HEADER_CONTRACT, HEADER_EXPOSURE, HEADER_MOCK_STATE, HEADER_REFERENCE, META_CONTRACT, META_TASK_ID, type ContractVersion } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { Keyring } from '../../kernel/secrets/keyring.js';
@@ -68,6 +68,8 @@ interface RequestCtx {
   legacyClient: { name: string | null; version: string | null; protocolVersion: string | null; capabilities?: Record<string, unknown> | null } | null;
   mockNamespace?: string;
   exposureOverride?: 'tools' | 'code';
+  /** eval reference session (`X-Neurouter-Reference: 1`, eval keys only): full objects */
+  fullObjects?: boolean;
   /** `X-Neurouter-Contract` (contract negotiation) */
   contractHeader?: string;
   /** client capabilities of a 2026-07-28 request envelope, seen before the SDK (negotiation in the factory) */
@@ -158,6 +160,7 @@ async function runContext(d: McpRouteDeps, rc: RequestCtx, c: ServerContext, ser
     requestId: newId(),
     ...(rc.mockNamespace ? { mockNamespace: rc.mockNamespace } : {}),
     ...(rc.exposureOverride ? { exposureOverride: rc.exposureOverride } : {}),
+    ...(rc.fullObjects ? { fullObjects: true } : {}),
     contract,
     outputSchema: outputSchemaSetting(b),
   };
@@ -356,6 +359,7 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
         legacyClient: legacyClients.get(auth.credentialKey, sessionId),
         ...(mockNs !== 'env' ? { mockNamespace: mockNs } : {}),
         ...(exp === 'tools' || exp === 'code' ? { exposureOverride: exp } : {}),
+        ...(isEval && header(req, HEADER_REFERENCE) === '1' ? { fullObjects: true } : {}),
         ...(header(req, HEADER_CONTRACT) ? { contractHeader: header(req, HEADER_CONTRACT)!.slice(0, 20) } : {}),
         ...(rpc.envelopeCaps ? { envelopeCaps: rpc.envelopeCaps } : {}),
         ...(sessionId ? { sessionId } : {}),

@@ -137,6 +137,10 @@ export interface AssertionResult {
   matchedBy?: 'literal' | 'normalized' | 'judge';
   /** max_calls: over the soft budget (efficiency) without failing. */
   overBudget?: boolean;
+  /** answer_contains: the expected values came from the ground truth (not a literal hint). */
+  groundTruth?: boolean;
+  /** called / not_called / max_calls: failed as written, passed by an equivalence rule (B9 path, ambiguous waiver). */
+  waived?: string;
 }
 
 /** LLM usage of judge calls (rubric judge + answer-equivalence judge). */
@@ -151,6 +155,8 @@ export interface JudgeResult {
   score: number;
   verdict: 'pass' | 'fail';
   reasons: string[];
+  /** Ambiguous tasks: how the agent handled the ambiguity (a clarifying question, an explicit assumption, neither). */
+  path?: 'asked' | 'assumed' | 'neither';
 }
 
 export interface CheckResult {

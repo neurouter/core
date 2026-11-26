@@ -217,3 +217,39 @@ describe('relations', () => {
     expect(readCall(cancelOrder, { order_id: 'o' }, TOOLS)).toEqual({ tool: 'get_order', args: { order_id: 'o' } });
   });
 });
+
+describe('B4: list detection on list wrappers with extra keys (P6 transcripts)', () => {
+  // apps_list_installation_repos_for_authenticated_user (GitHub): {total_count, repository_selection, repositories[]};
+  // 0.3.0 answered page {count: 0, total: 20} and hint "0 items." on 20 repositories (github-tool-c2, P6)
+  const repos = Array.from({ length: 20 }, (_, i) => ({ id: i + 1 }));
+  const installationRepos = tool('apps_list_installation_repos_for_authenticated_user', 'GET', '/user/installations/{installationId}/repositories', { properties: { installation_id: { type: 'integer' }, per_page: { type: 'integer', default: 30 }, page: { type: 'integer', default: 1 } } }, {
+    outputSchema: { type: 'object', required: ['total_count', 'repositories'], properties: { total_count: { type: 'integer' }, repository_selection: { type: 'string' }, repositories: { type: 'array', items: { type: 'object' } } } },
+  });
+  const githubValue = { total_count: 20, repository_selection: 'all', repositories: repos };
+  // get_topups (Stripe): {object: "list", data[], has_more, url}
+  const topups = tool('get_topups', 'GET', '/v1/topups', { properties: { limit: { type: 'integer' }, starting_after: { type: 'string' }, status: { type: 'string' } } }, {
+    outputSchema: { type: 'object', properties: { object: { type: 'string' }, data: { type: 'array', items: { type: 'object' } }, has_more: { type: 'boolean' }, url: { type: 'string' } } },
+  });
+  const paging = (t: ToolDef, args: Record<string, unknown>, value: unknown) => ({ encode: () => 'c_x', signals: nextSignals(pagingPlan(t), args, value, {}, 'https://api.test', 30), handle: null, own: ['cursor', 'fields'] });
+
+  it('GitHub {total_count, repository_selection, repositories}: a list of 20, no "0 items." hint', () => {
+    expect(isListTool(installationRepos, githubValue)).toBe(true);
+    const v = listView(installationRepos, { installation_id: 1 }, githubValue, undefined, paging(installationRepos, { installation_id: 1 }, githubValue));
+    expect(v.page).toMatchObject({ count: 20, total: 20, has_more: false });
+    expect(v.hint).toBeUndefined();
+    expect(v.page.scope).toBeUndefined();
+  });
+
+  it('Stripe {object, data, has_more, url}: count is the data length', () => {
+    const value = { object: 'list', data: [{ id: 'tu_1' }, { id: 'tu_2' }], has_more: false, url: '/v1/topups' };
+    expect(isListTool(topups, value)).toBe(true);
+    expect(listView(topups, {}, value, undefined, paging(topups, {}, value)).page).toMatchObject({ count: 2, has_more: false });
+  });
+
+  it('an entity with one array field is still not a list (an order with line items and a total)', () => {
+    const order = tool('get_order', 'GET', '/orders/{orderId}', { properties: { order_id: { type: 'string' } } }, {
+      outputSchema: { type: 'object', properties: { id: { type: 'string' }, total: { type: 'integer' }, status: { type: 'string' }, items: { type: 'array', items: { type: 'object' } } } },
+    });
+    expect(isListTool(order, { id: 'o1', total: 3, status: 'paid', items: [{}, {}] })).toBe(false);
+  });
+});
