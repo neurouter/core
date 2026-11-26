@@ -17,17 +17,19 @@ Recommended mode for gpt-6-luna: tool. Model matrix on the overlay (1 repeat):
 | claude-sonnet-5-5 | 71 (55%) | 74 (60%) | code |
 | gemini-3.5-flash-lite | 70 (55%) | 72 (60%) | tool (within 3 points) |
 
-Tokens are Neurouter's reported figure: uncached input + output. Cache reads are not counted, so token
-figures are not comparable across providers (OpenAI caches the tool list automatically).
+Tokens are the 0.2.0 figure: uncached input + output, without cache reads, so these numbers are not
+comparable across providers (OpenAI caches the tool list automatically). From 0.2.1, reports count
+uncached + cached input + output and show cached input separately.
 
 ## Files
 
 - `agent-ready.overlay.yaml`: the overlay. Every entry is tagged `[auto]` (from `neurouter eval --suggest`),
   `[curated]` (from `curated.overlay.yaml`, without its renames) or `[manual]`. Tool names stay raw because
-  eval assertions match tools by name.
+  0.2.0 eval assertions matched tools by name (0.2.1 resolves them by operationId, so renames are fine).
 - `eval-suite.json`: the frozen suite. It was generated from a 122-tool slice of the raw spec
-  (`generation-scope.overlay.yaml`: issues, pulls, search and a few repo reads), because each generator call
-  over all 1281 tools sends about 516k tokens of tool schemas.
+  (`generation-scope.overlay.yaml`: issues, pulls, search and a few repo reads), because in 0.2.0 each
+  generator call over all 1281 tools sent about 516k tokens of tool schemas. 0.2.1 budgets generation
+  (`--max-generator-tokens`, default 400k for the whole suite).
 - `curated.overlay.yaml`: the earlier hand-written overlay (renames tools; not used for these numbers).
 
 ## Reproduce
@@ -50,10 +52,11 @@ LLM results vary between runs; expect a few points of spread, especially with on
 
 ## Caveats
 
-- Mock environment: responses are generated from the spec. Some failures come from the mock, not the agent:
-  `repos_list_commits` mock responses fail the tool's own output schema (`commit.author.date` is not a
-  date-time), and a few generated `answer_contains` values (e.g. assignee logins) are not reproduced by the
-  mock at run time.
+- Mock environment: responses are generated from the spec. In 0.2.0 some failures came from the mock, not
+  the agent: `repos_list_commits` mock responses failed the tool's own output schema (`commit.author.date`
+  was not a date-time), and a few generated `answer_contains` values (e.g. assignee logins) were not
+  reproduced by the mock at run time. Both are fixed in 0.2.1 (schema-valid mock values; the same seeded
+  data for generation and runs), and tools no longer advertise per-tool `outputSchema` by default.
 - Single-call tasks in the raw run did return the right answer, but the generated `max_calls: 1` budget
   failed them: the raw responses were too large, so agents paged them with `neurouter_read_result`.
 - The same overlay was checked live against `https://api.github.com` (read-only token, writes disabled):
