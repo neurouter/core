@@ -127,7 +127,10 @@ export class Dispatcher {
       meta[META_NEXT_TOOLS] = ['neurouter_report_unmet_need'];
       text = String(structured.hint);
     } else if (format === 'python') {
-      text = res.tools.map((t) => (t.pySignature ? `${t.pySignature}\n    """${t.description.split('\n')[0]!.slice(0, 300)}"""` : `${t.name} — ${t.description.split('\n')[0]!.slice(0, 200)}`)).join('\n\n');
+      // the stubs are bare `def`s; say how to call them (gemini-3.5-flash-lite called `find_pets_by_status(...)` without the namespace)
+      const ns = ctx.server.slug.replace(/-/g, '_');
+      const how = surface.code ? `# In run_script call these as ${ns}.<name>(...), e.g. ${res.tools.find((t) => t.pyName && !t.pyName.startsWith('ops.'))?.pyName ?? `${ns}.<name>`}(...); helpers as ops.<name>(...).\n\n` : '';
+      text = how + res.tools.map((t) => (t.pySignature ? `${t.pySignature}\n    """${t.description.split('\n')[0]!.slice(0, 300)}"""` : `${t.name} — ${t.description.split('\n')[0]!.slice(0, 200)}`)).join('\n\n');
     } else {
       text = res.tools.map((t) => `${t.name} — ${t.description.split('\n')[0]!.slice(0, 200)}${t.write ? ' (write)' : ''}`).join('\n');
     }

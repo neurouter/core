@@ -182,6 +182,10 @@ servers:
     const c = await mcpClient(s, 'github', 'mock', key);
     const names = (await c.listTools()).tools.map((t) => t.name);
     expect(names).toContain('run_script');
+    // python stubs say how to call them (namespace prefix)
+    const found = text(await c.callTool({ name: 'search_tools', arguments: { query: 'list issues', format: 'python' } }));
+    expect(found).toMatch(/^# In run_script call these as github\.<name>\(\.\.\.\), e\.g\. github\.\w+\(\.\.\.\)/);
+    expect(found).toContain('def list_issues(');
     const code = `issues = github.list_issues(owner="octocat", repo="hello-world", state="open", limit=30)
 stale = [i for i in issues if ops.days_since(i["updated_at"]) > 0]
 for i in stale[:3]:
