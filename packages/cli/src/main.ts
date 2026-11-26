@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
 import { Command } from 'commander';
-import { cmdCompile, cmdValidate } from './commands/compile.js';
-import { cmdMock } from './commands/mock.js';
-import { cmdServe, cmdConsoleLink, cmdKeysCreate } from './commands/serve.js';
-import { cmdEval } from './commands/eval.js';
-import { generateKeyEnv } from './commands/keys.js';
 import { CLI_VERSION } from './version.js';
+
+// commands load lazily: `serve` starts OpenTelemetry before the server modules are imported
+const compileCmd = () => import('./commands/compile.js');
+const serveCmd = () => import('./commands/serve.js');
 
 /**
  * `npx neurouter serve|validate|eval|mock|compile|keys|console-link` (§15.8). Exit codes: 0 ok,
@@ -24,20 +23,24 @@ export function buildProgram(): Command {
     .option('--host <host>', 'host', '127.0.0.1')
     .option('--data <dir>', 'data directory', './.neurouter')
     .option('--embeddings', 'enable local search embeddings (downloads the model)', false)
-    .action(cmdServe);
+    .action(async (o) => {
+      const { otelEnabled, startOtel } = await import('@neurouter/server/otel');
+      if (otelEnabled(process.env)) await startOtel(process.env);
+      await (await serveCmd()).cmdServe(o);
+    });
 
   program
     .command('console-link')
     .description('Mint a one-time console sign-in URL (talks to the same DATABASE_URL)')
     .option('--data <dir>', 'data directory', './.neurouter')
-    .action(cmdConsoleLink);
+    .action(async (o) => (await serveCmd()).cmdConsoleLink(o));
 
   program
     .command('validate')
     .description('Parse, reconcile (dry run), compile and lint neurouter.yaml; exit 1 on errors')
     .option('-c, --config <file>', 'neurouter.yaml', defaultConfig ?? 'neurouter.yaml')
     .option('--print-schema', 'print the neurouter.yaml JSON Schema and exit', false)
-    .action(cmdValidate);
+    .action(async (o) => (await compileCmd()).cmdValidate(o));
 
   program
     .command('compile')
@@ -48,7 +51,7 @@ export function buildProgram(): Command {
     .option('--stubs <dir>', 'write <namespace>.pyi files')
     .option('--namespace <ns>', 'Python namespace (default from the spec title)')
     .option('--graphql-endpoint <url>', 'introspect a live GraphQL endpoint instead of --spec')
-    .action(cmdCompile);
+    .action(async (o) => (await compileCmd()).cmdCompile(o));
 
   program
     .command('mock')
@@ -56,7 +59,7 @@ export function buildProgram(): Command {
     .requiredOption('--spec <fileOrUrl>', 'spec file or URL')
     .option('-p, --port <port>', 'port', '4010')
     .option('--seed <n>', 'seed', '42')
-    .action(cmdMock);
+    .action(async (o) => (await import('./commands/mock.js')).cmdMock(o));
 
   program
     .command('eval')
@@ -79,13 +82,13 @@ export function buildProgram(): Command {
     .option('--transcripts <file>', 'write every attempt (transcript, observed calls, assertion results) as JSON, for debugging')
     .option('--suggest', 'print fix suggestions', false)
     .option('--embeddings', 'enable local search embeddings', false)
-    .action(cmdEval);
+    .action(async (o) => (await import('./commands/eval.js')).cmdEval(o));
 
   const keys = program.command('keys').description('Crypto keys and API keys');
   keys
     .command('gen [keyId]')
     .description('Print NEUROUTER_MASTER_KEYS / NEUROUTER_ACTIVE_KEY_ID / HASH_PEPPER')
-    .action((keyId?: string) => console.log(generateKeyEnv(keyId)));
+    .action(async (keyId?: string) => console.log((await import('./commands/keys.js')).generateKeyEnv(keyId)));
   keys
     .command('create')
     .description('Create an API key for a server environment (dev convenience; talks to DATABASE_URL)')
@@ -94,7 +97,7 @@ export function buildProgram(): Command {
     .option('--scopes <list>', 'tools:read,tools:write,code:run', 'tools:read,code:run')
     .option('--name <name>', 'key name', 'cli')
     .option('--data <dir>', 'data directory', './.neurouter')
-    .action(cmdKeysCreate);
+    .action(async (o) => (await serveCmd()).cmdKeysCreate(o));
   return program;
 }
 

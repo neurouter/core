@@ -1,4 +1,5 @@
 import type { Scope, TaskFraming, Via } from '@neurouter/shared';
+import type { CallTrace } from '../../kernel/observability/tracing.js';
 import type { RuntimeBundle } from '../../kernel/runtime-config.js';
 
 export type Principal =
@@ -34,6 +35,10 @@ export interface RunContext {
   /** Execute run bound to an approved plan (prod code mode, §9.7): `${tool}|${argsHash}` pairs. */
   approvedPlan?: Set<string>;
   traceparent: string | null;
+  /** Gateway span of the MCP request (audit `span_id`); inner script calls share it. */
+  spanId?: string | null;
+  /** The request's trace (tools/call): upstream calls run in their own client span under it. */
+  trace?: CallTrace;
   ip: string | null;
   userAgent: string | null;
   /** Eval-only: mock state namespace (`X-Neurouter-Mock-State`). */

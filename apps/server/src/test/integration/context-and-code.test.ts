@@ -10,9 +10,12 @@ type Txt = Array<{ type: string; text: string }>;
 const text = (r: { content: unknown }) => (r.content as Txt).map((c) => c.text).join('\n');
 
 /** A tiny real HTTP API returning 100 items (shaping/truncation over the HTTP invoker). */
+const upstreamTraceparents: string[] = [];
+
 function fakeApi(): Promise<{ server: Server; port: number }> {
   const items = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `item ${i + 1}`, secret_note: 'x' }));
   const server = createServer((req, res) => {
+    upstreamTraceparents.push(String(req.headers.traceparent ?? ''));
     if (req.url?.startsWith('/items')) {
       res.writeHead(200, { 'content-type': 'application/json', 'x-ratelimit-remaining': '99' });
       res.end(JSON.stringify(items));
@@ -109,6 +112,25 @@ servers:
   afterAll(async () => {
     await s?.close();
     api?.server.close();
+  });
+
+  it('tools/call is traced: caller trace id kept, gateway span id on the audit row, a client span hop sent upstream', async () => {
+    const c = await mcpClient(s, 'items', 'dev', await keyFor(s, 'items', 'dev', ['tools:read']));
+    const caller = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    const r = await c.callTool({ name: 'list_items', arguments: {}, _meta: { traceparent: caller } });
+    expect(r.isError, text(r)).toBeFalsy();
+    const sent = upstreamTraceparents.at(-1)!;
+    expect(sent).toMatch(/^00-4bf92f3577b34da6a3ce929d0e0e4736-[0-9a-f]{16}-01$/);
+    expect(sent).not.toContain('00f067aa0ba902b7');
+    await s.services.auditStore.flush();
+    const row = await s.services.dbs.audit.db.selectFrom('audit_log').select(['trace_id', 'span_id']).where('tool_name', '=', 'list_items').orderBy('ts', 'desc').executeTakeFirstOrThrow();
+    expect(row.trace_id).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
+    expect(row.span_id).toMatch(/^[0-9a-f]{16}$/);
+    expect(sent.split('-')[2]).not.toBe(row.span_id); // the upstream hop is a child span of the gateway span
+    // without a caller context the gateway starts a trace (audit rows still get trace and span ids)
+    await c.callTool({ name: 'list_items', arguments: {} });
+    expect(upstreamTraceparents.at(-1)).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    await c.close();
   });
 
   it('raw GitHub (48 tools, discovery auto) lists pinned + search_tools + call_tool; search ranks issues_create first', async () => {

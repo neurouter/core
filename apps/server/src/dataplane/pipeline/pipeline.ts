@@ -186,6 +186,7 @@ export class Pipeline {
       via: ctx.via,
       mode: ctx.mode,
       traceId: traceIdOf(ctx.traceparent),
+      spanId: ctx.spanId ?? null,
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     };
@@ -399,11 +400,12 @@ export class Pipeline {
           if (!hostAllowed(url, env.allowedHosts)) throw new RequestBuildError(`host ${url.host} is not in allowedHosts`, 'host_not_allowed');
           urlTemplate = url.pathname;
           const variables = Object.fromEntries(tool.binding.variables.map((v) => [v.name, specArgs[v.arg]]).filter(([, v]) => v !== undefined));
-          upstream = await this.d.http.invoke(env.id, { method: 'POST', url, urlTemplate, headers: { accept: GRAPHQL_ACCEPT, 'content-type': 'application/json', 'user-agent': `neurouter/${this.d.version}`, ...lower(env.headers), ...cred.headers }, body: JSON.stringify({ query: tool.binding.document, variables }) }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) });
+          const body = JSON.stringify({ query: tool.binding.document, variables });
+          upstream = await this.traced(ctx, tool.name, (trace) => this.d.http.invoke(env.id, { method: 'POST', url, urlTemplate, headers: { accept: GRAPHQL_ACCEPT, 'content-type': 'application/json', 'user-agent': `neurouter/${this.d.version}`, ...lower(env.headers), ...cred.headers, ...trace }, body }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) }));
         } else {
           const req = buildHttpRequest(tool, specArgs, { baseUrl: env.baseUrl, headers: env.headers, allowedHosts: env.allowedHosts, credentials: cred }, this.d.version);
           urlTemplate = req.urlTemplate;
-          upstream = await this.d.http.invoke(env.id, req, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) });
+          upstream = await this.traced(ctx, tool.name, (trace) => this.d.http.invoke(env.id, { ...req, headers: { ...req.headers, ...trace } }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) }));
         }
       }
       step('upstream', 'pass', String(upstream.status));
@@ -490,6 +492,17 @@ export class Pipeline {
     }
     void urlTemplate;
     return { ok: true, unknown: false, decision, status: 'ok', value, result: { content: [{ type: 'text', text }], structuredContent: wrapStructured(value), _meta: meta }, auditId, tool };
+  }
+
+  /**
+   * Runs one upstream HTTP call in its own client span under the request's gateway span (§10.5).
+   * `trace` = headers to add: the minted `traceparent` when no OTel SDK records (with the SDK, the
+   * undici instrumentation injects the client span's context itself).
+   */
+  private traced<T>(ctx: RunContext, name: string, fn: (trace: Record<string, string>) => Promise<T>): Promise<T> {
+    if (!ctx.trace) return fn({});
+    const t = ctx.trace;
+    return t.upstream(name, (meta) => fn(t.recording ? {} : meta));
   }
 
   plannedChange(tool: ToolDef, args: Record<string, unknown>, wouldConfirm: boolean, argsHash: string): PlannedChange {

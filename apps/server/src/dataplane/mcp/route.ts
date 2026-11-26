@@ -10,6 +10,7 @@ import type { McpAuthenticator } from '../auth/authenticate.js';
 import { RC_KEY, traceIdOf, type ClientInfo, type Principal, type RunContext } from '../pipeline/context.js';
 import type { Confirmer, ConfirmOutcome, Pipeline } from '../pipeline/pipeline.js';
 import type { TaskTracker } from '../tasks/tracker.js';
+import { startCallTrace } from '../../kernel/observability/tracing.js';
 import { bearerChallenge, protectedResourceMetadata } from './challenge.js';
 import type { Dispatcher } from './dispatch.js';
 import { InflightCalls, inspectJsonRpc, LegacyClientInfo } from './inflight.js';
@@ -196,17 +197,40 @@ export function buildServerFactory(d: McpRouteDeps) {
       return { tools: surface.tools.map((t) => structuredClone(t)) as never };
     });
     server.setRequestHandler('tools/call', async (req, c) => {
-      const ctx = await runContext(d, rc, c as ServerContext, server, mctx.era, true);
-      const surface = buildSurface(ctx, surfaceOpts);
-      const confirmer = makeConfirmer(d, ctx, c as ServerContext);
-      const signal = (c as unknown as { mcpReq: { signal?: AbortSignal } }).mcpReq.signal;
-      const out = await d.dispatcher.call(ctx, req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, surface, confirmer, signal);
-      if (out.kind === 'unknown') throw new ProtocolError(-32602, out.message);
-      if (out.kind === 'input_required') {
-        if (ctx.client.era !== 'modern') throw new ProtocolError(-32603, 'confirmation requires the 2026-07-28 protocol');
-        return out.result as never;
+      const base = await runContext(d, rc, c as ServerContext, server, mctx.era, true);
+      // gateway span `tools/call {tool}` (§10.5): parent from params._meta.traceparent, else the HTTP header
+      const meta = ((c as ServerContext).mcpReq as unknown as { _meta?: Record<string, unknown> })._meta ?? {};
+      const span = startCallTrace({
+        method: 'tools/call',
+        toolName: req.params.name,
+        metaTraceparent: typeof meta.traceparent === 'string' ? meta.traceparent : null,
+        metaTracestate: typeof meta.tracestate === 'string' ? meta.tracestate : null,
+        httpTraceparent: rc.traceparent,
+        protocolVersion: base.client.protocolVersion,
+      });
+      const ctx: RunContext = { ...base, traceparent: span.traceparent, spanId: span.spanId, trace: span };
+      let error: string | null = null;
+      try {
+        const surface = buildSurface(ctx, surfaceOpts);
+        const confirmer = makeConfirmer(d, ctx, c as ServerContext);
+        const signal = (c as unknown as { mcpReq: { signal?: AbortSignal } }).mcpReq.signal;
+        const out = await d.dispatcher.call(ctx, req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, surface, confirmer, signal);
+        if (out.kind === 'unknown') {
+          error = 'unknown_tool';
+          throw new ProtocolError(-32602, out.message);
+        }
+        if (out.kind === 'input_required') {
+          if (ctx.client.era !== 'modern') throw new ProtocolError(-32603, 'confirmation requires the 2026-07-28 protocol');
+          return out.result as never;
+        }
+        if ((out.result as { isError?: boolean }).isError) error = 'tool_error';
+        return server.projectCallToolResult(out.result as never, undefined);
+      } catch (err) {
+        error ??= (err as Error).name || 'Error';
+        throw err;
+      } finally {
+        span.end({ error });
       }
-      return server.projectCallToolResult(out.result as never, undefined);
     });
     return server;
   };

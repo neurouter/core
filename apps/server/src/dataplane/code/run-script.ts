@@ -184,6 +184,8 @@ export class ScriptRunner {
       );
     }
     const ctx: RunContext = { ...ctx0, taskId, via: 'script', mode: 'code', scriptRunId: runId, dryRun: mode === 'dry_run' };
+    // the run shows on the request's gateway span; each inner upstream call gets its own client span
+    ctx.trace?.setAttribute(mode === 'dry_run' ? 'neurouter.script_run_id.dry_run' : 'neurouter.script_run_id', runId);
     await this.d.db.insertInto('script_runs').values({ id: runId, tenant_id: ctx.tenantId, task_id: taskId, server_id: ctx.server.id, environment_id: ctx.environment.id, user_id: ctx.principal.type === 'external' ? null : ctx.principal.userId, credential_key: ctx.credentialKey, code: code.slice(0, 16384), code_hash: codeHash, mode, status: 'running', started_at: started }).execute();
 
     const ns = ctx.server.slug.replace(/-/g, '_');

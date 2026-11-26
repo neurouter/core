@@ -44,11 +44,17 @@ export interface CallTrace {
   traceId: string;
   /** the gateway span id (stored on the audit row) */
   spanId: string;
+  /** W3C traceparent of the gateway span (what the audit row and inner calls inherit) */
+  traceparent: string;
+  /** true when an OTel SDK records the span (the undici instrumentation then injects the HTTP header) */
+  recording: boolean;
   /**
-   * Runs `fn` inside the upstream client span (so the undici instrumentation injects the HTTP
-   * header) and hands it the `_meta` keys (traceparent / tracestate) to forward upstream.
+   * Runs `fn` inside a new upstream client span (one per upstream call, so a script's inner calls get
+   * one each) and hands it the `traceparent` / `tracestate` keys to forward upstream (HTTP headers
+   * when the SDK does not record, `_meta` for MCP upstreams).
    */
-  upstream<T>(serverSlug: string, fn: (meta: Record<string, string>) => Promise<T>): Promise<T>;
+  upstream<T>(name: string, fn: (meta: Record<string, string>) => Promise<T>): Promise<T>;
+  setAttribute(key: string, value: string | number | boolean): void;
   end(outcome: { error?: string | null }): void;
 }
 
@@ -88,47 +94,35 @@ export function startCallTrace(input: CallTraceInput): CallTrace {
   const spanId = recording ? span.spanContext().spanId : hex(8);
   const flags = recording ? (span.spanContext().traceFlags & 1 ? '01' : '00') : (parent?.flags ?? '01');
   const spanCtx = trace.setSpan(parentCtx, span);
-  let upstreamSpan: Span | null = null;
-  let upstreamCtx: Context | null = null;
-  let manualUpstream: string | null = null;
-
-  const ensureUpstream = (serverSlug: string) => {
-    if (upstreamCtx || manualUpstream) return;
-    if (recording) {
-      upstreamSpan = tracer.startSpan(`tools/call ${input.toolName ?? serverSlug}`, { kind: SpanKind.CLIENT, attributes: { 'mcp.method.name': 'tools/call', 'network.transport': 'tcp', 'neurouter.server': serverSlug } }, spanCtx);
-      upstreamCtx = trace.setSpan(spanCtx, upstreamSpan);
-    } else {
-      manualUpstream = formatTraceparent({ traceId, spanId: hex(8), flags });
-    }
-  };
-
-  const upstreamMeta = (): Record<string, string> => {
-      if (upstreamCtx) {
-        const out: Record<string, string> = {};
-        propagation.inject(upstreamCtx, out);
-        return out;
-      }
-      const out: Record<string, string> = { traceparent: manualUpstream ?? formatTraceparent({ traceId, spanId, flags }) };
-      if (carrier.tracestate) out.tracestate = carrier.tracestate;
-      return out;
-  };
 
   return {
     traceId,
     spanId,
-    async upstream<T>(serverSlug: string, fn: (meta: Record<string, string>) => Promise<T>): Promise<T> {
-      ensureUpstream(serverSlug);
-      const meta = upstreamMeta();
+    traceparent: formatTraceparent({ traceId, spanId, flags }),
+    recording,
+    async upstream<T>(name: string, fn: (meta: Record<string, string>) => Promise<T>): Promise<T> {
+      if (!recording) {
+        // no SDK: mint a client span id under the gateway span so the upstream sees the hop
+        const meta: Record<string, string> = { traceparent: formatTraceparent({ traceId, spanId: hex(8), flags }) };
+        if (carrier.tracestate) meta.tracestate = carrier.tracestate;
+        return fn(meta);
+      }
+      const up = tracer.startSpan(`tools/call ${name}`, { kind: SpanKind.CLIENT, attributes: { 'mcp.method.name': 'tools/call', 'network.transport': 'tcp', 'gen_ai.tool.name': name } }, spanCtx);
+      const upCtx = trace.setSpan(spanCtx, up);
+      const meta: Record<string, string> = {};
+      propagation.inject(upCtx, meta);
       try {
-        return upstreamCtx ? await context.with(upstreamCtx, () => fn(meta)) : await fn(meta);
+        return await context.with(upCtx, () => fn(meta));
       } catch (err) {
-        const s = upstreamSpan as Span | null;
-        s?.setStatus({ code: SpanStatusCode.ERROR, message: (err as Error).message });
-        s?.setAttribute('error.type', (err as Error).name || 'Error');
+        up.setStatus({ code: SpanStatusCode.ERROR, message: (err as Error).message });
+        up.setAttribute('error.type', (err as Error).name || 'Error');
         throw err;
       } finally {
-        (upstreamSpan as Span | null)?.end();
+        up.end();
       }
+    },
+    setAttribute(key, value) {
+      span.setAttribute(key, value);
     },
     end(outcome) {
       if (outcome.error) {
