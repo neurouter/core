@@ -1,3 +1,4 @@
+import { SCRIPT_BUILTINS } from '@neurouter/shared';
 import { LineIndex, tokenize, type Token } from './tokenize.js';
 
 /**
@@ -10,9 +11,9 @@ export const MAX_SCRIPT_BYTES = 16 * 1024;
 export const MAX_SCRIPT_LINES = 400;
 export const MAX_NESTING = 12;
 
-export const ALLOWED_BUILTINS = ['len', 'range', 'enumerate', 'zip', 'sorted', 'reversed', 'min', 'max', 'sum', 'any', 'all', 'abs', 'round', 'int', 'float', 'str', 'bool', 'list', 'dict', 'set', 'tuple', 'isinstance', 'print'] as const;
+export const ALLOWED_BUILTINS = SCRIPT_BUILTINS;
 
-const FORBIDDEN_NAMES = new Set(['globals', 'locals', 'vars', 'eval', 'exec', 'compile', 'open', 'input', 'breakpoint', 'getattr', 'setattr', 'delattr', 'type', 'memoryview', 'help']);
+const FORBIDDEN_NAMES = new Set(['globals', 'locals', 'vars', 'eval', 'exec', 'compile', 'open', 'input', 'breakpoint', 'getattr', 'setattr', 'delattr', 'memoryview', 'help']);
 
 export interface ScriptViolation {
   line: number;
@@ -89,6 +90,11 @@ export function validateScript(code: string, opts: ValidateOptions = {}): Valida
       else add(t.line, t.col, 'dunder', `Names containing '__' are not allowed ('${t.value}')`, 'Dunder attributes and names are not available in scripts; rename the variable.');
       continue;
     }
+    // type(x) inspects a value; the 3-argument form would build a class (classes are not allowed)
+    if (t.value === 'type' && !isAttr && !isKeywordArgument(toks, k) && callArgCount(toks, k) > 1) {
+      add(t.line, t.col, 'builtin', 'type() takes one argument in scripts', 'Use type(x) or isinstance(x, dict) to inspect a value; classes are not allowed.');
+      continue;
+    }
     if (FORBIDDEN_NAMES.has(t.value) && !isAttr && !isKeywordArgument(toks, k)) {
       add(t.line, t.col, 'builtin', `'${t.value}' is not available in scripts`, `Use tool functions (${nsHint}) and the allowed built-ins: ${ALLOWED_BUILTINS.join(', ')}.`);
     }
@@ -96,6 +102,23 @@ export function validateScript(code: string, opts: ValidateOptions = {}): Valida
   if (!errors.length) return { ok: true };
   errors.sort((a, b) => a.line - b.line || a.col - b.col);
   return { ok: false, errors: errors.slice(0, opts.maxErrors ?? 20) };
+}
+
+/** Number of top-level arguments of a call `name(…)` at token `k` (0 when not a call). */
+function callArgCount(toks: Token[], k: number): number {
+  const open = toks[k + 1];
+  if (!open || open.type !== 'OP' || open.value !== '(') return 0;
+  let args = 0;
+  let pending = false;
+  for (let j = k + 2; j < toks.length; j++) {
+    const x = toks[j]!;
+    if (x.type === 'OP' && x.value === ')' && x.depth <= open.depth) break;
+    if (x.type === 'OP' && x.value === ',' && x.depth === open.depth + 1) {
+      if (pending) args++;
+      pending = false;
+    } else if (x.type !== 'NEWLINE' && x.type !== 'INDENT' && x.type !== 'DEDENT' && x.type !== 'COMMENT') pending = true;
+  }
+  return args + (pending ? 1 : 0);
 }
 
 /** `name=` inside brackets (a keyword argument or a parameter default), e.g. `github.search(type="pr")`. */

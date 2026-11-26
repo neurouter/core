@@ -64,4 +64,13 @@ describe('shapeResponse', () => {
     const out = shapeOutputSchema(schema, { include: ['[].number', '[].user.login'], flatten: { '[].user.login': 'author' } })!;
     expect((out.properties as any).items.items.properties).toEqual({ number: { type: 'integer' }, author: { type: 'string' } });
   });
+
+  it('byteCap: false (run_script) returns whole values: no $truncated preview, maxItems still applies', () => {
+    const big = { id: 1, body: 'x'.repeat(5000) };
+    expect(shapeResponse(big, { maxBytes: 256 }).value).toMatchObject({ $truncated: true });
+    expect(shapeResponse(big, { maxBytes: 256 }, { byteCap: false }).value).toEqual(big);
+    const list = Array.from({ length: 30 }, (_, i) => ({ id: i, body: 'y'.repeat(200) }));
+    const r = shapeResponse(list, { maxItems: 10, maxBytes: 300 }, { byteCap: false, maxBytes: 300 });
+    expect((r.value as unknown[]).length).toBe(10);
+  });
 });

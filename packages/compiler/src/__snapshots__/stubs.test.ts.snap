@@ -2,6 +2,8 @@
 
 exports[`python stubs > matches the Petstore snapshot 1`] = `
 "# petstore.pyi  (generated; Neurouter compiler 0.1.0; build 1ff2025816a6)
+# Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type, iter, next, repr, chr, ord, hex, print (type takes one argument). No map/filter (use comprehensions), no getattr/hasattr (results are dicts).
+# Inside run_script, tool results are whole values (no byte truncation; an overlay maxItems still caps lists).
 from typing import Any, Literal, NotRequired, TypedDict
 
 class Category(TypedDict):

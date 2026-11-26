@@ -2,7 +2,7 @@
  * Python `.pyi` stubs for code mode (backend spec §8.5). Generated from the visible tools of a
  * namespace; the server regenerates them for the per-principal allowed set.
  */
-import type { JsonSchema, ToolDef } from '@neurouter/shared';
+import { scriptBuiltinsLine, type JsonSchema, type ToolDef } from '@neurouter/shared';
 import { PY_KEYWORDS, pyIdent } from './naming.js';
 import { isObj, jcsHash, type Obj } from './util.js';
 import { COMPILER_VERSION } from './version.js';
@@ -207,7 +207,7 @@ export function pySignatureFor(tool: ToolDef): string {
 export function generateStubs(tools: ToolDef[], namespace: string, opts: StubOptions = {}): string {
   const reg = new TypeRegistry(opts.maxTypedDicts ?? MAX_TYPED_DICTS);
   const fns = tools.filter((t) => !t.hidden).map((t) => renderFunction(t, reg).text);
-  const header = `# ${namespace}.pyi  (generated; Neurouter compiler ${COMPILER_VERSION}${opts.buildHash ? `; build ${opts.buildHash.slice(0, 12)}` : ''})\nfrom typing import Any, Literal, NotRequired, TypedDict\n`;
+  const header = `# ${namespace}.pyi  (generated; Neurouter compiler ${COMPILER_VERSION}${opts.buildHash ? `; build ${opts.buildHash.slice(0, 12)}` : ''})\n# ${scriptBuiltinsLine()}\n# Inside run_script, tool results are whole values (no byte truncation; an overlay maxItems still caps lists).\nfrom typing import Any, Literal, NotRequired, TypedDict\n`;
   return [header, ...reg.classes, ...fns].join('\n');
 }
 

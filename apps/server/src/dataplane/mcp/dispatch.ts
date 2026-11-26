@@ -1,4 +1,4 @@
-import { CALL_TOOL, META_CALL_ID, META_NEXT_TOOLS, META_TASK_ID, META_TOOL_NAMES, OPS_TOOLS, opsMcpName, RUN_SCRIPT, SEARCH_TOOLS, type OpsTool } from '@neurouter/shared';
+import { CALL_TOOL, META_CALL_ID, META_NEXT_TOOLS, META_TASK_ID, META_TOOL_NAMES, OPS_TOOLS, opsMcpName, RUN_SCRIPT, scriptBuiltinsLine, SEARCH_TOOLS, type OpsTool } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { RunContext } from '../pipeline/context.js';
@@ -129,7 +129,7 @@ export class Dispatcher {
     } else if (format === 'python') {
       // the stubs are bare `def`s; say how to call them (gemini-3.5-flash-lite called `find_pets_by_status(...)` without the namespace)
       const ns = ctx.server.slug.replace(/-/g, '_');
-      const how = surface.code ? `# In run_script call these as ${ns}.<name>(...), e.g. ${res.tools.find((t) => t.pyName && !t.pyName.startsWith('ops.'))?.pyName ?? `${ns}.<name>`}(...); helpers as ops.<name>(...).\n\n` : '';
+      const how = surface.code ? `# In run_script call these as ${ns}.<name>(...), e.g. ${res.tools.find((t) => t.pyName && !t.pyName.startsWith('ops.'))?.pyName ?? `${ns}.<name>`}(...); helpers as ops.<name>(...).\n# ${scriptBuiltinsLine()}\n\n` : '';
       text = how + res.tools.map((t) => (t.pySignature ? `${t.pySignature}\n    """${t.description.split('\n')[0]!.slice(0, 300)}"""` : `${t.name} — ${t.description.split('\n')[0]!.slice(0, 200)}`)).join('\n\n');
     } else {
       text = res.tools.map((t) => `${t.name} — ${t.description.split('\n')[0]!.slice(0, 200)}${t.write ? ' (write)' : ''}`).join('\n');

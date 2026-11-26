@@ -27,6 +27,11 @@ export interface ShapeResult {
 export interface ShapeOptions {
   /** fallback byte cap when the overlay sets none */
   maxBytes?: number;
+  /**
+   * false: no byte cap at all, not even the overlay's `maxBytes` (results inside `run_script`: the
+   * script reads values, not text, and has its own result-size limit). `maxItems` still applies.
+   */
+  byteCap?: boolean;
 }
 
 /** Locates the list to cut: the root array, or the only array property of a root object. */
@@ -70,7 +75,7 @@ export function shapeResponse(input: unknown, shaping: ResponseShaping | undefin
     truncated = { totalItems: listLen, returnedItems: s.maxItems, totalBytes, returnedBytes: jsonBytes(out) };
   }
 
-  const maxBytes = s.maxBytes ?? opts.maxBytes;
+  const maxBytes = opts.byteCap === false ? undefined : (s.maxBytes ?? opts.maxBytes);
   if (maxBytes !== undefined && jsonBytes(out) > maxBytes) {
     const curLen = Array.isArray(out) ? out.length : (listOf(out)?.get().length ?? null);
     if (listLen !== null && curLen !== null && curLen > 0) {

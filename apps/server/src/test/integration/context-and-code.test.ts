@@ -56,6 +56,7 @@ describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('context, dis
     dir = mkdtempSync(join(tmpdir(), 'nr-it-'));
     writeFileSync(join(dir, 'items.yaml'), ITEMS_SPEC(api.port));
     writeFileSync(join(dir, 'items.overlay.yaml'), 'overlay: 1\ntools:\n  "operationId:listItems":\n    response:\n      maxItems: 50\n      exclude: ["[].secret_note"]\n');
+    writeFileSync(join(dir, 'petsmall.overlay.yaml'), 'overlay: 1\ntools:\n  "operationId:getPetById":\n    response:\n      maxBytes: 256\n');
     const subset = resolve(REPO_ROOT, 'examples/github/github-subset.json');
     const curated = resolve(REPO_ROOT, 'examples/github/curated.overlay.yaml');
     writeFileSync(
@@ -105,6 +106,15 @@ servers:
         baseUrl: "mock:"
         writes: { enabled: true }
         limits: { code: { cpuTimeSec: 1, wallTimeSec: 10 } }
+  - slug: petsmall
+    name: Petstore (tiny maxBytes)
+    spec: { path: ${resolve(REPO_ROOT, 'examples/petstore/openapi.yaml')} }
+    overlay: ${join(dir, 'petsmall.overlay.yaml')}
+    environments:
+      - slug: dev
+        kind: dev
+        baseUrl: "mock:"
+        codeMode: true
 `,
     );
     const dbUrl = pgUrl ? await resetPg(pgUrl, 'nr_it_ctx') : '';
@@ -315,6 +325,24 @@ return {"checked": len(issues), "labelled": [i["number"] for i in stale[:3]]}`;
     expect((loop.structuredContent as { status: string }).status).toBe('limit_exceeded');
     const ok = await c.callTool({ name: 'run_script', arguments: { code: 'p = petstore.get_pet_by_id(pet_id=1)\nreturn p["id"]' } });
     expect(ok.structuredContent).toMatchObject({ status: 'ok', result: 1 });
+    await c.close();
+  }, 60_000);
+
+  it('run_script reads whole tool results where tool mode gets the maxBytes preview; unsupported built-ins get a hint', async () => {
+    const c = await mcpClient(s, 'petsmall', 'dev', await keyFor(s, 'petsmall', 'dev', ['tools:read', 'code:run']));
+    // tool mode: the overlay 256-byte cap gives the documented preview object
+    const tool = await c.callTool({ name: 'get_pet_by_id', arguments: { pet_id: 1 } });
+    expect(tool.structuredContent).toMatchObject({ $truncated: true });
+    // in a script the same call is the whole value (fields readable, no {$truncated, preview})
+    const r = await c.callTool({ name: 'run_script', arguments: { code: 'p = petsmall.get_pet_by_id(pet_id=1)\nreturn {"id": p["id"], "has_name": "name" in p, "kind": str(type(p)), "truncated": "$truncated" in p}' } });
+    expect(r.structuredContent, text(r)).toMatchObject({ status: 'ok', result: { id: 1, has_name: true, kind: "<class 'dict'>", truncated: false } });
+    const m = await c.callTool({ name: 'run_script', arguments: { code: 'return list(map(str, [1, 2]))' } });
+    const err = (m.structuredContent as { status: string; error: { hint?: string } });
+    expect(err.status).toBe('type_error');
+    expect(err.error.hint).toContain('map is not available in scripts: use a list comprehension');
+    expect(err.error.hint).toContain('iter, next');
+    const it = await c.callTool({ name: 'run_script', arguments: { code: 'xs = iter([3, 4])\nreturn [next(xs), next(xs, None), next(xs, "end")]' } });
+    expect(it.structuredContent).toMatchObject({ status: 'ok', result: [3, 4, 'end'] });
     await c.close();
   }, 60_000);
 

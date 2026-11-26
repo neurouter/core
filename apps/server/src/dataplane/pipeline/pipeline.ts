@@ -457,7 +457,9 @@ export class Pipeline {
     let text: string;
     let shaped;
     try {
-      shaped = shapeResponse(body, tool.shaping, { maxBytes: 64 * 1024 });
+      // scripts get whole values: a {$truncated, preview} object read as missing fields in code (the
+      // script's result-size limit bounds what it returns); tool-mode results keep the byte cap
+      shaped = shapeResponse(body, tool.shaping, ctx.via === 'script' ? { byteCap: false } : { maxBytes: 64 * 1024 });
       value = shaped.value;
       if (shaped.truncated) {
         const handle = await this.d.pages.store(ctx.tenantId, ctx.credentialKey, shaped.full);

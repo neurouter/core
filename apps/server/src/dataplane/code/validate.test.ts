@@ -33,10 +33,17 @@ describe('validateScript: rejected constructs', () => {
     expect(e!.hint.length).toBeGreaterThan(10);
   });
 
-  it.each(['globals', 'locals', 'vars', 'eval', 'exec', 'compile', 'open', 'input', 'breakpoint', 'getattr', 'setattr', 'delattr', 'type', 'memoryview', 'help'])('rejects the built-in %s', (name) => {
+  it.each(['globals', 'locals', 'vars', 'eval', 'exec', 'compile', 'open', 'input', 'breakpoint', 'getattr', 'setattr', 'delattr', 'memoryview', 'help'])('rejects the built-in %s', (name) => {
     const e = errs(`x = 1\ny = ${name}(x)`)[0];
     expect(e).toMatchObject({ rule: 'builtin', line: 2, col: 5 });
     expect(e!.hint).toMatch(/len, range/);
+  });
+
+  it('allows type(x) (one argument) and iter/next; rejects the class-building type(name, bases, dict)', () => {
+    expect(validateScript('r = github.get(x=1)\nif type(r) == dict and isinstance(r, dict):\n    it = iter(r.get("items", []))\n    return next(it, None)\nreturn type(f(a, b)) == list', NS)).toEqual({ ok: true });
+    expect(validateScript('return type(x,)', NS)).toEqual({ ok: true });
+    const e = errs('X = type("X", (), {})')[0];
+    expect(e).toMatchObject({ rule: 'builtin', line: 1, col: 5, message: 'type() takes one argument in scripts' });
   });
 
   it('allows forbidden names as keyword arguments, attributes and string content', () => {

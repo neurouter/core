@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import { generateOpsStub, generateStubs, pyArgMap } from '@neurouter/compiler';
 import type { Executor, HostCallResult, RunResult } from '@neurouter/executor';
-import { META_CALL_ID, META_PLANNED_CHANGES, META_RESULT_HANDLE, META_TASK_ID, META_TRUNCATED, type ErrorCode, type ScriptStatus, type ToolDef } from '@neurouter/shared';
+import { META_CALL_ID, META_PLANNED_CHANGES, META_RESULT_HANDLE, META_TASK_ID, META_TRUNCATED, SCRIPT_BUILTIN_ALTERNATIVES, scriptBuiltinsLine, type ErrorCode, type ScriptStatus, type ToolDef } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import type { MainDB } from '../../kernel/db/schema.js';
 import { sha256Hex } from '../../kernel/lib/crypto.js';
@@ -26,7 +26,7 @@ export const RUN_SCRIPT_DEFINITION = {
   name: 'run_script',
   title: 'Run a Python script against the API',
   description:
-    'Run a short Python script that calls API tools as functions (e.g. github.list_issues(owner=..., repo=...)) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins and ops.* helpers. Tool results are dicts/lists. Use mode="dry_run" to see planned writes without executing them. Get function signatures from search_tools.',
+    'Run a short Python script that calls API tools as functions (e.g. github.list_issues(owner=..., repo=...)) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins (len, sorted, isinstance, type, iter/next, …; no map/filter/getattr) and ops.* helpers. Tool results are dicts/lists, and inside scripts they are never cut to a byte size (an overlay maxItems still caps lists; the script result limit applies to what you return). Use mode="dry_run" to see planned writes without executing them. Get function signatures from search_tools.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -326,7 +326,7 @@ export class ScriptRunner {
     if (res.status === 'type_error' || res.status === 'syntax_error') phases.push({ name: 'type_check', status: 'failed', durationMs: execMs }, { name: 'execute', status: 'skipped', durationMs: 0 });
     else phases.push({ name: 'type_check', status: 'ok', durationMs: 0 }, { name: 'execute', status: res.status === 'ok' ? 'ok' : 'failed', durationMs: execMs });
     void planOnly;
-    return finish(res.status as ScriptStatus, { value: res.value, ...(res.error ? { error: { ...res.error } } : {}), stats: { wallMs: res.stats.wallMs, suspensions: res.stats.suspensions, toolCalls: calls }, stdout: res.stdout, truncated: res.truncated === true, preview: res.preview, valueBytes: res.valueBytes });
+    return finish(res.status as ScriptStatus, { value: res.value, ...(res.error ? { error: withBuiltinHint({ ...res.error }) } : {}), stats: { wallMs: res.stats.wallMs, suspensions: res.stats.suspensions, toolCalls: calls }, stdout: res.stdout, truncated: res.truncated === true, preview: res.preview, valueBytes: res.valueBytes });
   }
 }
 
@@ -352,4 +352,15 @@ class Semaphore {
       this.queue.shift()?.();
     }
   }
+}
+
+/**
+ * Monty reports an unsupported built-in as "Name `map` used when not defined": say what scripts can use
+ * instead (agents otherwise retry the same call or guess).
+ */
+export function withBuiltinHint(error: Record<string, unknown>): Record<string, unknown> {
+  const m = /Name `([A-Za-z_][A-Za-z0-9_]*)` used when not defined/.exec(String(error.message ?? ''));
+  if (!m || error.hint) return error;
+  const alt = SCRIPT_BUILTIN_ALTERNATIVES[m[1]!];
+  return { ...error, hint: `${alt ? `${m[1]} is not available in scripts: ${alt}. ` : ''}${scriptBuiltinsLine()}` };
 }
