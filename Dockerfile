@@ -18,6 +18,9 @@ COPY packages/cli/package.json packages/cli/
 COPY apps/executor/package.json apps/executor/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
+# onnxruntime-node's install script would download the CUDA execution provider (~270 MB) on linux/x64;
+# there is no GPU here. The CPU binaries ship in the npm package.
+ENV ONNXRUNTIME_NODE_INSTALL=skip
 RUN npm ci --no-audit --no-fund
 
 # ---------------------------------------------------------------- build: shared → compiler → evals → executor → web → server → cli
@@ -47,8 +50,16 @@ COPY packages/cli/package.json packages/cli/
 COPY apps/executor/package.json apps/executor/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
+ENV ONNXRUNTIME_NODE_INSTALL=skip
+# image slimming: keep only this platform's onnxruntime binaries (the package ships darwin, win32 and
+# linux arm64/x64), and drop onnxruntime-web: @huggingface/transformers' Node build inlines what it
+# uses of it and loads onnxruntime-node for inference
 RUN npm ci --omit=dev --no-audit --no-fund --workspace @neurouter/server --workspace neurouter --include-workspace-root=false \
- && mkdir -p apps/server/node_modules apps/executor/node_modules packages/shared/node_modules packages/compiler/node_modules packages/evals/node_modules packages/cli/node_modules
+ && cd node_modules/onnxruntime-node/bin/napi-v6 \
+ && find . -mindepth 1 -maxdepth 2 ! -path ./linux ! -path "./linux/$(node -p process.arch)" -exec rm -rf {} + \
+ && test -f "linux/$(node -p process.arch)/onnxruntime_binding.node" \
+ && rm -rf /app/node_modules/onnxruntime-web \
+ && cd /app && mkdir -p apps/server/node_modules apps/executor/node_modules packages/shared/node_modules packages/compiler/node_modules packages/evals/node_modules packages/cli/node_modules
 
 # ---------------------------------------------------------------- runtime
 FROM ${NODE_IMAGE} AS runtime
