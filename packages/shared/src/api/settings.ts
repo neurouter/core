@@ -1,6 +1,7 @@
 import * as z from 'zod';
 import { ConfigMode, JobKind, JobStatus, KillSwitchKind, KillSwitchScope, Role, UserStatus } from '../domain/index.js';
 import { CodeLimits } from '../config/limits.js';
+import { LlmProviderKind } from '../config/llm-models.js';
 import { EvalEffort } from '../config/neurouter-yaml.js';
 import { Diagnostic } from '../domain/tool-model.js';
 import { CursorQuery, Id, IdParams, IsoDateTime, Items, Page, Ref, queryOptional } from './common.js';
@@ -8,8 +9,6 @@ import { endpoint } from './endpoint.js';
 
 /* ------------------------------------------------------------------ settings (§14.13) */
 
-
-export const DEFAULT_EVAL_MODEL = 'claude-sonnet-5-5';
 
 export const ExecutorStatus = z.object({
   mode: z.enum(['embedded', 'remote', 'local', 'off']),
@@ -21,10 +20,18 @@ export const ExecutorStatus = z.object({
 });
 export type ExecutorStatus = z.infer<typeof ExecutorStatus>;
 
+export const KeyStatus = z.object({ configured: z.boolean(), source: z.enum(['env', 'stored']).nullable(), last4: z.string().nullable() });
+export type KeyStatus = z.infer<typeof KeyStatus>;
+
+const KeyWrite = z.union([z.object({ value: z.string().min(8).max(512) }), z.object({ clear: z.literal(true) })]);
+
 export const Settings = z.object({
   general: z.object({ orgName: z.string(), publicUrl: z.string(), retentionDays: z.number().int() }),
   models: z.object({
-    anthropicKey: z.object({ configured: z.boolean(), source: z.enum(['env', 'stored']).nullable(), last4: z.string().nullable() }),
+    /** @deprecated same as `keys.anthropic` (kept for older clients). */
+    anthropicKey: KeyStatus,
+    /** Per-provider key status (env wins over the stored, encrypted key; keys are never returned). */
+    keys: z.object({ openai: KeyStatus, anthropic: KeyStatus, gemini: KeyStatus }),
     evalModel: z.string(),
     judgeModel: z.string(),
     generatorModel: z.string(),
@@ -42,12 +49,15 @@ export const Settings = z.object({
 });
 export type Settings = z.infer<typeof Settings>;
 
-/** Sectioned partial update; `models.anthropicKey` is write-only. */
+/** Sectioned partial update; `models.apiKeys` (and the legacy `models.anthropicKey`) are write-only. */
 export const SettingsPatch = z.object({
   general: z.object({ orgName: z.string().min(1).max(100), retentionDays: z.number().int().min(1).max(3650) }).partial().optional(),
   models: z
     .object({
-      anthropicKey: z.union([z.object({ value: z.string().min(8).max(512) }), z.object({ clear: z.literal(true) })]),
+      /** @deprecated use `apiKeys.anthropic`. */
+      anthropicKey: KeyWrite,
+      /** Write-only per-provider keys (stored encrypted; an env key for the same provider wins). */
+      apiKeys: z.object({ openai: KeyWrite, anthropic: KeyWrite, gemini: KeyWrite }).partial(),
       evalModel: z.string().min(1),
       judgeModel: z.string().min(1),
       generatorModel: z.string().min(1),
@@ -86,9 +96,9 @@ export const settingsEndpoints = {
 
 export const ModelProvider = z.object({
   id: Id,
-  kind: z.literal('anthropic'),
+  kind: LlmProviderKind,
   name: z.string(),
-  /** `env` providers come from ANTHROPIC_API_KEY and cannot be deleted. */
+  /** `env` providers come from OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY and cannot be deleted. */
   keySource: z.enum(['env', 'stored']),
   keyLast4: z.string().nullable(),
   defaultModel: z.string(),
@@ -99,17 +109,17 @@ export const ModelProvider = z.object({
 });
 export type ModelProvider = z.infer<typeof ModelProvider>;
 
-export const ModelProviderCreate = z.object({ kind: z.literal('anthropic'), name: z.string().min(1).max(100), apiKey: z.string().min(8).max(512), defaultModel: z.string().min(1).default(DEFAULT_EVAL_MODEL) });
+export const ModelProviderCreate = z.object({ kind: LlmProviderKind.default('openai'), name: z.string().min(1).max(100), apiKey: z.string().min(8).max(512), defaultModel: z.string().min(1).optional() });
 export const ModelProviderPatch = z.object({ name: z.string().min(1).max(100).optional(), apiKey: z.string().min(8).max(512).optional(), defaultModel: z.string().min(1).optional() });
 
 export const modelProviderEndpoints = {
   list: endpoint({
     method: 'GET', path: '/api/settings/model-providers', kind: 'json', access: ['settings:read'],
-    summary: 'Model providers (MVP: one Anthropic provider)', response: Items(ModelProvider),
+    summary: 'Model providers (one per kind: openai, anthropic, gemini)', response: Items(ModelProvider),
   }),
   create: endpoint({
     method: 'POST', path: '/api/settings/model-providers', kind: 'json', status: 201, access: ['settings:write'],
-    summary: 'Add the Anthropic provider (409 when one exists)', body: ModelProviderCreate, response: ModelProvider,
+    summary: 'Add a provider key for a kind (409 when that kind already has one)', body: ModelProviderCreate, response: ModelProvider,
   }),
   update: endpoint({
     method: 'PATCH', path: '/api/settings/model-providers/:id', kind: 'json', access: ['settings:write'],

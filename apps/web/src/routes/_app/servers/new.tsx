@@ -829,7 +829,7 @@ function ReadinessStep({ preview, serverId, runId, onBack, onState }: { preview:
             <AlertCircleIcon />
             <AlertTitle>No model provider configured</AlertTitle>
             <AlertDescription>
-              Evals use your own Anthropic API key.{' '}
+              Evals use your own OpenAI, Anthropic or Gemini API key.{' '}
               <Link to="/settings" search={{ tab: 'models' }} className="font-medium text-primary underline">
                 Add it in Settings › Models
               </Link>
@@ -839,7 +839,7 @@ function ReadinessStep({ preview, serverId, runId, onBack, onState }: { preview:
         ) : null}
         <div className="flex flex-wrap gap-2.5">
           {!runId ? (
-            <GatedButton cap="evals:run" demoOp="evals.createRun" size="lg" disabled={noModel || startRun.isPending} disabledReason={noModel ? 'Add an Anthropic key in Settings › Models first' : null} onClick={() => startRun.mutate()}>
+            <GatedButton cap="evals:run" demoOp="evals.createRun" size="lg" disabled={noModel || startRun.isPending} disabledReason={noModel ? 'Add a model provider key in Settings › Models first' : null} onClick={() => startRun.mutate()}>
               {startRun.isPending ? <LoaderCircleIcon className="animate-spin" /> : null}
               Run a quick eval (12 tasks · 1 model · tool + code)
             </GatedButton>
@@ -853,7 +853,7 @@ function ReadinessStep({ preview, serverId, runId, onBack, onState }: { preview:
           </Button>
         </div>
         <p className="text-[12.5px] text-muted-foreground">
-          Evals use your own Anthropic API key (Settings › Models). A quick eval costs roughly 120k tokens.
+          Evals use your own OpenAI, Anthropic or Gemini API key (Settings › Models). A quick eval costs roughly 120k tokens.
           {evalGate.reason ? ` ${evalGate.reason}.` : ''}
         </p>
       </StepBody>

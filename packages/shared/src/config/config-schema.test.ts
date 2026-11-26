@@ -12,7 +12,7 @@ const SPEC_EXAMPLE = {
     oidc: { issuer: 'https://accounts.google.com', clientId: '1234.apps.googleusercontent.com', clientSecret: 'env:OIDC_CLIENT_SECRET', adminGroups: ['platform-admins'], allowedEmailDomains: ['acme.dev'] },
     externalAs: { issuer: 'https://auth.acme.dev', jwksUri: 'https://auth.acme.dev/.well-known/jwks.json', audience: 'auto', requiredScopes: ['mcp'] },
   },
-  settings: { codeMode: { enabled: true }, evals: { model: 'claude-sonnet-5-5', apiKey: 'env:ANTHROPIC_API_KEY', effort: 'medium', repeats: 3 }, retentionDays: 30 },
+  settings: { codeMode: { enabled: true }, evals: { model: 'gpt-6-luna', apiKey: 'env:OPENAI_API_KEY', effort: 'medium', repeats: 3 }, retentionDays: 30 },
   servers: [
     {
       slug: 'github',

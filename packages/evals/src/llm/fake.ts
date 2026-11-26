@@ -66,7 +66,7 @@ export function llmResponse(content: LlmResponse['content'], opts: { model?: str
   const stop = opts.stop ?? (content.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn');
   return {
     id: `msg_${(++counter).toString(36)}`,
-    model: opts.model ?? 'claude-sonnet-5-5',
+    model: opts.model ?? 'gpt-6-luna',
     role: 'assistant',
     content,
     stop_reason: stop,

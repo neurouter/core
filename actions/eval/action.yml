@@ -7,12 +7,14 @@ inputs:
   suite: { description: Frozen suite JSON (else a suite is generated), required: false, default: "" }
   config: { description: neurouter.yaml (with server), required: false, default: "" }
   server: { description: Server slug in config, required: false, default: "" }
-  models: { description: Comma-separated models, required: false, default: claude-sonnet-5-5 }
+  models: { description: "Comma-separated models (gpt-* → OpenAI, claude-* → Anthropic, gemini-* → Gemini)", required: false, default: gpt-6-luna }
   modes: { description: tool,code, required: false, default: "tool,code" }
   repeats: { description: Attempts per task, required: false, default: "3" }
   min-score: { description: Fail below this headline score, required: false, default: "0" }
   neurouter-version: { description: npm version of the neurouter CLI, required: false, default: "0.1.0" }
-  anthropic-api-key: { description: "Anthropic API key (pass secrets.ANTHROPIC_API_KEY)", required: true }
+  openai-api-key: { description: "OpenAI API key (pass secrets.OPENAI_API_KEY); needed for gpt-* models", required: false, default: "" }
+  anthropic-api-key: { description: "Anthropic API key (pass secrets.ANTHROPIC_API_KEY); needed for claude-* models", required: false, default: "" }
+  gemini-api-key: { description: "Gemini API key (pass secrets.GEMINI_API_KEY); needed for gemini-* models", required: false, default: "" }
 outputs:
   score: { description: Headline agent-readiness score, value: "${{ steps.eval.outputs.score }}" }
   recommended-mode: { description: tool or code, value: "${{ steps.eval.outputs.mode }}" }
@@ -25,7 +27,9 @@ runs:
     - id: eval
       shell: bash
       env:
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
       run: |
         set -euo pipefail
         ARGS=()

@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { DEFAULT_EVAL_MODEL } from '@neurouter/shared';
 
 /** "true"/"false"/"1"/"0"/"yes"/"no" (env strings) → boolean. */
 export const zBool = z.preprocess((v) => {
@@ -120,8 +121,11 @@ export const Env = z
     NEUROUTER_EXECUTOR_PREWARM: z.coerce.number().int().min(0).max(256).default(2),
     MONTY_BINARY_PATH: opt(z.string()),
     MONTY_BINARY_SHA256: opt(z.string()),
+    /** BYOK model provider keys (each optional; an env key wins over a key stored in the console). */
+    OPENAI_API_KEY: opt(z.string()),
     ANTHROPIC_API_KEY: opt(z.string()),
-    NEUROUTER_EVAL_MODEL: z.string().default('claude-sonnet-5-5'),
+    GEMINI_API_KEY: opt(z.string()),
+    NEUROUTER_EVAL_MODEL: z.string().default(DEFAULT_EVAL_MODEL),
     /** Test/dev only: `stub` (deterministic heuristic provider) or `fake:<fixture dir>` (NODE_ENV=test). */
     NEUROUTER_EVAL_LLM: opt(z.string()),
     NEUROUTER_EVAL_FAKE_LLM: opt(z.string()),

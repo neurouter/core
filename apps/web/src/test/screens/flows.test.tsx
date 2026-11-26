@@ -140,7 +140,7 @@ describe('evals', () => {
   it('renders the matrix as a table with a textual best marker', async () => {
     await renderRoute('/evals/runs/run_14');
     const table = await screen.findByRole('table', { name: /task success by model and mode/i });
-    const row = within(table).getByRole('row', { name: /claude-opus/ });
+    const row = within(table).getByRole('row', { name: /gpt-6-luna/ });
     expect(within(row).getByText('best')).toBeInTheDocument();
     expect(within(row).getByText('86%')).toBeInTheDocument();
   });
@@ -175,5 +175,35 @@ describe('keys', () => {
     expect(screen.getByText(/shown only once/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Done' }));
     expect(screen.queryByLabelText('API key secret')).not.toBeInTheDocument();
+  });
+});
+
+describe('settings › models', () => {
+  it('shows one key row per provider, saves a Gemini key write-only, and groups models by provider', async () => {
+    const db = createDb({ speed: 0 });
+    const { user } = await renderRoute('/settings?tab=models', { db });
+    const openai = await screen.findByRole('listitem', { name: 'OpenAI key' });
+    expect(within(openai).getByText(/from OPENAI_API_KEY/)).toBeInTheDocument();
+    expect(within(openai).queryByLabelText('OpenAI API key')).not.toBeInTheDocument(); // env-managed: no input
+    const gemini = screen.getByRole('listitem', { name: 'Gemini key' });
+    expect(within(gemini).getByText('No key')).toBeInTheDocument();
+    fireEvent.change(within(gemini).getByLabelText('Gemini API key'), { target: { value: 'AIza-test-key-4321' } });
+    await user.click(within(gemini).getByRole('button', { name: 'Save key' }));
+    expect(await within(gemini).findByText(/stored · …4321/)).toBeInTheDocument();
+    expect(db.settings.keys.gemini).toEqual({ configured: true, source: 'stored', last4: '4321' });
+    expect(screen.queryByDisplayValue('AIza-test-key-4321')).not.toBeInTheDocument();
+    const evalModel = screen.getByLabelText('Eval model') as HTMLSelectElement;
+    expect(evalModel.value).toBe('gpt-6-luna');
+    expect([...evalModel.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['OpenAI', 'Anthropic', 'Gemini']);
+    await user.selectOptions(evalModel, 'gemini-3-flash-preview');
+    await waitFor(() => expect(db.settings.evalModel).toBe('gemini-3-flash-preview'));
+  });
+
+  it('new eval run defaults to the eval model and offers the configured providers’ models', async () => {
+    const db = createDb({ speed: 0 });
+    await renderRoute('/evals?new=1', { db });
+    expect(await screen.findByRole('checkbox', { name: 'gpt-6-luna' })).toBeChecked();
+    expect(await screen.findByRole('checkbox', { name: 'claude-sonnet-5-5' })).not.toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: 'gemini-3-flash-preview' })).not.toBeInTheDocument(); // no Gemini key in the demo
   });
 });

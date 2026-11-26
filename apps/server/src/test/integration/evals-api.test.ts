@@ -78,3 +78,25 @@ describe('evals REST flow (stub provider)', () => {
     expect(p.statusCode).toBe(422);
   });
 });
+
+/** Real providers are picked per model: a run model whose provider has no key is a 412 before any side effect. */
+describe('eval runs need a key for each model provider', () => {
+  let t: TestContext;
+  let serverId: string;
+  beforeAll(async () => {
+    t = await consoleOn(await bootServer({ OPENAI_API_KEY: 'sk-test-openai-only' }));
+    serverId = (await t.s.services.servers.bySlug(t.s.services.tenantId, 'petstore'))!.id;
+  }, 60_000);
+  afterAll(async () => t?.close());
+
+  it('412 llm_key_missing for a Gemini or Anthropic model when only OPENAI_API_KEY is set; 422 for an unroutable id', async () => {
+    const gem = await t.as(t.admin, { method: 'POST', url: '/api/eval-runs', payload: { serverId, preset: 'quick', models: ['gemini-3-flash-preview'] } });
+    expect(gem.statusCode).toBe(412);
+    expect(gem.json()).toMatchObject({ code: 'llm_key_missing' });
+    expect(gem.json().detail ?? gem.json().title).toMatch(/GEMINI_API_KEY/);
+    expect((await t.as(t.admin, { method: 'POST', url: '/api/eval-runs', payload: { serverId, preset: 'quick', models: ['claude-opus-5-5'] } })).statusCode).toBe(412);
+    expect((await t.as(t.admin, { method: 'POST', url: '/api/eval-runs', payload: { serverId, preset: 'quick', models: ['mystery-model'] } })).statusCode).toBe(422);
+    expect((await t.json(t.admin, { method: 'GET', url: `/api/eval-runs?serverId=${serverId}` }, 200)).items).toHaveLength(0);
+    expect((await t.json(t.admin, { url: '/api/me' }, 200)).features.evals).toBe(true);
+  });
+});

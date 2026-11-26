@@ -21,6 +21,8 @@ export function useUpdateSettings() {
   });
 }
 export const useTestModel = () => useMutation({ mutationFn: () => apiFetch(api.settings.testModel) });
+/** Tests one provider (`<kind>-env` | `<kind>-stored`). */
+export const useTestProvider = () => useMutation({ mutationFn: (id: string) => apiFetch(api.modelProviders.test, { params: { id } }) });
 export const useTestTelemetry = () => useMutation({ mutationFn: () => apiFetch(api.telemetry.test) });
 export function useReloadConfig() {
   const qc = useQueryClient();

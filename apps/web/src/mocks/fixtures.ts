@@ -5,7 +5,7 @@
  */
 import { HttpResponse } from 'msw';
 import {
-  Me, PROBLEM_CONTENT_TYPE, capabilitiesFor, problemType, readinessBand, type Badges, type EnvironmentDetail, type EvalRunRow, type OverlayDraft, type OverlayPatchOp, type ReadinessComponent,
+  LLM_PROVIDER_KINDS, Me, PROBLEM_CONTENT_TYPE, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, capabilitiesFor, providerForModel, problemType, readinessBand, type Badges, type EnvironmentDetail, type EvalRunRow, type OverlayDraft, type OverlayPatchOp, type ReadinessComponent,
   type SpecPreview, type UpstreamAuthIn, type UpstreamAuthOut,
 } from '@neurouter/shared';
 import {
@@ -254,11 +254,22 @@ function tickSuggestions(db: MockDb) {
 }
 const stripSug = ({ verifyStartedMs: _v, title: _t, ops: _o, ...s }: SuggestionState) => s;
 
+/** One provider per kind with a key, like the server (`<kind>-env` | `<kind>-stored`). */
+function mockProviders(db: MockDb) {
+  const defaultKind = providerForModel(db.settings.evalModel);
+  return LLM_PROVIDER_KINDS.filter((k) => db.settings.keys[k].configured).map((k) => {
+    const key = db.settings.keys[k];
+    const source = key.source ?? 'stored';
+    const defaultModel = defaultKind === k ? db.settings.evalModel : PROVIDER_MODELS[k][0]!;
+    return { id: `${k}-${source}`, kind: k, name: source === 'env' ? `${PROVIDER_LABELS[k]} (${PROVIDER_ENV_KEYS[k]})` : PROVIDER_LABELS[k], keySource: source, keyLast4: key.last4, defaultModel, models: [...new Set([defaultModel, ...PROVIDER_MODELS[k]])], isDefault: defaultKind === k, lastTestAt: iso(Date.now() - DAY), lastTestOk: true };
+  });
+}
+
 function settingsView(db: MockDb) {
   const st = db.settings;
   return {
     general: { orgName: st.orgName, publicUrl: 'https://mcp.acme.test', retentionDays: st.taskDays },
-    models: { anthropicKey: st.anthropicKey, evalModel: st.evalModel, judgeModel: st.judgeModel, generatorModel: st.generatorModel, effort: st.effort, fallbacks: st.fallbacks, labelInferredTasks: st.labelInferredTasks },
+    models: { anthropicKey: st.keys.anthropic, keys: st.keys, evalModel: st.evalModel, judgeModel: st.judgeModel, generatorModel: st.generatorModel, effort: st.effort, fallbacks: st.fallbacks, labelInferredTasks: st.labelInferredTasks },
     codeMode: { enabled: st.codeModeEnabled, executor: { mode: 'embedded' as const, ok: true, montyVersion: '0.4.2', poolMax: 8, busy: 1, detail: null }, defaults: { maxToolCalls: 200, wallTimeSec: 30, cpuTimeSec: 10, maxMemoryMb: 64, maxConcurrentCalls: 8, maxResultBytes: 1_048_576 } },
     retention: { auditDays: st.auditDays, taskDays: st.taskDays },
     telemetry: { otelEnabled: true, metricsEnabled: true, otlpEndpoint: 'http://otel-collector:4318' },
@@ -994,8 +1005,8 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
       const lumen = s.seed.id === 'srv_lumen';
       return {
         items: [
-          { id: `suite_${s.seed.slug}_2`, serverId: s.seed.id, version: 2, status: 'frozen', taskCount: lumen ? 30 : 40, byCategory: lumen ? { single: 12, multi: 10, ambiguous: 4, impossible: 4 } : { single: 16, multi: 12, ambiguous: 6, impossible: 6 }, generatedFromBuild: { id: `bld_${s.seed.slug}_1`, hash: 'a1b2c3' }, generator: { model: 'claude-sonnet', promptVersion: 'gen-2', seed: 7 }, createdAt: iso(Date.now() - 6 * DAY), frozenAt: iso(Date.now() - 5 * DAY) },
-          { id: `suite_${s.seed.slug}_1`, serverId: s.seed.id, version: 1, status: 'draft', taskCount: 24, byCategory: { single: 8, multi: 8, ambiguous: 4, impossible: 4 }, generatedFromBuild: { id: `bld_${s.seed.slug}_1`, hash: 'a1b2c3' }, generator: { model: 'claude-sonnet', promptVersion: 'gen-2', seed: 3 }, createdAt: iso(Date.now() - 9 * DAY), frozenAt: null },
+          { id: `suite_${s.seed.slug}_2`, serverId: s.seed.id, version: 2, status: 'frozen', taskCount: lumen ? 30 : 40, byCategory: lumen ? { single: 12, multi: 10, ambiguous: 4, impossible: 4 } : { single: 16, multi: 12, ambiguous: 6, impossible: 6 }, generatedFromBuild: { id: `bld_${s.seed.slug}_1`, hash: 'a1b2c3' }, generator: { model: 'claude-sonnet-5-5', promptVersion: 'gen-2', seed: 7 }, createdAt: iso(Date.now() - 6 * DAY), frozenAt: iso(Date.now() - 5 * DAY) },
+          { id: `suite_${s.seed.slug}_1`, serverId: s.seed.id, version: 1, status: 'draft', taskCount: 24, byCategory: { single: 8, multi: 8, ambiguous: 4, impossible: 4 }, generatedFromBuild: { id: `bld_${s.seed.slug}_1`, hash: 'a1b2c3' }, generator: { model: 'claude-sonnet-5-5', promptVersion: 'gen-2', seed: 3 }, createdAt: iso(Date.now() - 9 * DAY), frozenAt: null },
         ],
       };
     },
@@ -1017,12 +1028,12 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
       const b = await body<{ serverId: string; environmentId?: string; models?: string[]; modes?: ('tool' | 'code')[]; repeats?: number; preset?: 'quick' }>(ctx);
       const s = db.servers.find((x) => x.seed.id === b.serverId);
       if (!s) return problem(422, 'validation_failed', 'Validation failed', 'Unknown server.');
-      if (!db.settings.anthropicKey.configured) return problem(412, 'llm_key_missing', 'Model provider key missing', 'Add an Anthropic API key in Settings › Models to run evals.');
+      if (!Object.values(db.settings.keys).some((k) => k.configured)) return problem(412, 'llm_key_missing', 'Model provider key missing', 'Add an OpenAI, Anthropic or Gemini API key in Settings › Models to run evals.');
       if (db.runs.some((r) => r.row.server.id === s.seed.id && (tickRun(db, r), r.row.status === 'running'))) return problem(409, 'job_running', 'A run is already in progress', 'One eval run per server at a time. Wait for it to finish or cancel it.');
       const env = s.envs.find((e) => e.id === b.environmentId) ?? s.envs.find((e) => e.isMock)!;
       if (env.kind === 'prod') return problem(422, 'validation_failed', 'Evals never run against prod', 'Pick the mock, dev or qa environment.');
       const quick = b.preset === 'quick';
-      const models = quick ? ['claude-sonnet'] : b.models?.length ? b.models : ['claude-sonnet'];
+      const models = quick ? [db.settings.evalModel] : b.models?.length ? b.models : [db.settings.evalModel];
       const modes = quick ? (['tool', 'code'] as const) : b.modes?.length ? b.modes : (['tool', 'code'] as const);
       const repeats = quick ? 1 : (b.repeats ?? 3);
       const taskCount = quick ? 12 : 40;
@@ -1076,7 +1087,7 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
       tickRun(db, r);
       const done = r.row.status === 'succeeded';
       const score = done
-        ? { headline: r.finalScore, band: readinessBand(r.finalScore), confidence: 'measured' as const, recommendedMode: r.row.recommendedMode, recommendation: r.recommendation, primaryModel: r.row.models[0] ?? 'claude-sonnet',
+        ? { headline: r.finalScore, band: readinessBand(r.finalScore), confidence: 'measured' as const, recommendedMode: r.row.recommendedMode, recommendation: r.recommendation, primaryModel: r.row.models[0] ?? 'claude-sonnet-5-5',
             modeScores: { tool: Math.round((r.matrix.filter((c) => c.mode === 'tool').reduce((a, c) => a + c.successRate, 0) / Math.max(1, r.matrix.filter((c) => c.mode === 'tool').length)) * 100) || undefined, code: Math.round((r.matrix.filter((c) => c.mode === 'code').reduce((a, c) => a + c.successRate, 0) / Math.max(1, r.matrix.filter((c) => c.mode === 'code').length)) * 100) || undefined },
             breakdown: r.breakdown, cells: r.matrix.map((c) => ({ model: c.model, mode: c.mode, score: c.score, components: r.breakdown })) }
         : null;
@@ -1204,10 +1215,8 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
     'settings.get': () => settingsView(db),
     'settings.update': async (ctx) => {
       const b = await body<{ general?: { orgName?: string }; models?: Record<string, unknown>; codeMode?: { enabled?: boolean }; retention?: { auditDays?: number; taskDays?: number }; audit?: { storeOutputs?: boolean } }>(ctx);
-      if (b.models?.anthropicKey) {
-        const k = b.models.anthropicKey as { value?: string; clear?: boolean };
-        db.settings.anthropicKey = k.clear ? { configured: false, source: null, last4: null } : { configured: true, source: 'stored', last4: (k.value ?? '').slice(-4) };
-      }
+      const writes = { ...((b.models?.apiKeys ?? {}) as Record<string, { value?: string; clear?: boolean }>), ...(b.models?.anthropicKey ? { anthropic: b.models.anthropicKey as { value?: string; clear?: boolean } } : {}) };
+      for (const [kind, k] of Object.entries(writes)) if (kind === 'openai' || kind === 'anthropic' || kind === 'gemini') db.settings.keys[kind] = k.clear ? { configured: false, source: null, last4: null } : { configured: true, source: 'stored', last4: (k.value ?? '').slice(-4) };
       for (const key of ['evalModel', 'judgeModel', 'generatorModel', 'effort', 'fallbacks', 'labelInferredTasks'] as const) if (b.models?.[key] !== undefined) (db.settings as Record<string, unknown>)[key] = b.models[key];
       if (b.codeMode?.enabled !== undefined) db.settings.codeModeEnabled = b.codeMode.enabled;
       if (b.retention?.auditDays) db.settings.auditDays = b.retention.auditDays;
@@ -1216,12 +1225,18 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
       if (b.general?.orgName) db.settings.orgName = b.general.orgName;
       return settingsView(db);
     },
-    'settings.testModel': () => (db.settings.anthropicKey.configured ? { ok: true, model: db.settings.evalModel, latencyMs: 640 } : problem(412, 'llm_key_missing', 'Model provider key missing', 'Add an Anthropic API key first.')),
-    'modelProviders.list': () => ({ items: db.settings.anthropicKey.configured ? [{ id: 'mp_anthropic', kind: 'anthropic', name: 'Anthropic', keySource: db.settings.anthropicKey.source ?? 'stored', keyLast4: db.settings.anthropicKey.last4, defaultModel: db.settings.evalModel, models: [...MODELS], isDefault: true, lastTestAt: iso(Date.now() - DAY), lastTestOk: true }] : [] }),
-    'modelProviders.create': () => problem(409, 'conflict', 'One provider', 'The MVP supports one Anthropic provider. Update the existing one.'),
-    'modelProviders.update': () => ({ id: 'mp_anthropic', kind: 'anthropic', name: 'Anthropic', keySource: 'stored', keyLast4: db.settings.anthropicKey.last4, defaultModel: db.settings.evalModel, models: [...MODELS], isDefault: true, lastTestAt: null, lastTestOk: null }),
+    'settings.testModel': () => {
+      const kind = providerForModel(db.settings.evalModel);
+      return kind && db.settings.keys[kind].configured ? { ok: true, model: db.settings.evalModel, latencyMs: 640 } : problem(412, 'llm_key_missing', 'Model provider key missing', 'Add a key for the eval model provider first.');
+    },
+    'modelProviders.list': () => ({ items: mockProviders(db) }),
+    'modelProviders.create': () => problem(409, 'conflict', 'Provider exists', 'One provider per kind. Update the existing one.'),
+    'modelProviders.update': (ctx) => mockProviders(db).find((x) => x.id === p(ctx, 'id')) ?? problem(404, 'not_found', 'Not found', 'No such model provider.'),
     'modelProviders.delete': () => null,
-    'modelProviders.test': () => ({ ok: true, model: db.settings.evalModel, latencyMs: 640 }),
+    'modelProviders.test': (ctx) => {
+      const mp = mockProviders(db).find((x) => x.id === p(ctx, 'id'));
+      return mp ? { ok: true, model: mp.defaultModel, latencyMs: 640 } : problem(404, 'not_found', 'Not found', 'No such model provider.');
+    },
     'telemetry.test': () => ({ ok: true, otlpEndpoint: 'http://otel-collector:4318', detail: 'Sent 1 span and 1 log record.' }),
     'killSwitches.list': () => ({ items: db.killSwitches }),
     'killSwitches.set': async (ctx) => {

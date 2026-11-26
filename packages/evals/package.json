@@ -24,10 +24,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@neurouter/shared": "0.1.0",
-    "@neurouter/compiler": "0.1.0",
     "@anthropic-ai/sdk": "1.14.0",
+    "@google/genai": "3.6.1",
     "@modelcontextprotocol/client": "2.4.0",
+    "@neurouter/compiler": "0.1.0",
+    "@neurouter/shared": "0.1.0",
+    "openai": "7.65.0",
     "zod": "4.6.7"
   }
 }

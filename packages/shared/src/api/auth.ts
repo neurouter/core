@@ -51,7 +51,7 @@ export function isSafeReturnTo(value: string | null | undefined): value is strin
 export const Features = z.object({
   codeMode: z.boolean(),
   embeddings: z.enum(['ready', 'loading', 'disabled', 'error']),
-  /** An Anthropic key is configured (env or stored). */
+  /** A model provider key (OpenAI, Anthropic or Gemini; env or stored) is configured. */
   evals: z.boolean(),
   oauthBroker: z.boolean(),
   externalAs: z.boolean(),

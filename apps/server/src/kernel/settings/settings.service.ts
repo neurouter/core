@@ -33,11 +33,20 @@ export interface SettingValues {
   evalEffort: 'low' | 'medium' | 'high';
   evalFallbacks: 'default' | 'off';
   evalRepeats: number;
-  /** Stored (encrypted) Anthropic key secret id; ANTHROPIC_API_KEY env wins. */
+  /** Stored (encrypted) provider key secret ids + last 4 chars; the provider's env key (e.g. OPENAI_API_KEY) wins. */
+  openaiKeySecretId: string | null;
+  openaiKeyLast4: string | null;
   anthropicKeySecretId: string | null;
   anthropicKeyLast4: string | null;
+  geminiKeySecretId: string | null;
+  geminiKeyLast4: string | null;
+  /** Display name of the stored Anthropic provider (legacy single-provider setting). */
   modelProviderName: string;
+  /** Display names of stored providers by kind (Anthropic falls back to `modelProviderName`). */
+  modelProviderNames: Partial<Record<'openai' | 'anthropic' | 'gemini', string>>;
+  /** Last test of the Anthropic provider (legacy); other kinds in `modelProviderLastTests`. */
   modelProviderLastTest: { at: number; ok: boolean } | null;
+  modelProviderLastTests: Partial<Record<'openai' | 'anthropic' | 'gemini', { at: number; ok: boolean }>>;
   labelInferredTasks: boolean;
   retentionDays: number | null;
   nativeSearchClients: string[];
@@ -69,10 +78,16 @@ export const SETTING_DEFAULTS: SettingValues = {
   evalEffort: 'medium',
   evalFallbacks: 'default',
   evalRepeats: 3,
+  openaiKeySecretId: null,
+  openaiKeyLast4: null,
   anthropicKeySecretId: null,
   anthropicKeyLast4: null,
+  geminiKeySecretId: null,
+  geminiKeyLast4: null,
   modelProviderName: 'Anthropic',
+  modelProviderNames: {},
   modelProviderLastTest: null,
+  modelProviderLastTests: {},
   labelInferredTasks: false,
   retentionDays: null,
   nativeSearchClients: [],

@@ -6,6 +6,7 @@ import {
   generateSuite,
   llmFromEnv,
   LlmKeyError,
+  RoutingLlmClient,
   QUICK_COUNTS,
   runSuite,
   scoreRun,
@@ -34,6 +35,7 @@ import type { SettingsService } from '../../kernel/settings/settings.service.js'
 import type { Metrics } from '../../kernel/observability/metrics.js';
 import type { ApiKeysService } from '../keys/api-keys.service.js';
 import type { BuildsService } from '../servers/builds.service.js';
+import { providerKeys } from './model-keys.js';
 import type { ServersService } from '../servers/servers.service.js';
 
 export type EvalRunRowDb = Selectable<EvalRunsTable>;
@@ -116,16 +118,32 @@ export class EvalsService {
 
   constructor(private readonly d: EvalDeps) {}
 
-  /** BYOK key: ANTHROPIC_API_KEY env wins, else the stored (encrypted) key; stub/fake per env. */
-  async llm(): Promise<LlmClient> {
-    let stored: string | null = null;
-    if (!this.d.env.ANTHROPIC_API_KEY && !this.d.env.NEUROUTER_EVAL_LLM && !this.d.env.NEUROUTER_EVAL_FAKE_LLM) stored = await this.d.secrets.get(this.d.tenantId, 'settings', 'anthropic', 'api_key');
+  /**
+   * BYOK keys per provider (OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY env win over the
+   * stored, encrypted keys); stub/fake per env. With `models`, 412 unless each model's provider has
+   * a key.
+   */
+  async llm(models?: string[]): Promise<LlmClient> {
+    const testLlm = this.d.env.NEUROUTER_EVAL_LLM || this.d.env.NEUROUTER_EVAL_FAKE_LLM;
+    const stored = testLlm ? {} : await providerKeys({ env: this.d.env, settings: this.d.settings, namedSecrets: this.d.secrets, tenantId: this.d.tenantId });
+    let llm: LlmClient;
     try {
-      return llmFromEnv(this.d.env, stored);
+      llm = llmFromEnv(this.d.env, stored, { defaultModel: await this.model() });
     } catch (err) {
-      if (err instanceof LlmKeyError) throw new AppError('llm_key_missing', 'Configure an Anthropic API key (ANTHROPIC_API_KEY or Settings → Models) to run evals');
+      if (err instanceof LlmKeyError) throw new AppError('llm_key_missing', 'Configure a model provider API key (OPENAI_API_KEY, ANTHROPIC_API_KEY or GEMINI_API_KEY, or Settings → Models) to run evals');
       throw err;
     }
+    if (llm instanceof RoutingLlmClient) {
+      for (const m of models ?? []) {
+        try {
+          llm.resolve(m);
+        } catch (err) {
+          if (err instanceof LlmKeyError) throw new AppError('llm_key_missing', err.message);
+          throw AppError.validation((err as Error).message, [{ path: ['models'], message: 'unknown provider', code: 'unknown_provider' }]);
+        }
+      }
+    }
+    return llm;
   }
 
   async model(): Promise<string> {
@@ -156,15 +174,15 @@ export class EvalsService {
 
   /** Generates a draft suite (§15.2); reference calls are executed over MCP on a fresh mock namespace. */
   async generateSuite(serverId: string, opts: { counts?: Partial<Record<EvalCategory, number>>; model?: string; seed?: number; instructions?: string | null; createdBy: string | null; intoSuiteId?: string }): Promise<EvalSuiteRowDb> {
-    const llm = await this.llm();
     const { server, env } = await this.serverAndEnv(serverId, null);
     const buildId = env.build_id ?? server.latest_build_id;
     if (!buildId) throw AppError.conflict('The server has no build');
     const { gen } = await this.genTools(buildId);
+    const model = opts.model ?? (await this.d.settings.get('generatorModel')) ?? (await this.model());
+    const llm = await this.llm([model]);
     const ns = `eval:gen-${newId()}`;
     const samples = await this.d.ports.mockSamples(env.id, ns, 3);
     const key = await this.evalKey(serverId, env.id, ['tools:read', 'tools:write'], 'eval generator');
-    const model = opts.model ?? (await this.d.settings.get('generatorModel')) ?? (await this.model());
     try {
       const out = await generateSuite({
         llm,
@@ -240,7 +258,10 @@ export class EvalsService {
     const { server, env } = await this.serverAndEnv(input.serverId, input.environmentId);
     const running = await this.d.db.selectFrom('eval_runs').select('id').where('server_id', '=', input.serverId).where('status', 'in', ['queued', 'running']).executeTakeFirst();
     if (running && input.trigger !== 'suggestion_verify') throw new AppError('job_running', 'An eval run is already in progress for this server');
-    await this.llm(); // 412 early when no key
+    // 412 early when a run model's (or the judge's) provider has no key
+    const stubLlm = !this.d.env.NEUROUTER_EVAL_FAKE_LLM && this.d.env.NEUROUTER_EVAL_LLM === 'stub';
+    const runModels = input.models?.length ? input.models : [await this.model()];
+    await this.llm(stubLlm ? [] : [...runModels, (await this.d.settings.get('judgeModel')) ?? runModels[0]!]);
     let suiteId = input.suiteId ?? null;
     if (!suiteId) {
       const latest = await this.d.db.selectFrom('eval_suites').select(['id', 'task_count']).where('server_id', '=', input.serverId).orderBy('version', 'desc').executeTakeFirst();

@@ -107,7 +107,7 @@ export interface MockDb {
   users: UserRow[];
   killSwitches: { scope: 'global' | 'server' | 'environment' | 'tool'; target: string; kind: 'all' | 'writes' | 'code_mode'; reason: string; createdBy: { id: string; name: string } | null; createdAt: string }[];
   settings: {
-    anthropicKey: { configured: boolean; source: 'env' | 'stored' | null; last4: string | null };
+    keys: Record<'openai' | 'anthropic' | 'gemini', { configured: boolean; source: 'env' | 'stored' | null; last4: string | null }>;
     evalModel: string;
     judgeModel: string;
     generatorModel: string;
@@ -655,7 +655,7 @@ export function generateTask(db: MockDb, idx: number, startedMs: number, opts: {
     goal: inferred ? null : goal,
     outcome,
     framing: inferred ? 'inferred' : hasScript && r() < 0.3 ? 'script' : 'explicit',
-    inferredLabel: inferred ? { goal, outcome: 'unknown', confidence: 0.62, model: 'claude-haiku' } : null,
+    inferredLabel: inferred ? { goal, outcome: 'unknown', confidence: 0.62, model: 'gemini-3-flash-preview' } : null,
     status: opts.open ? 'open' : 'closed',
     origin: 'agent',
     server: { id: s.seed.id, slug: s.seed.slug, name: s.name },
@@ -857,7 +857,7 @@ export function createDb(opts: { speed?: number } = {}): MockDb {
     servers, tasks: [], taskDetails: new Map(), calls: new Map(), scripts: new Map(), needGroups: [], issues: [], keys: [], runs: [], suggestions: [], adminAudit: [], previews: new Map(),
     users: Object.values(PEOPLE).map((p, i) => ({ id: p.id, email: p.email, name: p.name, role: p.role, roleSource: i === 0 ? 'bootstrap' : 'oidc', status: 'active', lastLoginAt: ago((i + 1) * 2 * HOUR), createdAt: ago((60 - i * 10) * DAY) })),
     killSwitches: [{ scope: 'tool', target: 'acme-orders/prod/cancel_order', kind: 'writes', reason: 'Investigating double cancellations (INC-2231)', createdBy: ref(PEOPLE.jon), createdAt: ago(26 * HOUR) }],
-    settings: { anthropicKey: { configured: true, source: 'stored', last4: '9fQa' }, evalModel: 'claude-sonnet', judgeModel: 'claude-opus', generatorModel: 'claude-sonnet', effort: 'medium', fallbacks: 'default', labelInferredTasks: true, codeModeEnabled: true, storeOutputs: false, auditDays: 90, taskDays: 30, orgName: INSTANCE.name },
+    settings: { keys: { openai: { configured: true, source: 'env', last4: 'Lu6a' }, anthropic: { configured: true, source: 'stored', last4: '9fQa' }, gemini: { configured: false, source: null, last4: null } }, evalModel: 'gpt-6-luna', judgeModel: 'gpt-6-luna', generatorModel: 'gpt-6-luna', effort: 'medium', fallbacks: 'default', labelInferredTasks: true, codeModeEnabled: true, storeOutputs: false, auditDays: 90, taskDays: 30, orgName: INSTANCE.name },
     speed: opts.speed ?? 1, nextRunNumber: 19, seq: 0, auditCache: null,
   };
 

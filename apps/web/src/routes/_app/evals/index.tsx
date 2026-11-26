@@ -24,6 +24,7 @@ import { runsQuery, suitesQuery, useCreateRun } from '@/features/evals/queries';
 import { formatScoreDelta } from '@/features/readiness/score';
 import { ScoreBadge } from '@/features/readiness/score-ring';
 import { serversQuery } from '@/features/servers/queries';
+import { availableModels } from '@/features/settings/models';
 import { settingsQuery } from '@/features/settings/queries';
 import { compactDuration } from '@/features/tasks/timeline';
 import { useMe } from '@/hooks/use-me';
@@ -108,7 +109,7 @@ function EvalsPage() {
     <>
       <PageHeader
         title="Evals"
-        description="Generated tasks × models × tool and code mode, scored 0–100. Runs use your own Anthropic key."
+        description="Generated tasks × models × tool and code mode, scored 0–100. Runs use your own OpenAI, Anthropic or Gemini key."
         actions={
           <>
             <Button variant="outline" disabled={!canCompare} render={canCompare ? <Link to="/evals/compare" search={{ base: sorted[0]!.id, head: sorted[1]!.id }} /> : undefined} nativeButton={!canCompare}>
@@ -149,7 +150,7 @@ function NewRunDialog({ defaultServer, onClose }: { defaultServer?: string | und
   const settings = useQuery({ ...settingsQuery(), retry: false });
   const [env, setEnv] = useState('');
   const [suite, setSuite] = useState('');
-  const [models, setModels] = useState<string[]>(['claude-sonnet']);
+  const [picked, setModels] = useState<string[] | null>(null);
   const [modes, setModes] = useState<('tool' | 'code')[]>(['tool', 'code']);
   const [repeats, setRepeats] = useState(3);
   const [error, setError] = useState<string | null>(null);
@@ -159,8 +160,9 @@ function NewRunDialog({ defaultServer, onClose }: { defaultServer?: string | und
   const suiteList = suites.data?.items ?? [];
   const suiteId = suite || suiteList.find((s) => s.status === 'frozen')?.id || suiteList[0]?.id || '';
   const taskCount = suiteList.find((s) => s.id === suiteId)?.taskCount ?? 40;
+  const MODEL_LIST = availableModels(settings.data);
+  const models = picked ?? MODEL_LIST.slice(0, 1);
   const calls = taskCount * models.length * modes.length * repeats;
-  const MODEL_LIST = [settings.data?.models.evalModel ?? 'claude-sonnet', 'claude-opus', 'claude-haiku'].filter((v, i, a) => a.indexOf(v) === i);
   if (!me.features.evals)
     return (
       <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -169,7 +171,7 @@ function NewRunDialog({ defaultServer, onClose }: { defaultServer?: string | und
             <DialogTitle>No model provider</DialogTitle>
           </DialogHeader>
           <Alert>
-            <AlertTitle>Evals need an Anthropic API key</AlertTitle>
+            <AlertTitle>Evals need a model provider key (OpenAI, Anthropic or Gemini)</AlertTitle>
             <AlertDescription>
               <Link to="/settings" search={{ tab: 'models' }} className="font-medium text-primary underline">
                 Add it in Settings › Models

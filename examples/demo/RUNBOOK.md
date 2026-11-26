@@ -1,6 +1,6 @@
 # Launch demo runbook (raw → curated)
 
-Prerequisites: `npm install` and an Anthropic key (`ANTHROPIC_API_KEY`). Without a key, prefix the
+Prerequisites: `npm install` and an OpenAI key (`OPENAI_API_KEY`; the default model is `gpt-6-luna`). Without a key, prefix the
 commands with `NEUROUTER_EVAL_LLM=stub` to run the deterministic stub provider (not a real model; the
 report says so).
 

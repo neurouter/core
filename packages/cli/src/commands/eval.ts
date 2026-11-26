@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { buildReport, renderMarkdown, renderTable, type EvalTask, type SuiteFile } from '@neurouter/evals';
 import { startServer, type RunningServer } from '@neurouter/server';
+import { providerForModel } from '@neurouter/shared';
 import { readSpec, serverEnv } from './common.js';
 
 interface EvalOpts {
@@ -86,7 +87,7 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     const prompts = Object.fromEntries((await s.evals.suiteTasks(suiteId)).map((t) => [t.key, { category: t.category, prompt: t.prompt }]));
     const report = buildReport({
       server: { slug, name: slug },
-      run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: results[0]?.servedByModel === 'stub' ? 'stub' : 'anthropic', startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString() },
+      run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString() },
       score,
       suggestions: suggestions.map((x) => ({ cause: x.cause as never, kind: x.kind, tools: JSON.parse(x.tools) as string[], affectedTaskKeys: JSON.parse(x.affected_task_ids) as string[], overlayPatch: (JSON.parse(x.overlay_patch) as { yaml: string }).yaml, overlayOps: [], specPatch: x.spec_patch, rationale: x.rationale, predictedDelta: x.predicted_delta })),
       results,

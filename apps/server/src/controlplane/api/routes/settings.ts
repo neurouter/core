@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { stringify } from 'yaml';
-import { api, DEFAULT_CODE_LIMITS, DEFAULT_EVAL_MODEL, SUPPORTED_PROTOCOL_VERSIONS, type ModelProvider, type Settings } from '@neurouter/shared';
+import { createLlmClient } from '@neurouter/evals';
+import { api, DEFAULT_CODE_LIMITS, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
 import type { CommittedAuditRow } from '../../../kernel/audit/writer.js';
 import { pingDatabase } from '../../../kernel/db/index.js';
 import { toIso, toIsoOrNull } from '../../../kernel/lib/clock.js';
@@ -11,20 +12,22 @@ import { clampLimit, decodeCursor, toPage } from '../../../kernel/lib/pagination
 import { KILL_CHANGED, type UpstreamAuthDescriptor } from '../../../kernel/runtime-config.js';
 import { requireUser } from '../../auth/guards.js';
 import { parseConfigYaml } from '../../config-sync/reconcile.js';
+import { clearProviderKey, LAST4_SETTING, providerKey, providerSecret, SECRET_ID_SETTING, storeProviderKey } from '../../evals/model-keys.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
 
-export const ANTHROPIC_SECRET = { owner: 'settings' as const, ownerId: 'anthropic', name: 'api_key' };
-export const ENV_PROVIDER_ID = 'anthropic-env';
-export const STORED_PROVIDER_ID = 'anthropic-stored';
-const MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'];
+export const ANTHROPIC_SECRET = providerSecret('anthropic');
+/** Provider ids: `<kind>-env` (from the env key; cannot be deleted) and `<kind>-stored` (console key). */
+export const envProviderId = (kind: LlmProviderKind) => `${kind}-env`;
+export const storedProviderId = (kind: LlmProviderKind) => `${kind}-stored`;
+export const ENV_PROVIDER_ID = envProviderId('anthropic');
+export const STORED_PROVIDER_ID = storedProviderId('anthropic');
 
-/** The Anthropic key the evals use (env wins over the stored, encrypted key) — for the eval workstream too. */
+const keyDeps = (c: Pick<ApiContext, 'config' | 'settings' | 'namedSecrets' | 'tenantId'>) => ({ env: c.config.env as unknown as Record<string, string | undefined>, settings: c.settings, namedSecrets: c.namedSecrets, tenantId: c.tenantId });
+
+/** The Anthropic key the evals use (env wins over the stored, encrypted key). */
 export async function anthropicKey(c: Pick<ApiContext, 'config' | 'settings' | 'namedSecrets' | 'tenantId'>): Promise<{ key: string; source: 'env' | 'stored' } | null> {
-  if (c.config.env.ANTHROPIC_API_KEY) return { key: c.config.env.ANTHROPIC_API_KEY, source: 'env' };
-  if (!(await c.settings.get('anthropicKeySecretId'))) return null;
-  const v = await c.namedSecrets.get(c.tenantId, ANTHROPIC_SECRET.owner, ANTHROPIC_SECRET.ownerId, ANTHROPIC_SECRET.name);
-  return v ? { key: v, source: 'stored' } : null;
+  return providerKey(keyDeps(c), 'anthropic');
 }
 
 /** Dotted Settings keys set by neurouter.yaml (read-only in the console). */
@@ -43,7 +46,7 @@ function fileManagedSettings(c: ApiContext): string[] {
     if (st?.evals?.generatorModel) out.push('models.generatorModel');
     if (st?.evals?.effort) out.push('models.effort');
     if (st?.evals?.fallbacks) out.push('models.fallbacks');
-    if (st?.evals?.apiKey) out.push('models.anthropicKey');
+    if (st?.evals?.apiKey) out.push('models.anthropicKey', 'models.apiKeys');
     if (st?.discovery) out.push('discovery.nativeSearchClients');
     if (st?.tasks) out.push('models.labelInferredTasks');
     if (st?.audit) out.push('audit.storeOutputs');
@@ -53,14 +56,20 @@ function fileManagedSettings(c: ApiContext): string[] {
   }
 }
 
+async function keyStatus(c: ApiContext, kind: LlmProviderKind): Promise<KeyStatus> {
+  const key = await providerKey(keyDeps(c), kind);
+  return { configured: Boolean(key), source: key?.source ?? null, last4: key ? (key.source === 'env' ? key.key.slice(-4) : await c.settings.get(LAST4_SETTING[kind])) : null };
+}
+
 async function settingsView(c: ApiContext): Promise<Settings> {
   const s = c.settings;
-  const key = await anthropicKey(c);
+  const keys = { openai: await keyStatus(c, 'openai'), anthropic: await keyStatus(c, 'anthropic'), gemini: await keyStatus(c, 'gemini') };
   const evalModel = (await s.get('evalModel')) ?? c.config.env.NEUROUTER_EVAL_MODEL;
   return {
     general: { orgName: (await s.get('orgName')) ?? c.config.env.ORG_NAME, publicUrl: c.config.publicUrl, retentionDays: (await s.get('retentionDays')) ?? c.config.env.NEUROUTER_RETENTION_DAYS },
     models: {
-      anthropicKey: { configured: Boolean(key), source: key?.source ?? null, last4: key ? (key.source === 'env' ? key.key.slice(-4) : await s.get('anthropicKeyLast4')) : null },
+      anthropicKey: keys.anthropic,
+      keys,
       evalModel,
       judgeModel: (await s.get('judgeModel')) ?? evalModel,
       generatorModel: (await s.get('generatorModel')) ?? evalModel,
@@ -77,44 +86,54 @@ async function settingsView(c: ApiContext): Promise<Settings> {
   };
 }
 
+async function lastTest(c: ApiContext, kind: LlmProviderKind): Promise<{ at: number; ok: boolean } | null> {
+  return (await c.settings.get('modelProviderLastTests'))[kind] ?? (kind === 'anthropic' ? await c.settings.get('modelProviderLastTest') : null);
+}
+
+async function providerName(c: ApiContext, kind: LlmProviderKind): Promise<string> {
+  return (await c.settings.get('modelProviderNames'))[kind] ?? (kind === 'anthropic' ? await c.settings.get('modelProviderName') : PROVIDER_LABELS[kind]);
+}
+
+/** One provider per kind that has a key: env key → `<kind>-env`, else a stored key → `<kind>-stored`. */
 async function providers(c: ApiContext): Promise<ModelProvider[]> {
-  const s = c.settings;
-  const last = await s.get('modelProviderLastTest');
-  const defaultModel = (await s.get('evalModel')) ?? c.config.env.NEUROUTER_EVAL_MODEL;
-  const base = { kind: 'anthropic' as const, defaultModel, models: MODELS.includes(defaultModel) ? MODELS : [defaultModel, ...MODELS], lastTestAt: last ? toIso(last.at) : null, lastTestOk: last ? last.ok : null };
+  const evalModel = (await c.settings.get('evalModel')) ?? c.config.env.NEUROUTER_EVAL_MODEL;
+  const defaultKind = providerForModel(evalModel);
+  const env = c.config.env as unknown as Record<string, string | undefined>;
   const out: ModelProvider[] = [];
-  if (c.config.env.ANTHROPIC_API_KEY) out.push({ ...base, id: ENV_PROVIDER_ID, name: 'Anthropic (ANTHROPIC_API_KEY)', keySource: 'env', keyLast4: c.config.env.ANTHROPIC_API_KEY.slice(-4), isDefault: true });
-  if (await s.get('anthropicKeySecretId')) out.push({ ...base, id: STORED_PROVIDER_ID, name: await s.get('modelProviderName'), keySource: 'stored', keyLast4: await s.get('anthropicKeyLast4'), isDefault: !c.config.env.ANTHROPIC_API_KEY });
+  for (const kind of LLM_PROVIDER_KINDS) {
+    const list = [...PROVIDER_MODELS[kind]];
+    const defaultModel = defaultKind === kind ? evalModel : list[0]!;
+    const last = await lastTest(c, kind);
+    const base = { kind, defaultModel, models: list.includes(defaultModel) ? list : [defaultModel, ...list], lastTestAt: last ? toIso(last.at) : null, lastTestOk: last ? last.ok : null, isDefault: defaultKind === kind };
+    const envKey = env[PROVIDER_ENV_KEYS[kind]];
+    if (envKey) out.push({ ...base, id: envProviderId(kind), name: `${PROVIDER_LABELS[kind]} (${PROVIDER_ENV_KEYS[kind]})`, keySource: 'env', keyLast4: envKey.slice(-4) });
+    else if (await c.settings.get(SECRET_ID_SETTING[kind])) out.push({ ...base, id: storedProviderId(kind), name: await providerName(c, kind), keySource: 'stored', keyLast4: await c.settings.get(LAST4_SETTING[kind]) });
+  }
   return out;
 }
 
-async function storeKey(c: ApiContext, value: string, by: string): Promise<void> {
-  await c.namedSecrets.set(c.tenantId, ANTHROPIC_SECRET.owner, ANTHROPIC_SECRET.ownerId, ANTHROPIC_SECRET.name, value, by);
-  await c.settings.set('anthropicKeySecretId', `${ANTHROPIC_SECRET.owner}:${ANTHROPIC_SECRET.ownerId}`, by);
-  await c.settings.set('anthropicKeyLast4', value.slice(-4), by);
-}
-
-async function clearKey(c: ApiContext, by: string): Promise<void> {
-  await c.namedSecrets.delete(c.tenantId, ANTHROPIC_SECRET.owner, ANTHROPIC_SECRET.ownerId, ANTHROPIC_SECRET.name);
-  await c.settings.set('anthropicKeySecretId', null, by);
-  await c.settings.set('anthropicKeyLast4', null, by);
-}
-
-/** One tiny Messages call with the configured key (never in tests: the key is absent there). */
-async function testModel(c: ApiContext): Promise<{ ok: boolean; model: string; latencyMs: number | null; error?: string }> {
-  const key = await anthropicKey(c);
-  const model = (await c.settings.get('evalModel')) ?? c.config.env.NEUROUTER_EVAL_MODEL;
-  if (!key) throw new AppError('llm_key_missing', 'Configure an Anthropic API key first (ANTHROPIC_API_KEY or Settings → Models)');
+/** One tiny call through the provider's SDK client (never in tests: keys are absent there). */
+async function testModel(c: ApiContext, kind?: LlmProviderKind): Promise<{ ok: boolean; model: string; latencyMs: number | null; error?: string }> {
+  const evalModel = (await c.settings.get('evalModel')) ?? c.config.env.NEUROUTER_EVAL_MODEL;
+  const ref = parseModelRef(evalModel);
+  const k = kind ?? ref.provider;
+  if (!k) throw AppError.validation(`Cannot tell which provider serves ${evalModel}; prefix it with openai:, anthropic: or gemini:`, [{ path: ['evalModel'], message: 'unknown provider', code: 'unknown_provider' }]);
+  const model = ref.provider === k ? ref.model : PROVIDER_MODELS[k][0]!;
+  const key = await providerKey(keyDeps(c), k);
+  if (!key) throw new AppError('llm_key_missing', `Configure a ${PROVIDER_LABELS[k]} API key first (${PROVIDER_ENV_KEYS[k]} or Settings → Models)`);
   if (c.config.env.NODE_ENV === 'test') return { ok: false, model, latencyMs: null, error: 'model tests are disabled when NODE_ENV=test' };
   const t0 = c.clock.now();
+  const record = async (ok: boolean) => {
+    await c.settings.set('modelProviderLastTests', { ...(await c.settings.get('modelProviderLastTests')), [k]: { at: c.clock.now(), ok } });
+    if (k === 'anthropic') await c.settings.set('modelProviderLastTest', { at: c.clock.now(), ok });
+  };
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': key.key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model, max_tokens: 16, messages: [{ role: 'user', content: 'Reply with OK.' }] }), signal: AbortSignal.timeout(20_000) });
-    const ok = res.ok;
-    await c.settings.set('modelProviderLastTest', { at: c.clock.now(), ok });
-    return { ok, model, latencyMs: c.clock.now() - t0, ...(ok ? {} : { error: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` }) };
+    await createLlmClient({ provider: k, apiKey: key.key }).create({ model, max_tokens: 64, messages: [{ role: 'user', content: 'Reply with OK.' }] }, { signal: AbortSignal.timeout(20_000) });
+    await record(true);
+    return { ok: true, model, latencyMs: c.clock.now() - t0 };
   } catch (err) {
-    await c.settings.set('modelProviderLastTest', { at: c.clock.now(), ok: false });
-    return { ok: false, model, latencyMs: null, error: (err as Error).message };
+    await record(false);
+    return { ok: false, model, latencyMs: null, error: (err as Error).message.slice(0, 300) };
   }
 }
 
@@ -137,9 +156,11 @@ export async function settingsRoutes(app: FastifyInstance, c: ApiContext): Promi
     if (b.general?.retentionDays !== undefined) await s.set('retentionDays', b.general.retentionDays, u.id);
     if (b.models) {
       const m = b.models;
-      if (m.anthropicKey) {
-        if ('value' in m.anthropicKey) await storeKey(c, m.anthropicKey.value, u.id);
-        else await clearKey(c, u.id);
+      const writes: Array<[LlmProviderKind, { value: string } | { clear: true }]> = Object.entries(m.apiKeys ?? {}).filter((e): e is [LlmProviderKind, { value: string } | { clear: true }] => e[1] !== undefined);
+      if (m.anthropicKey && !m.apiKeys?.anthropic) writes.push(['anthropic', m.anthropicKey]);
+      for (const [kind, w] of writes) {
+        if ('value' in w) await storeProviderKey(c, kind, w.value, u.id);
+        else await clearProviderKey(c, kind, u.id);
       }
       if (m.evalModel) await s.set('evalModel', m.evalModel, u.id);
       if (m.judgeModel) await s.set('judgeModel', m.judgeModel, u.id);
@@ -166,13 +187,18 @@ export async function settingsRoutes(app: FastifyInstance, c: ApiContext): Promi
   route(app, 'modelProviders.list', api.modelProviders.list, async () => ({ items: await providers(c) }));
   route(app, 'modelProviders.create', api.modelProviders.create, async (req, reply) => {
     const u = requireUser(req);
-    if ((await providers(c)).length) throw AppError.conflict('An Anthropic provider is already configured (the MVP allows one)');
-    await storeKey(c, req.body.apiKey, u.id);
-    await c.settings.set('modelProviderName', req.body.name, u.id);
-    await c.settings.set('evalModel', req.body.defaultModel, u.id);
+    const kind = req.body.kind;
+    if ((await providers(c)).some((p) => p.kind === kind)) throw AppError.conflict(`A ${PROVIDER_LABELS[kind]} provider is already configured (one per kind); update it instead`);
+    await storeProviderKey(c, kind, req.body.apiKey, u.id);
+    await setProviderName(kind, req.body.name, u.id);
+    if (req.body.defaultModel) await c.settings.set('evalModel', req.body.defaultModel, u.id);
     reply.status(201);
-    return (await providers(c)).find((p) => p.id === STORED_PROVIDER_ID)!;
+    return (await providers(c)).find((p) => p.id === storedProviderId(kind))!;
   });
+  const setProviderName = async (kind: LlmProviderKind, name: string, by: string) => {
+    if (kind === 'anthropic') await c.settings.set('modelProviderName', name, by);
+    else await c.settings.set('modelProviderNames', { ...(await c.settings.get('modelProviderNames')), [kind]: name }, by);
+  };
   const providerOr404 = async (id: string) => {
     const p = (await providers(c)).find((x) => x.id === id);
     if (!p) throw AppError.notFound('Model provider');
@@ -181,21 +207,21 @@ export async function settingsRoutes(app: FastifyInstance, c: ApiContext): Promi
   route(app, 'modelProviders.update', api.modelProviders.update, async (req) => {
     const u = requireUser(req);
     const p = await providerOr404(req.params.id);
-    if (p.keySource === 'env' && req.body.apiKey) throw AppError.validation('This provider uses ANTHROPIC_API_KEY; change the environment variable', [{ path: ['apiKey'], message: 'env-managed', code: 'env_managed' }]);
-    if (req.body.apiKey) await storeKey(c, req.body.apiKey, u.id);
-    if (req.body.name && p.keySource === 'stored') await c.settings.set('modelProviderName', req.body.name, u.id);
+    if (p.keySource === 'env' && req.body.apiKey) throw AppError.validation(`This provider uses ${PROVIDER_ENV_KEYS[p.kind]}; change the environment variable`, [{ path: ['apiKey'], message: 'env-managed', code: 'env_managed' }]);
+    if (req.body.apiKey) await storeProviderKey(c, p.kind, req.body.apiKey, u.id);
+    if (req.body.name && p.keySource === 'stored') await setProviderName(p.kind, req.body.name, u.id);
     if (req.body.defaultModel) await c.settings.set('evalModel', req.body.defaultModel, u.id);
     return providerOr404(req.params.id);
   });
   route(app, 'modelProviders.delete', api.modelProviders.delete, async (req) => {
     const u = requireUser(req);
     const p = await providerOr404(req.params.id);
-    if (p.keySource === 'env') throw AppError.conflict('A provider from ANTHROPIC_API_KEY cannot be deleted from the console');
-    await clearKey(c, u.id);
+    if (p.keySource === 'env') throw AppError.conflict(`A provider from ${PROVIDER_ENV_KEYS[p.kind]} cannot be deleted from the console`);
+    await clearProviderKey(c, p.kind, u.id);
   });
   route(app, 'modelProviders.test', api.modelProviders.test, async (req) => {
-    await providerOr404(req.params.id);
-    return testModel(c);
+    const p = await providerOr404(req.params.id);
+    return testModel(c, p.kind);
   });
 
   route(app, 'telemetry.test', api.telemetry.test, async (req) => {
@@ -342,5 +368,4 @@ export async function settingsRoutes(app: FastifyInstance, c: ApiContext): Promi
       listeners.delete(l);
     });
   });
-  void DEFAULT_EVAL_MODEL;
 }

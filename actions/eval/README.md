@@ -14,7 +14,8 @@ jobs:
           spec: openapi.yaml
           suite: neurouter/suite.json      # optional: freeze a generated suite for stable CI
           min-score: 70
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}   # default model gpt-6-luna
+          # models: gpt-6-luna,claude-sonnet-5-5      # add anthropic-api-key / gemini-api-key for other providers
 ```
 
 Outputs: `score`, `recommended-mode`, `report-path`. The step fails when the CLI exits non-zero

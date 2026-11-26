@@ -3,7 +3,7 @@ import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import * as z from 'zod';
 import { DownloadIcon, LoaderCircleIcon, RefreshCwIcon } from 'lucide-react';
-import type { KillSwitchRow } from '@/contract';
+import { LLM_PROVIDER_KINDS, PROVIDER_ENV_KEYS, PROVIDER_LABELS, type KeyStatus, type KillSwitchRow, type LlmProviderKind } from '@/contract';
 import { guard } from '@/app/route-guards';
 import { GatedButton, useGate } from '@/components/app/gated';
 import { ButtonTabs } from '@/components/app/link-tabs';
@@ -13,7 +13,8 @@ import { Pill } from '@/components/status/status';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { configStatusQuery, killSwitchesQuery, settingsQuery, systemInfoQuery, useClearKillSwitch, useReloadConfig, useSetKillSwitch, useTestModel, useTestTelemetry, useUpdateSettings, useUpdateUser, usersQuery } from '@/features/settings/queries';
+import { configStatusQuery, killSwitchesQuery, settingsQuery, systemInfoQuery, useClearKillSwitch, useReloadConfig, useSetKillSwitch, useTestProvider, useTestTelemetry, useUpdateSettings, useUpdateUser, usersQuery } from '@/features/settings/queries';
+import { modelGroups } from '@/features/settings/models';
 import { useMe } from '@/hooks/use-me';
 import { configExportUrl } from '@/lib/download';
 import { formatBytes, formatDuration, formatRelative } from '@/lib/format';
@@ -98,20 +99,55 @@ function General() {
   );
 }
 
+const KEY_PLACEHOLDER: Record<LlmProviderKind, string> = { openai: 'sk-…', anthropic: 'sk-ant-…', gemini: 'AIza…' };
+
+function ProviderKey({ kind, status }: { kind: LlmProviderKind; status: KeyStatus }) {
+  const update = useUpdateSettings();
+  const test = useTestProvider();
+  const gate = useGate('settings:write');
+  const [key, setKey] = useState('');
+  const label = PROVIDER_LABELS[kind];
+  return (
+    <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0" aria-label={`${label} key`}>
+      <div className="flex flex-wrap items-center gap-2 text-[13.5px]">
+        <span className="w-20 font-medium">{label}</span>
+        {status.configured ? <Pill tone="ok">Configured · {status.source === 'env' ? `from ${PROVIDER_ENV_KEYS[kind]}` : 'stored'} · …{status.last4}</Pill> : <Pill tone="muted">No key</Pill>}
+        <GatedButton cap="settings:write" variant="outline" size="sm" disabled={!status.configured || test.isPending} onClick={() => test.mutate(`${kind}-${status.source ?? 'stored'}`, { onSuccess: (r) => (r.ok ? notifySuccess(`${r.model} answered in ${formatDuration(r.latencyMs)}`) : notifyError(new Error(r.error ?? 'Failed'), 'Test failed')), onError: (e) => notifyError(e) })}>
+          {test.isPending ? <LoaderCircleIcon className="animate-spin" /> : null} Test
+        </GatedButton>
+      </div>
+      {status.source !== 'env' ? (
+        <div className="flex gap-2">
+          <Input type="password" aria-label={`${label} API key`} autoComplete="off" placeholder={status.configured ? 'Replace the key' : KEY_PLACEHOLDER[kind]} value={key} disabled={gate.disabled} onChange={(e) => setKey(e.target.value)} className="max-w-sm" />
+          <GatedButton cap="settings:write" disabled={key.length < 8} onClick={() => update.mutate({ models: { apiKeys: { [kind]: { value: key } } } }, { onSuccess: () => (setKey(''), notifySuccess(`${label} key saved`)), onError: (e) => notifyError(e) })}>
+            Save key
+          </GatedButton>
+          {status.configured ? (
+            <GatedButton cap="settings:write" variant="ghost" onClick={() => update.mutate({ models: { apiKeys: { [kind]: { clear: true } } } })}>
+              Remove
+            </GatedButton>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
 function Models() {
   const s = useQuery(settingsQuery()).data!;
   const update = useUpdateSettings();
-  const test = useTestModel();
   const gate = useGate('settings:write');
-  const [key, setKey] = useState('');
-  const k = s.models.anthropicKey;
-  const MODELS = ['claude-opus', 'claude-sonnet', 'claude-haiku'];
+  const keys = s.models.keys;
   const select = (id: string, field: 'evalModel' | 'judgeModel' | 'generatorModel', label: string) => (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={id}>{label}</Label>
       <select id={id} className="h-9 rounded-lg border bg-background px-2 font-mono text-sm" disabled={gate.disabled} value={s.models[field]} onChange={(e) => update.mutate({ models: { [field]: e.target.value } }, { onError: (err) => notifyError(err) })}>
-        {[...new Set([s.models[field], ...MODELS])].map((m) => (
-          <option key={m}>{m}</option>
+        {modelGroups(s.models[field]).map((g) => (
+          <optgroup key={g.kind ?? 'other'} label={g.kind ? `${PROVIDER_LABELS[g.kind]}${keys[g.kind].configured ? '' : ' (no key)'}` : 'Other'}>
+            {g.models.map((m) => (
+              <option key={m}>{m}</option>
+            ))}
+          </optgroup>
         ))}
       </select>
     </div>
@@ -119,28 +155,16 @@ function Models() {
   return (
     <section className={card} aria-labelledby="m-title">
       <h2 id="m-title" className="text-base font-semibold">
-        Model provider: Anthropic
+        Model providers
       </h2>
-      <p className="text-[13px] text-muted-foreground">Evals run on your own key. The key is write-only: Neurouter shows only its source and last four characters. Other providers come later.</p>
-      <div className="flex flex-wrap items-center gap-2 text-[13.5px]">
-        {k.configured ? <Pill tone="ok">Configured · {k.source === 'env' ? 'from ANTHROPIC_API_KEY' : 'stored'} · …{k.last4}</Pill> : <Pill tone="warn">No key</Pill>}
-        <GatedButton cap="settings:write" variant="outline" size="sm" disabled={!k.configured || test.isPending} onClick={() => test.mutate(undefined, { onSuccess: (r) => (r.ok ? notifySuccess(`${r.model} answered in ${formatDuration(r.latencyMs)}`) : notifyError(new Error(r.error ?? 'Failed'), 'Test failed')), onError: (e) => notifyError(e) })}>
-          {test.isPending ? <LoaderCircleIcon className="animate-spin" /> : null} Test
-        </GatedButton>
-      </div>
-      {k.source !== 'env' ? (
-        <div className="flex gap-2">
-          <Input type="password" aria-label="Anthropic API key" autoComplete="off" placeholder={k.configured ? 'Replace the key' : 'sk-ant-…'} value={key} disabled={gate.disabled} onChange={(e) => setKey(e.target.value)} className="max-w-sm" />
-          <GatedButton cap="settings:write" disabled={key.length < 8} onClick={() => update.mutate({ models: { anthropicKey: { value: key } } }, { onSuccess: () => (setKey(''), notifySuccess('Key saved')), onError: (e) => notifyError(e) })}>
-            Save key
-          </GatedButton>
-          {k.configured ? (
-            <GatedButton cap="settings:write" variant="ghost" onClick={() => update.mutate({ models: { anthropicKey: { clear: true } } })}>
-              Remove
-            </GatedButton>
-          ) : null}
-        </div>
-      ) : null}
+      <p className="text-[13px] text-muted-foreground">
+        Evals run on your own keys. Each model goes to its provider (gpt-* → OpenAI, claude-* → Anthropic, gemini-* → Gemini). Keys are write-only: Neurouter shows only their source and last four characters; an environment variable wins over a stored key.
+      </p>
+      <ul className="divide-y">
+        {LLM_PROVIDER_KINDS.map((k) => (
+          <ProviderKey key={k} kind={k} status={keys[k]} />
+        ))}
+      </ul>
       <div className="grid gap-3 sm:grid-cols-3">
         {select('m-eval', 'evalModel', 'Eval model')}
         {select('m-judge', 'judgeModel', 'Judge model')}

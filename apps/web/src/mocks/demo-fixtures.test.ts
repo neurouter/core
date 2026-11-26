@@ -5,7 +5,7 @@ import { contractFixtures, type Resolver } from './fixtures';
 
 /** Every GET fixture of the demo dataset parses against its contract schema (spec §12). */
 describe('demo fixtures', () => {
-  const params: Record<string, string> = { id: 'srv_acme_orders', groupId: 'need_bulk_refund', auditId: 'aud_01JDX8K1', reportId: 'need_bulk_refund_r0', slug: 'acme-orders', taskRunId: 'trun.run_14.t01.claude-opus.tool', toolName: 'create_refund', name: 'X' };
+  const params: Record<string, string> = { id: 'srv_acme_orders', groupId: 'need_bulk_refund', auditId: 'aud_01JDX8K1', reportId: 'need_bulk_refund_r0', slug: 'acme-orders', taskRunId: 'trun.run_14.t01.gpt-6-luna.tool', toolName: 'create_refund', name: 'X' };
   const idFor: Record<string, string> = {
     'tools.get': 'srv_acme_orders__customersSearch', 'tools.diff': 'srv_acme_orders__customersSearch', 'metrics.toolUsage': 'srv_acme_orders__customersSearch', 'tasks.get': 'task_flag_unpaid', 'tasks.events': 'task_flag_unpaid',
     'scripts.get': 'scr_dry', 'inbox.issue': 'iss_total_string', 'inbox.exportIssueMarkdown': 'iss_total_string', 'evals.run': 'run_14', 'evals.runTasks': 'run_14', 'evals.taskRun': 'run_14', 'suggestions.list': 'run_14',

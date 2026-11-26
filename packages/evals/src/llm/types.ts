@@ -1,7 +1,12 @@
 /**
- * The subset of the Anthropic Messages API the evals use, as a provider-neutral interface so the
- * runner, generator and judge are testable with fake and stub clients. Shapes mirror
- * `@anthropic-ai/sdk` 1.14.0 (`Anthropic.MessageCreateParams`, `Anthropic.Message`).
+ * The request/response shape every LLM client speaks: the subset of the Anthropic Messages API the
+ * evals use (it mirrors `@anthropic-ai/sdk` 1.14.0 `MessageCreateParams` / `Message`). The OpenAI
+ * (Responses API) and Gemini (Interactions API) adapters translate to and from it, so the runner,
+ * generator and judge stay provider-neutral and testable with fake and stub clients.
+ *
+ * Provider state that must round-trip verbatim (OpenAI reasoning items, Gemini thought signatures)
+ * travels in an opaque assistant content block (`openai_items` / `gemini_steps`) that only the
+ * adapter that produced it reads.
  */
 
 export type LlmTextBlock = { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } };
@@ -58,8 +63,8 @@ export interface LlmCreateOptions {
 }
 
 export interface LlmClient {
-  /** `anthropic` | `stub` | `fake` — reported so a stub is never mistaken for a real model. */
-  readonly provider: 'anthropic' | 'stub' | 'fake' | 'scripted';
+  /** The provider (for a router: the default model's) — reported so a stub is never mistaken for a real model. */
+  readonly provider: 'openai' | 'anthropic' | 'gemini' | 'stub' | 'fake' | 'scripted';
   create(req: LlmRequest, opts?: LlmCreateOptions): Promise<LlmResponse>;
 }
 
@@ -74,7 +79,7 @@ export class LlmError extends Error {
 }
 /** Missing or invalid API key (→ problem `llm_key_missing`). Fails the whole run. */
 export class LlmKeyError extends LlmError {
-  constructor(message = 'Anthropic API key missing or invalid') {
+  constructor(message = 'Model provider API key missing or invalid') {
     super(message, 401);
     this.name = 'LlmKeyError';
   }

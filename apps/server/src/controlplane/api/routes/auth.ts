@@ -4,6 +4,7 @@ import { AppError } from '../../../kernel/lib/errors.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { loadConsoleUser, type ConsoleUser } from '../../../kernel/principal.js';
 import { clientMeta, requireUser } from '../../auth/guards.js';
+import { anyProviderKey } from '../../evals/model-keys.js';
 import type { ApiContext } from '../context.js';
 import { embedderView } from '../context.js';
 import { route } from '../routes.js';
@@ -21,7 +22,8 @@ async function badges(c: ApiContext) {
 }
 
 export async function evalsConfigured(c: ApiContext): Promise<boolean> {
-  return Boolean(c.config.env.ANTHROPIC_API_KEY || c.config.env.NEUROUTER_EVAL_LLM || c.config.env.NEUROUTER_EVAL_FAKE_LLM || (await c.settings.get('anthropicKeySecretId')));
+  if (c.config.env.NEUROUTER_EVAL_LLM || c.config.env.NEUROUTER_EVAL_FAKE_LLM) return true;
+  return anyProviderKey({ env: c.config.env as unknown as Record<string, string | undefined>, settings: c.settings });
 }
 
 export async function buildMe(c: ApiContext, user: ConsoleUser, csrfToken: string): Promise<Me> {

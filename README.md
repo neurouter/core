@@ -38,7 +38,11 @@ NEUROUTER_EVAL_LLM=stub npx tsx --conditions=@neurouter/source packages/cli/src/
   --spec examples/petstore/openapi.yaml --generate --repeats 1 --md report.md
 ```
 
-With `ANTHROPIC_API_KEY` set, the same command uses `claude-sonnet-5-5` (BYOK).
+With `OPENAI_API_KEY` set, the same command uses the default model `gpt-6-luna` (BYOK). Evals also run
+on Anthropic (`ANTHROPIC_API_KEY`, `claude-*` models) and Gemini (`GEMINI_API_KEY`, `gemini-*` models):
+pass `--models gpt-6-luna,claude-sonnet-5-5,gemini-3-flash-preview` to compare them; each model goes to
+its provider (`provider:model` forces one). Keys can also be stored, encrypted, in the console
+(Settings › Models).
 
 ## Development
 

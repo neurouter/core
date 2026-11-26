@@ -69,7 +69,7 @@ export function buildProgram(): Command {
     .option('--generate', 'generate a suite', false)
     .option('--counts <s,m,a,i>', 'tasks per category for --generate', '8,8,4,4')
     .option('--save-suite <file>', 'write the suite JSON')
-    .option('--models <list>', 'comma-separated models')
+    .option('--models <list>', 'comma-separated models (default gpt-6-luna; e.g. gpt-6-luna,claude-sonnet-5-5,gemini-3-flash-preview; provider:model forces a provider)')
     .option('--modes <list>', 'tool,code', 'tool,code')
     .option('--repeats <n>', 'attempts per task', '3')
     .option('--env <slug>', 'environment', 'mock')

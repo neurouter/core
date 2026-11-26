@@ -6,7 +6,7 @@ instance:
   name: Neurouter demo
 settings:
   codeMode: { enabled: true }
-  evals: { model: claude-sonnet-5-5, effort: medium, repeats: 3 }
+  evals: { model: gpt-6-luna, effort: medium, repeats: 3 }
 servers:
   - slug: github
     name: GitHub REST

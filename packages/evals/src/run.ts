@@ -46,7 +46,7 @@ function cut(s: string): string {
   return s.length > TRANSCRIPT_ITEM_MAX ? `${s.slice(0, TRANSCRIPT_ITEM_MAX)}…` : s;
 }
 
-/** The agent loop (§15.4 step 3): MCP tools 1:1 as Anthropic tools, tool_choice auto, parallel tool_use blocks. */
+/** The agent loop (§15.4 step 3): MCP tools 1:1 as LLM tools (each provider adapter maps them), tool_choice auto, parallel tool_use blocks. */
 export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
