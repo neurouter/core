@@ -177,6 +177,23 @@ servers:
     await c.close();
   });
 
+  it('X-Neurouter-Exposure works for normal API keys (console code-mode-only snippets) and respects code-mode availability', async () => {
+    const both = await mcpClient(s, 'github', 'mock', await keyFor(s, 'github', 'mock', ['tools:read', 'code:run']));
+    expect((await both.listTools()).tools.map((t) => t.name)).toContain('list_issues');
+    await both.close();
+    const codeOnly = await mcpClient(s, 'github', 'mock', await keyFor(s, 'github', 'mock', ['tools:read', 'code:run']), { headers: { 'X-Neurouter-Exposure': 'code' } });
+    const names = (await codeOnly.listTools()).tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['run_script', 'search_tools']));
+    expect(names).not.toContain('list_issues');
+    await codeOnly.close();
+    // without code:run, code mode is unavailable: the header falls back to tools
+    const noCode = await mcpClient(s, 'github', 'mock', await keyFor(s, 'github', 'mock', ['tools:read']), { headers: { 'X-Neurouter-Exposure': 'code' } });
+    const n2 = (await noCode.listTools()).tools.map((t) => t.name);
+    expect(n2).not.toContain('run_script');
+    expect(n2).toContain('list_issues');
+    await noCode.close();
+  });
+
   it('run_script: one call lists 30 issues and labels the stale ones; dry_run plans without writing', async () => {
     const key = await keyFor(s, 'github', 'mock', ['tools:read', 'tools:write', 'code:run']);
     const c = await mcpClient(s, 'github', 'mock', key);

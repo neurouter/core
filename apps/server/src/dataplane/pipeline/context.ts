@@ -38,7 +38,7 @@ export interface RunContext {
   userAgent: string | null;
   /** Eval-only: mock state namespace (`X-Neurouter-Mock-State`). */
   mockNamespace?: string;
-  /** Eval-only: exposure override (`X-Neurouter-Exposure`). */
+  /** Exposure override (`X-Neurouter-Exposure: tools|code`), any credential; code falls back to tools when unavailable. */
   exposureOverride?: 'tools' | 'code';
   requestId: string;
 }

@@ -264,7 +264,9 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
       for (const id of rpc.cancels) void inflight.cancel(auth.credentialKey, id).catch(() => {});
       const isEval = auth.principal.type === 'api_key' && auth.principal.purpose === 'eval';
       const mockNs = isEval ? header(req, HEADER_MOCK_STATE) : undefined;
-      const exp = isEval ? header(req, HEADER_EXPOSURE) : undefined;
+      // any credential may narrow its own surface (console "code mode only" snippets); code still needs
+      // code mode to be available (env codeMode, code:run scope, kill switches, executor), see effectiveMode
+      const exp = header(req, HEADER_EXPOSURE)?.trim().toLowerCase();
       const buildOverride = isEval ? header(req, HEADER_BUILD) : undefined;
       const effective = buildOverride ? await d.runtime.withBuild(bundle, buildOverride) : bundle;
       if (!effective) return reply.status(404).type('application/json').send({ error: 'build_not_found' });
