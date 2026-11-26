@@ -64,5 +64,6 @@ jobs:
       - run: |
           set -euo pipefail
           printf 'database: { url: "postgres://x@y/z" }\ncrypto: { masterKeys: "k1:AAAA", activeKeyId: k1, hashPepper: pppppppppppppppppppppppppppppppppppp }\n' > v.yaml
-          for m in sidecar deployment; do helm template nr deploy/helm/neurouter -f v.yaml --set executor.mode=$m > $m.yaml; done
+          helm lint deploy/helm/neurouter-core -f v.yaml
+          for m in sidecar deployment; do helm template nr deploy/helm/neurouter-core -f v.yaml --set executor.mode=$m --set openai.existingSecret=llm > $m.yaml; done
           cat sidecar.yaml deployment.yaml | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 -summary -strict -

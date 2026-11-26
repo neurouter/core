@@ -1,8 +1,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "neurouter.fullname" . }}
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
@@ -11,15 +11,15 @@ spec:
     type: RollingUpdate
     rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
   selector:
-    matchLabels: {{- include "neurouter.selectorLabels" . | nindent 6 }}
+    matchLabels: {{- include "neurouter-core.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      labels: {{- include "neurouter.selectorLabels" . | nindent 8 }}
+      labels: {{- include "neurouter-core.selectorLabels" . | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
-      serviceAccountName: {{ include "neurouter.serviceAccountName" . }}
+      serviceAccountName: {{ include "neurouter-core.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -29,17 +29,17 @@ spec:
       automountServiceAccountToken: {{ .Values.serviceAccount.annotations | empty | not }}
       containers:
         - name: neurouter
-          image: {{ include "neurouter.image" . }}
+          image: {{ include "neurouter-core.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - { name: http, containerPort: {{ .Values.service.port }}, protocol: TCP }
           envFrom:
-            - configMapRef: { name: {{ include "neurouter.fullname" . }} }
+            - configMapRef: { name: {{ include "neurouter-core.fullname" . }} }
             {{- with .Values.extraEnvFrom }}{{ toYaml . | nindent 12 }}{{- end }}
           env:
             - name: INSTANCE_ID
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
-            {{- include "neurouter.env" . | nindent 12 }}
+            {{- include "neurouter-core.env" . | nindent 12 }}
           startupProbe:
             # migrations (onStart mode) and boot; the embedding model loads in the background
             httpGet: { path: /healthz, port: http }
@@ -65,7 +65,7 @@ spec:
             {{- end }}
         {{- if eq .Values.executor.mode "sidecar" }}
         - name: executor
-          image: {{ include "neurouter.image" . }}
+          image: {{ include "neurouter-core.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/docker-entrypoint.sh", "node", "apps/executor/dist/main.js", "--tcp", {{ printf "127.0.0.1:%v" .Values.executor.port | quote }}]
           env:
@@ -73,9 +73,9 @@ spec:
             - { name: NEUROUTER_EXECUTOR_POOL_MAX, value: {{ .Values.executor.poolMax | quote }} }
             - { name: NEUROUTER_EXECUTOR_PREWARM, value: {{ .Values.executor.prewarm | quote }} }
             - name: NEUROUTER_EXECUTOR_TOKEN
-              valueFrom: { secretKeyRef: { name: {{ include "neurouter.executorSecret" . }}, key: NEUROUTER_EXECUTOR_TOKEN } }
+              valueFrom: { secretKeyRef: { name: {{ include "neurouter-core.executorSecret" . }}, key: NEUROUTER_EXECUTOR_TOKEN } }
           resources: {{- toYaml .Values.executor.resources | nindent 12 }}
-          securityContext: {{- include "neurouter.executorSecurityContext" . | nindent 12 }}
+          securityContext: {{- include "neurouter-core.executorSecurityContext" . | nindent 12 }}
           volumeMounts:
             - { name: executor-tmp, mountPath: /tmp }
         {{- end }}
@@ -88,7 +88,7 @@ spec:
         {{- end }}
         {{- if .Values.config.neurouterYaml }}
         - name: config
-          configMap: { name: {{ include "neurouter.fullname" . }}-config }
+          configMap: { name: {{ include "neurouter-core.fullname" . }}-config }
         {{- end }}
       {{- if .Values.topologySpread }}
       topologySpreadConstraints:
@@ -96,7 +96,7 @@ spec:
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
-            matchLabels: {{- include "neurouter.selectorLabels" . | nindent 14 }}
+            matchLabels: {{- include "neurouter-core.selectorLabels" . | nindent 14 }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}

@@ -45,8 +45,9 @@ jobs:
       - uses: azure/setup-helm@v5
       - run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-          helm package deploy/helm/neurouter --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}"
-          helm push neurouter-*.tgz oci://ghcr.io/neurouter/charts
+          helm package deploy/helm/neurouter-core --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}"
+          # chart name neurouter-core: oci://ghcr.io/neurouter/charts/neurouter holds the deprecated Neurouter Hub chart
+          helm push neurouter-core-*.tgz oci://ghcr.io/neurouter/charts
 
   npm:
     runs-on: ubuntu-latest

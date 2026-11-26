@@ -4,21 +4,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "neurouter.fullname" . }}-executor
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}-executor
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.executor.replicas }}
   selector:
-    matchLabels: {{- include "neurouter.executorSelectorLabels" . | nindent 6 }}
+    matchLabels: {{- include "neurouter-core.executorSelectorLabels" . | nindent 6 }}
   template:
     metadata:
-      labels: {{- include "neurouter.executorSelectorLabels" . | nindent 8 }}
+      labels: {{- include "neurouter-core.executorSelectorLabels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: executor
-          image: {{ include "neurouter.image" . }}
+          image: {{ include "neurouter-core.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/docker-entrypoint.sh", "node", "apps/executor/dist/main.js", "--tcp", {{ printf "0.0.0.0:%v" .Values.executor.port | quote }}]
           ports:
@@ -28,12 +28,12 @@ spec:
             - { name: NEUROUTER_EXECUTOR_POOL_MAX, value: {{ .Values.executor.poolMax | quote }} }
             - { name: NEUROUTER_EXECUTOR_PREWARM, value: {{ .Values.executor.prewarm | quote }} }
             - name: NEUROUTER_EXECUTOR_TOKEN
-              valueFrom: { secretKeyRef: { name: {{ include "neurouter.executorSecret" . }}, key: NEUROUTER_EXECUTOR_TOKEN } }
+              valueFrom: { secretKeyRef: { name: {{ include "neurouter-core.executorSecret" . }}, key: NEUROUTER_EXECUTOR_TOKEN } }
           readinessProbe:
             tcpSocket: { port: executor }
             periodSeconds: 10
           resources: {{- toYaml .Values.executor.resources | nindent 12 }}
-          securityContext: {{- include "neurouter.executorSecurityContext" . | nindent 12 }}
+          securityContext: {{- include "neurouter-core.executorSecurityContext" . | nindent 12 }}
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
       volumes:
@@ -43,27 +43,27 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "neurouter.fullname" . }}-executor
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}-executor
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
-  selector: {{- include "neurouter.executorSelectorLabels" . | nindent 4 }}
+  selector: {{- include "neurouter-core.executorSelectorLabels" . | nindent 4 }}
   ports:
     - { name: executor, port: {{ .Values.executor.port }}, targetPort: executor, protocol: TCP }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "neurouter.fullname" . }}-executor
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}-executor
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels: {{- include "neurouter.executorSelectorLabels" . | nindent 6 }}
+    matchLabels: {{- include "neurouter-core.executorSelectorLabels" . | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - podSelector:
-            matchLabels: {{- include "neurouter.selectorLabels" . | nindent 14 }}
+            matchLabels: {{- include "neurouter-core.selectorLabels" . | nindent 14 }}
       ports:
         - { port: {{ .Values.executor.port }}, protocol: TCP }
   egress: []

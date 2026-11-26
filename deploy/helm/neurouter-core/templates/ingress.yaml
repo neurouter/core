@@ -2,8 +2,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "neurouter.fullname" . }}
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations: {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -22,6 +22,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "neurouter.fullname" . }}
+                name: {{ include "neurouter-core.fullname" . }}
                 port: { name: http }
 {{- end }}

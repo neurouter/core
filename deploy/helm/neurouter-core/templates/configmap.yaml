@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "neurouter.fullname" . }}
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
 data:
   NODE_ENV: production
   PORT: {{ .Values.service.port | quote }}
@@ -46,7 +46,7 @@ data:
   NEUROUTER_EXECUTOR_URL: {{ printf "tcp://127.0.0.1:%v" .Values.executor.port | quote }}
   {{- else if eq .Values.executor.mode "deployment" }}
   NEUROUTER_EXECUTOR_MODE: remote
-  NEUROUTER_EXECUTOR_URL: {{ printf "tcp://%s-executor:%v" (include "neurouter.fullname" .) .Values.executor.port | quote }}
+  NEUROUTER_EXECUTOR_URL: {{ printf "tcp://%s-executor:%v" (include "neurouter-core.fullname" .) .Values.executor.port | quote }}
   {{- else }}
   NEUROUTER_EXECUTOR_MODE: "off"
   {{- end }}
@@ -56,8 +56,8 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "neurouter.fullname" . }}-config
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}-config
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
 data:
   neurouter.yaml: |
 {{ .Values.config.neurouterYaml | indent 4 }}

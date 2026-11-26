@@ -1,4 +1,4 @@
-# Neurouter Helm values (backend spec §20.2; ADAPT the neurouter-hub chart).
+# Neurouter Core Helm values (chart neurouter-core).
 
 image:
   repository: ghcr.io/neurouter/core
@@ -70,9 +70,14 @@ executor:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "2", memory: 1Gi }
 
-# BYOK Anthropic key for evals: secret with key ANTHROPIC_API_KEY
+# BYOK model provider keys for evals (each optional; the default eval model gpt-6-luna needs OpenAI).
+# Each names an existing secret holding the key under the variable's name; one secret may hold all three.
+openai:
+  existingSecret: ""          # secret with key OPENAI_API_KEY
 anthropic:
-  existingSecret: ""
+  existingSecret: ""          # secret with key ANTHROPIC_API_KEY
+gemini:
+  existingSecret: ""          # secret with key GEMINI_API_KEY
 
 archive:
   url: ""                     # AUDIT_ARCHIVE_URL (file:, s3://, gs://, azblob://); credentials via extraEnv / workload identity
@@ -123,7 +128,7 @@ podDisruptionBudget:
 
 networkPolicy:
   enabled: false
-  # Egress CIDRs the server may reach (upstream APIs, IdP, Anthropic, object storage). Cloud metadata is always denied.
+  # Egress CIDRs the server may reach (upstream APIs, IdP, model providers, object storage). Cloud metadata is always denied.
   allowEgressCidrs: ["0.0.0.0/0"]
   denyEgressCidrs: ["169.254.169.254/32"]
 

@@ -2,10 +2,10 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "neurouter.fullname" . }}
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
 spec:
-  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ include "neurouter.fullname" . }} }
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ include "neurouter-core.fullname" . }} }
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:

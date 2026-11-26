@@ -2,10 +2,10 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "neurouter.fullname" . }}
-  labels: {{- include "neurouter.labels" . | nindent 4 }}
+  name: {{ include "neurouter-core.fullname" . }}
+  labels: {{- include "neurouter-core.labels" . | nindent 4 }}
 spec:
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
   selector:
-    matchLabels: {{- include "neurouter.selectorLabels" . | nindent 6 }}
+    matchLabels: {{- include "neurouter-core.selectorLabels" . | nindent 6 }}
 {{- end }}

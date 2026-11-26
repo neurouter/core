@@ -62,8 +62,11 @@ Local dev uses SQLite (no Docker). Production uses Postgres with pgvector.
 ## Deploy
 
 - Docker: `docker build -t neurouter-core .` then `docker run -p 3000:3000 --env-file .env -e NEUROUTER_CONFIG=/app/neurouter.example.yaml neurouter-core`.
-- Kubernetes: `deploy/helm/neurouter` (executor as a sidecar, or a separate Deployment with a deny-all
-  egress NetworkPolicy, recommended for production).
+- Docker image: `ghcr.io/neurouter/core:<version>`.
+- Kubernetes: the `neurouter-core` chart, `helm install neurouter oci://ghcr.io/neurouter/charts/neurouter-core --version <version> -f values.yaml`
+  (source in `deploy/helm/neurouter-core`; executor as a sidecar, or a separate Deployment with a deny-all
+  egress NetworkPolicy, recommended for production). Model provider keys: `openai.existingSecret`,
+  `anthropic.existingSecret`, `gemini.existingSecret`.
 - Cloud Run demo: `deploy/cloudrun/setup.sh` and `deploy/cloudrun/deploy.sh` (reviewed and run by a human).
 
 See [SECURITY.md](SECURITY.md) for the code-mode threat model.
