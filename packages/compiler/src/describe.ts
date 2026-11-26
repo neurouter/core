@@ -30,16 +30,26 @@ export interface CheckedExample {
 
 const ajv = new Ajv2020({ strict: false, allErrors: true, validateSchema: false, allowUnionTypes: true, validateFormats: false });
 const compiled = new WeakMap<object, ValidateFunction>();
+/** Compiled validators by schema text too: recompiling the same spec (re-imports, tests) reuses them. */
+const byText = new Map<string, ValidateFunction>();
 function validator(schema: JsonSchema): ValidateFunction | null {
   let v = compiled.get(schema);
+  if (v) return v;
+  const text = JSON.stringify(schema);
+  v = byText.get(text);
   if (!v) {
     try {
-      v = ajv.compile(schema as Obj);
+      v = ajv.compile(JSON.parse(text) as Obj);
     } catch {
       return null;
     }
-    compiled.set(schema, v);
+    if (byText.size >= 2000) {
+      byText.clear();
+      ajv.removeSchema();
+    }
+    byText.set(text, v);
   }
+  compiled.set(schema, v);
   return v;
 }
 
