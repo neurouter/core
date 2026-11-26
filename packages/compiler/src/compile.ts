@@ -7,6 +7,7 @@ import { parse as parseYaml } from 'yaml';
 import type { GraphQLSchema } from 'graphql';
 import type { CompileInput, Diagnostic, LintReport, SpecFormat, ToolDef } from '@neurouter/shared';
 import { compileGraphql, loadGraphqlSchema } from './graphql/compile-graphql.js';
+import { checkExamples } from './describe.js';
 import { lint } from './lint.js';
 import { buildMockModel, type MockModel } from './mock/model.js';
 import { pyIdent } from './naming.js';
@@ -186,7 +187,13 @@ export async function compile(input: CompileInput): Promise<CompileResult> {
   const baseTools = base.tools.map((t) => finalize(structuredClone(t), namespace));
   const visible = tools.filter((t) => !t.hidden);
   const pythonStubs = { [namespace]: generateStubs(visible, namespace, { buildHash: hash }) };
-  const report = lint(tools, { ...(input.options?.discovery ? { discovery: input.options.discovery } : {}), ...(input.options?.pinned ? { pinned: input.options.pinned } : {}) });
+  // one checked example per visible tool (contract-2 descriptions, docstrings; lint example_runs)
+  const examples = await checkExamples(tools, mockModel);
+  for (const t of tools) {
+    const ex = examples.get(t.name);
+    if (ex) t.checkedExample = { arguments: ex.arguments, source: ex.source, runs: ex.runs, conforms: ex.conforms, ...(ex.problem ? { problem: ex.problem } : {}), ...(ex.curatedProblem ? { curatedProblem: ex.curatedProblem } : {}) };
+  }
+  const report = lint(tools, { ...(input.options?.discovery ? { discovery: input.options.discovery } : {}), ...(input.options?.pinned ? { pinned: input.options.pinned } : {}), examples });
   return {
     format,
     title: base.title,

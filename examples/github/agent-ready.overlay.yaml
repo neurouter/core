@@ -27,7 +27,7 @@ tools:
     args:
       describe:                                                     # [curated]
         labels: "Comma-separated label names, e.g. bug,ui"
-        state: "open, closed or all"
+        state: "Which issues by state; open by default"              # [manual] P5 lint enum_in_schema: the values are in the schema
         since: "Only issues updated at or after this ISO-8601 time"
     response:
       include: ["[].number", "[].title", "[].state", "[].user.login", "[].labels[].name", "[].comments", "[].created_at", "[].updated_at", "[].html_url", "[].pull_request.url"]  # [curated]
@@ -179,6 +179,8 @@ tools:
     hidden: false
     description: Merge a pull request. Writes to the base branch.   # [curated]
     risk: { destructive: true }
+    examples:                                                       # [manual] P5 lint example_runs (runs against the mock)
+      - arguments: { owner: octocat, repo: hello-world, pull_number: 1, body: { merge_method: squash } }
   "operationId:pulls/list-reviews":
     hidden: false
     description: List the reviews on a pull request (approved, changes requested, commented).  # [curated]

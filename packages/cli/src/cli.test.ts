@@ -43,6 +43,22 @@ describe('neurouter validate', () => {
     expect(r.err).toMatch(/neurouter\.yaml:\d+:1: error: .*(Literal secrets|confirm)/);
   });
 
+  it('prints failing lint rules; a curated example that does not run is an error', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));
+    writeFileSync(join(dir, 'o.overlay.yaml'), 'overlay: 1\ntools:\n  operationId:getOrder:\n    examples:\n      - arguments: { order_id: 12 }\n');
+    const f = join(dir, 'neurouter.yaml');
+    writeFileSync(f, `version: 1\nservers:\n  - slug: acme\n    name: Acme\n    spec: { path: ${join(ROOT, 'examples/acme-orders/openapi.yaml')} }\n    overlay: o.overlay.yaml\n    environments:\n      - { slug: dev, kind: dev, baseUrl: "mock:" }\n`);
+    const r = await run(['validate', '--config', f]);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/acme: lint example_runs \d+%/);
+    expect(r.err).toMatch(/error: get_order: curated example \{"order_id":12\} fails: does not match the input schema: \/order_id must be string/);
+    expect(r.err).toMatch(/1 curated example\(s\) do not run/);
+    writeFileSync(join(dir, 'o.overlay.yaml'), 'overlay: 1\ntools:\n  operationId:getOrder:\n    examples:\n      - arguments: { order_id: order_2 }\n');
+    const ok = await run(['validate', '--config', f]);
+    expect(ok.code, ok.err).toBeUndefined();
+    expect(ok.out).toMatch(/acme: lint has_more_without_cursor/);
+  }, 30_000);
+
   it('--print-schema prints the JSON Schema', async () => {
     const r = await run(['validate', '--print-schema']);
     expect(JSON.parse(r.out)).toHaveProperty('properties.servers');

@@ -755,7 +755,7 @@ function ReadinessStep({ preview, serverId, runId, onBack, onState }: { preview:
   const done = r?.status === 'succeeded' && r.score;
   const running = !!runId && (!r || r.status === 'running' || r.status === 'queued');
   const prelim = preview.preliminaryScore ?? preview.lint?.score ?? 0;
-  const lintRows = (preview.lint?.rules ?? []).filter((x) => ['description_present', 'examples_present', 'names_clear'].includes(x.rule));
+  const lintRows = (preview.lint?.rules ?? []).filter((x) => ['description_present', 'examples_present', 'example_runs', 'names_clear'].includes(x.rule));
   const noModel = !me.features.evals;
   const modeCell = (mode: 'tool' | 'code') => {
     const cells = r?.matrix.filter((c) => c.mode === mode) ?? [];

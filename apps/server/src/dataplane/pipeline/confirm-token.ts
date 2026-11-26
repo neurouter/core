@@ -76,6 +76,8 @@ export interface WritePlan {
   args: Record<string, unknown>;
   reversible: boolean;
   effect: string;
+  /** overlay `readBack`: the target's current values (label fields and the fields the write changes) */
+  before?: Record<string, unknown>;
 }
 
 /** `cancel_order(order_id=order_1)` → target `order order_1`, effect from the description (the paragraph after the title, else its first sentence). */
@@ -84,7 +86,38 @@ export function writePlan(t: ToolDef, args: Record<string, unknown>): WritePlan 
   const path = t.binding.type === 'http' ? t.binding.pathTemplate : t.binding.type === 'graphql' ? `graphql:${t.binding.operationType}` : t.name;
   const id = pathId(t, args);
   const paras = t.description.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean);
+
   const text = (paras.length > 1 ? paras[1] : paras[0]) ?? t.title ?? t.name;
   const sentence = /^(.{10,200}?[.!?])(\s|$)/.exec(text)?.[1] ?? text.slice(0, 200);
   return { tool: t.name, ...(id ? { target: `${nounOf(t)} ${String(id.value).slice(0, 60)}` } : {}), method, path, args, reversible: !t.risk.destructive, effect: text.length <= 200 ? text : sentence };
+}
+
+const LABEL_KEYS = ['name', 'title', 'display_name', 'displayName', 'login', 'email', 'number', 'customerId', 'customer_id', 'status', 'state'];
+
+function at(o: unknown, path: string): unknown {
+  let v: unknown = o;
+  for (const k of path.split('.')) v = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>)[k] : undefined;
+  return v;
+}
+
+const short = (v: unknown): string => (typeof v === 'string' ? v.slice(0, 40) : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '');
+
+/**
+ * Overlay `readBack` (contract-v2 §4.6, P5): a human label of the write's target from its read
+ * (`order order_1 (customer_3, shipped, 171.13 EUR)`) and the values an agent verifies: the label fields, the
+ * fields the write's arguments name, and status/state.
+ */
+export function readBackView(t: ToolDef, args: Record<string, unknown>, entity: unknown, label?: string[]): { label: string; values: Record<string, unknown> } {
+  const id = pathId(t, args);
+  const keys = label?.length ? label : LABEL_KEYS.filter((k) => at(entity, k) !== undefined && typeof at(entity, k) !== 'object').slice(0, 3);
+  const parts = keys.map((k) => short(at(entity, k))).filter(Boolean);
+  const e = entity && typeof entity === 'object' && !Array.isArray(entity) ? (entity as Record<string, unknown>) : {};
+  if (!label?.length && typeof e.total === 'number') parts.push(`${e.total}${typeof e.currency === 'string' ? ` ${e.currency}` : ''}`);
+  const values: Record<string, unknown> = {};
+  for (const k of [...keys, ...Object.keys(args), 'status', 'state']) {
+    const v = at(entity, k);
+    if (v !== undefined && !(k in values) && (typeof v !== 'object' || v === null || JSON.stringify(v).length <= 300)) values[k] = v;
+  }
+  const head = `${nounOf(t)}${id ? ` ${String(id.value).slice(0, 60)}` : ''}`;
+  return { label: parts.length ? `${head} (${parts.slice(0, 4).join(', ')})` : head, values };
 }

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compile, GRAPHQL_ACCEPT, GRAPHQL_INTROSPECTION_QUERY, pyNamespace, readIntrospectionResponse } from '@neurouter/compiler';
-import { neurouterYamlJsonSchema } from '@neurouter/shared';
+import { neurouterYamlJsonSchema, type LintReport, type ToolDef } from '@neurouter/shared';
 import { parseConfigYaml } from '@neurouter/server';
 import { readSpec } from './common.js';
 
@@ -28,6 +28,7 @@ export async function cmdCompile(o: { spec?: string; overlay?: string; out?: str
   }
   console.log(`${r.title || 'API'} (${r.format}): ${r.tools.length} tools (${visible.length} visible, ${visible.filter((t) => t.risk.write).length} write), lint score ${r.lint.score}`);
   for (const t of visible) console.log(`  ${t.risk.write ? 'W' : 'R'} ${t.name}`);
+  printLint('', r.lint, r.tools);
   if (o.out) writeFileSync(o.out, JSON.stringify({ format: r.format, title: r.title, tools: r.tools, lint: r.lint, diagnostics: r.diagnostics }, null, 2));
   if (o.stubs) {
     mkdirSync(o.stubs, { recursive: true });
@@ -37,6 +38,30 @@ export async function cmdCompile(o: { spec?: string; overlay?: string; out?: str
     }
   }
   if (!r.ok) process.exitCode = 1;
+}
+
+/**
+ * Lint lines for the terminal: each rule that does not pass (score, detail) and its warnings (max `perRule`).
+ * Returns the number of errors: a curated (overlay or spec) example that does not run fails validation
+ * (contract-v2 §10: examples in descriptions are executed); a synthesized one only warns.
+ */
+export function printLint(prefix: string, report: LintReport, tools: ToolDef[], perRule = 5): number {
+  let errors = 0;
+  for (const r of report.rules) {
+    if (r.passed || r.weight === 0) continue;
+    console.log(`  ${prefix}lint ${r.rule} ${Math.round(r.score * 100)}%: ${r.detail}`);
+    const fs = report.findings.filter((f) => f.rule === r.rule && f.severity !== 'info');
+    for (const f of fs.slice(0, perRule)) {
+      const curated = r.rule === 'example_runs' && f.message.startsWith('curated example');
+      if (curated) errors++;
+      (curated ? console.error : console.log)(`    ${curated ? 'error' : f.severity}: ${f.tool ? `${f.tool}: ` : ''}${f.message}`);
+    }
+    if (fs.length > perRule) console.log(`    … ${fs.length - perRule} more`);
+  }
+  // curated examples beyond the printed ones still count
+  void tools;
+  const failing = report.findings.filter((f) => f.rule === 'example_runs' && f.message.startsWith('curated example'));
+  return Math.max(errors, failing.length);
 }
 
 /** `npx neurouter validate`: parse + compile + lint every server of the file; exit 1 on errors (§6.2). */
@@ -67,6 +92,9 @@ export async function cmdValidate(o: { config: string; printSchema?: boolean }):
           if (d.severity === 'error') errors++;
         }
         console.log(`${s.slug}: ${r.tools.filter((t) => !t.hidden).length} visible tools, lint score ${r.lint.score}, ${s.environments?.length ?? 0} environment(s) + mock`);
+        const failed = printLint(`${s.slug}: `, r.lint, r.tools);
+        if (failed) console.error(`${o.config}:${line}:1: error: ${s.slug}: ${failed} curated example(s) do not run against the mock (fix them in the overlay)`);
+        errors += failed;
       } catch (err) {
         console.error(`${o.config}:${line}:1: error: ${s.slug}: ${(err as Error).message}`);
         errors++;

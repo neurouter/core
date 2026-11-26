@@ -3,27 +3,42 @@
  * weighted share of passed checks (each rule scores 0..1).
  */
 import type { LintFinding, LintReport, LintRule, LintRuleResult, ToolDef } from '@neurouter/shared';
+import { describeTool, destructiveProblem, firstSentenceProblem, hasMoreWithoutCursor, proseEnums, type CheckedExample } from './describe.js';
 import { destructiveVerb, isVerb } from './naming.js';
 import { countFields, schemaDepth } from './openapi/schema.js';
 import { isObj } from './util.js';
 
 export const LINT_WEIGHTS: Record<LintRule, number> = {
-  description_present: 15,
-  description_actionable: 10,
-  params_described: 15,
-  params_typed: 10,
-  names_clear: 10,
-  toolset_size: 15,
-  output_shaped: 10,
-  examples_present: 5,
-  writes_marked: 5,
-  schema_depth: 5,
+  description_present: 10,
+  description_actionable: 6,
+  params_described: 10,
+  params_typed: 8,
+  names_clear: 8,
+  toolset_size: 12,
+  output_shaped: 8,
+  // replaced by example_runs (contract-v2 §4.5: the example in the description is executed); kept for old reports
+  examples_present: 0,
+  writes_marked: 4,
+  schema_depth: 4,
+  // contract-2 description standard (P5)
+  example_runs: 10,
+  destructive_marked: 4,
+  has_more_without_cursor: 4,
+  envelope_conformance: 4,
+  first_sentence: 4,
+  description_length: 2,
+  enum_in_schema: 2,
 };
+
+/** The contract-2 description of a tool should stay within this many characters. */
+export const MAX_AGENT_DESCRIPTION = 800;
 
 export interface LintOptions {
   discovery?: 'auto' | 'full' | 'search';
   /** extra pinned tool names (neurouter.yaml `exposure.pinned`) */
   pinned?: string[];
+  /** checked examples (`checkExamples`): without them `example_runs` only checks that an example exists */
+  examples?: Map<string, CheckedExample>;
 }
 
 const MAX_FINDINGS_PER_RULE = 25;
@@ -146,15 +161,19 @@ export function lint(tools: ToolDef[], opts: LintOptions = {}): LintReport {
     add('output_shaped', ok / lists.length, `${ok}/${lists.length} list tools shaped or small`);
   }
 
-  // examples_present
-  if (visible.length === 0) add('examples_present', 1, 'no visible tools');
-  else {
-    const withEx = visible.filter((t) => t.examples.length > 0).length;
-    const ratio = withEx / visible.length;
-    add('examples_present', ratio / 0.3, `${withEx}/${visible.length} tools have examples (target ≥ 30%)`);
-    if (ratio < 0.3) findings.push({ rule: 'examples_present', severity: 'info', message: `Only ${withEx} of ${visible.length} tools have an example; add examples in the overlay.` });
-  }
-
+  // example_runs: every tool's description example validates and the mock answers it (contract-v2 §4.5)
+  perTool(
+    'example_runs',
+    (t) => {
+      if (t.kind === 'composite') return null;
+      const ex = opts.examples?.get(t.name) ?? (t.checkedExample as CheckedExample | undefined);
+      if (!ex) return opts.examples ? 'no example: add one in the overlay (examples[].arguments); no required value could be derived' : t.examples.length ? null : 'no example (add one in the overlay)';
+      if (ex.runs === false) return `${ex.source === 'synthesized' ? '' : 'curated '}example ${JSON.stringify(ex.arguments).slice(0, 120)} fails: ${ex.problem ?? 'error'}`;
+      if (ex.curatedProblem) return `curated example ${ex.curatedProblem} (the description shows a working ${ex.source} example instead)`;
+      return null;
+    },
+    'tools have an example that runs against the mock',
+  );
   perTool(
     'writes_marked',
     (t) => {
@@ -175,6 +194,54 @@ export function lint(tools: ToolDef[], opts: LintOptions = {}): LintReport {
       findings.push({ rule: 'writes_marked', severity: 'info', tool: t.name, message: `marked destructive because it ${verb}s (name/summary); set risk.destructive in the overlay if that is wrong` });
   }
   perTool('schema_depth', (t) => (schemaDepth(t.inputSchema) > 4 ? `input schema nests ${schemaDepth(t.inputSchema)} levels (> 4)` : null), 'input schemas nest ≤ 4 levels');
+
+  perTool('destructive_marked', (t) => destructiveProblem(t), 'destructive writes are marked and name what they destroy');
+  {
+    const lists = visible.filter((t) => isListTool(t) || hasMoreWithoutCursor(t));
+    let ok = 0;
+    let n = 0;
+    for (const t of lists) {
+      if (!hasMoreWithoutCursor(t)) ok++;
+      else if (n++ < MAX_FINDINGS_PER_RULE) findings.push({ rule: 'has_more_without_cursor', severity: 'warning', tool: t.name, message: 'pages upstream (a page-size parameter) but has no cursor, page or offset parameter or Link header: has_more can be true without a next_cursor. Expose the position parameter, or cap the list with response.maxItems.' });
+    }
+    add('has_more_without_cursor', lists.length ? ok / lists.length : 1, lists.length ? `${ok}/${lists.length} list tools can reach their next page` : 'no list tools');
+  }
+  perTool(
+    'envelope_conformance',
+    (t) => {
+      const ex = opts.examples?.get(t.name) ?? (t.checkedExample as CheckedExample | undefined);
+      return ex?.conforms === false ? (ex.problem ?? 'the example response does not match the output schema') : null;
+    },
+    'example responses match the (shaped) output schema',
+  );
+  perTool('first_sentence', (t) => (t.kind === 'composite' ? null : firstSentenceProblem(t)), 'first sentences state the effect (verb first, 10–200 chars)');
+  perTool(
+    'description_length',
+    (t) => {
+      const ex = opts.examples?.get(t.name) ?? (t.checkedExample as CheckedExample | undefined);
+      const d = describeTool(t, visible, { example: ex?.arguments ?? null, paging: isListTool(t) ? { cursor: 'cursor', limit: 'limit' } : null, fields: { name: 'fields' }, dryRun: t.risk.write ? 'dry_run' : null, confirm: t.risk.destructive ? 'confirm' : null });
+      return d.length > MAX_AGENT_DESCRIPTION ? `the agent description is ${d.length} chars (aim for ≤ ${MAX_AGENT_DESCRIPTION}); shorten the first paragraph or the example` : null;
+    },
+    `agent descriptions ≤ ${MAX_AGENT_DESCRIPTION} chars`,
+  );
+  {
+    let ok = 0;
+    let n = 0;
+    for (const t of visible) {
+      const prose = proseEnums(t);
+      const missing = prose.filter((p) => !p.inSchema);
+      if (!missing.length) ok++;
+      for (const p of prose) {
+        if (n++ >= MAX_FINDINGS_PER_RULE) break;
+        findings.push(
+          p.inSchema
+            ? { rule: 'enum_in_schema', severity: 'info', tool: t.name, message: `${p.arg}: the description repeats the allowed values (${p.values.join(', ')}) that the schema already lists; drop them from the prose` }
+            : { rule: 'enum_in_schema', severity: 'warning', tool: t.name, message: `${p.arg}: allowed values (${p.values.join(', ')}) are only in the description; put them in the schema (args.enum)`, fix: [{ op: 'set', selector: t.key, field: 'args', value: { enum: { [p.arg]: p.values } } }] },
+        );
+      }
+    }
+    add('enum_in_schema', visible.length ? ok / visible.length : 1, `${ok}/${visible.length} tools keep allowed values in the schema`);
+  }
 
   const total = rules.reduce((s, r) => s + r.weight, 0);
   const score = Math.round((100 * rules.reduce((s, r) => s + r.weight * r.score, 0)) / total);

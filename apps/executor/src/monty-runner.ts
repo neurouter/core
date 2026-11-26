@@ -177,7 +177,7 @@ export class MontyRunner {
       externalModules[ns] = new (M().ExternalModule)(attrs, { stubs });
     }
     const inputs = req.inputs ?? {};
-    const globalStubs = ['from typing import Any', 'def days_since(iso: str) -> float: ...', ...Object.keys(inputs).filter((k) => IDENT.test(k)).map((k) => `${k}: Any`)].join('\n') + '\n';
+    const globalStubs = ['from typing import Any', 'def days_since(iso: str) -> float: ...', ...Object.keys(inputs).filter((k) => IDENT.test(k)).map((k) => `${k}: Any`)].join('\n') + '\n' + (req.typeStubs ? `${req.typeStubs}\n` : '');
     const frozenNow = new Date(req.osPolicy.datetime);
     const nowMs = Number.isNaN(frozenNow.getTime()) ? Date.now() : frozenNow.getTime();
     const prelude = req.prelude ?? `import ${Object.keys(modules).join(', ')}`;
@@ -388,8 +388,22 @@ interface TypingDiagnostic {
 const mapCol = (col: number | undefined, offset: number): number | undefined => (col === undefined ? undefined : Math.max(1, col - offset));
 const mapLine = (line: number | undefined, offset: number): number | undefined => (line === undefined ? undefined : Math.max(1, line - offset));
 
+/** The prelude is feed 0 and the user's (wrapped) code feed 1: frames of the prelude are not the script's. */
+const PRELUDE_FILE = '<python-input-0>';
+const USER_FILE = '<python-input-1>';
+
 function cleanTraceback(text: string, offset: number): string {
-  return text.replace(/<python-input-\d+>/g, SCRIPT_NAME).replace(/line (\d+)/g, (_m, n: string) => `line ${mapLine(Number(n), offset)}`);
+  // drop the prelude's frames (`File "<python-input-0>", line N, in f` + its source and marker lines)
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]!.includes(`File "${PRELUDE_FILE}"`)) {
+      while (i + 1 < lines.length && /^\s{4,}/.test(lines[i + 1]!)) i++;
+      continue;
+    }
+    kept.push(lines[i]!);
+  }
+  return kept.join('\n').replace(/<python-input-\d+>/g, SCRIPT_NAME).replace(/line (\d+)/g, (_m, n: string) => `line ${mapLine(Number(n), offset)}`);
 }
 
 /** Maps a Monty exception to a run status and a user-facing error with user line numbers. */
@@ -426,7 +440,9 @@ export function mapError(err: unknown, offset: number, limitTripped: string | nu
   if (MontyRuntimeError && err instanceof MontyRuntimeError) {
     const { typeName } = err.exception;
     const frames = err.traceback();
-    const last = frames[frames.length - 1];
+    // an error raised inside a prelude function (contract-2 tool wrappers) is reported at the user's calling line
+    const user = frames.filter((f) => f.filename === USER_FILE);
+    const last = user[user.length - 1] ?? frames.filter((f) => f.filename !== PRELUDE_FILE).pop() ?? frames[frames.length - 1];
     const status: RunStatus = LIMIT_EXCEPTIONS.has(typeName) || limitTripped ? 'limit_exceeded' : 'script_error';
     return {
       status,

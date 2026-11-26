@@ -164,6 +164,7 @@ function applyEntry(tool: ToolDef, selector: string, e: OverlayToolEntry, ctx: C
   if (e.response) tool.shaping = { ...(tool.shaping ?? {}), ...e.response };
   if (e.examples) tool.examples = e.examples.map((x) => ({ ...(x.title ? { title: x.title } : {}), arguments: x.arguments, source: 'overlay' as const }));
   if (e.idempotencyHeader && tool.binding.type === 'http') (tool.binding as HttpBinding).idempotencyHeader = e.idempotencyHeader;
+  if (e.readBack) tool.readBack = typeof e.readBack === 'string' ? { tool: e.readBack } : { tool: e.readBack.tool, ...(e.readBack.label?.length ? { label: e.readBack.label } : {}) };
   if (e.graphql?.selection) {
     if (tool.binding.type !== 'graphql' || !ctx.graphqlSchema) {
       ctx.diagnostics.push({ severity: 'warning', code: 'overlay_graphql_selection', message: `${selector}: graphql.selection applies only to GraphQL tools`, line: ctx.lineOf(selector) });
@@ -253,6 +254,18 @@ export function applyOverlay(baseTools: ToolDef[], overlay: Overlay | null, opts
   for (const [p, def] of Object.entries(overlay.profiles ?? {})) {
     profiles[p] = def.tools;
     for (const n of def.tools) if (!known.has(n)) diagnostics.push({ severity: 'warning', code: 'profile_unknown_tool', message: `profile "${p}" lists unknown tool "${n}"`, overlayPath: `profiles.${p}.tools` });
+  }
+  // readBack must name a visible read tool whose required arguments the write has
+  for (const t of tools) {
+    if (!t.readBack) continue;
+    const r = tools.find((x) => x.name === t.readBack!.tool);
+    const req = r && Array.isArray(r.inputSchema.required) ? (r.inputSchema.required as string[]) : [];
+    const have = new Set(Object.keys((t.inputSchema.properties as object | undefined) ?? {}));
+    const problem = !t.risk.write ? 'is only used on write tools' : !r ? `names unknown tool "${t.readBack.tool}"` : r.risk.write ? `"${r.name}" is not a read` : req.some((a) => !have.has(a)) ? `"${r.name}" needs ${req.filter((a) => !have.has(a)).join(', ')}, which ${t.name} does not have` : null;
+    if (problem) {
+      diagnostics.push({ severity: 'warning', code: 'overlay_read_back', message: `${t.name}: readBack ${problem}; ignored`, overlayPath: `tools.readBack` });
+      delete t.readBack;
+    }
   }
   for (const o of orphaned) diagnostics.push({ severity: 'warning', code: 'overlay_orphaned', message: `Overlay key "${o}" matches no operation`, overlayPath: `tools["${o}"]`, line: ctx.lineOf(o) });
   return { tools, diagnostics, orphanedOverlayKeys: orphaned, profiles };

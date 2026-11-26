@@ -114,6 +114,13 @@ export interface ToolDef {
   key: string;
   /** sha256(JCS of the agent-visible definition). */
   defHash: string;
+  /**
+   * The copy-ready example agents see (contract 2), checked by the compiler: validated against the input schema and
+   * run against a throwaway mock (lint `example_runs`). Absent in builds compiled before 0.3.
+   */
+  checkedExample?: { arguments: Record<string, unknown>; source: 'overlay' | 'spec' | 'synthesized'; runs: boolean | null; conforms: boolean | null; problem?: string; curatedProblem?: string };
+  /** Overlay `readBack` (contract 2): the read that labels the write's target and shows before/after values. */
+  readBack?: { tool: string; label?: string[] };
 }
 
 export const Diagnostic = z.object({
@@ -141,6 +148,14 @@ export const LintRule = z.enum([
   'examples_present',
   'writes_marked',
   'schema_depth',
+  // contract 2 description standard (P5)
+  'example_runs',
+  'destructive_marked',
+  'has_more_without_cursor',
+  'envelope_conformance',
+  'first_sentence',
+  'description_length',
+  'enum_in_schema',
 ]);
 export type LintRule = z.infer<typeof LintRule>;
 

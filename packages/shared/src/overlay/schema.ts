@@ -61,6 +61,15 @@ export const OverlayToolEntry = z
     examples: z.array(OverlayExample).max(20),
     graphql: z.object({ selection: z.string() }).strict(),
     idempotencyHeader: z.string(),
+    /**
+     * Contract 2 (writes): the read tool of the write's target, e.g. `get_order`. Dry-run plans and confirmations
+     * name the target with a human label, and a write answers `{before, after, response}`. `label`: the fields of
+     * the read that name the entity (default: name/title/number/status/total-like fields).
+     */
+    readBack: z.union([
+      z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+      z.object({ tool: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/), label: z.array(z.string().max(100)).max(5).optional() }).strict(),
+    ]),
   })
   .partial()
   .strict();
@@ -93,7 +102,7 @@ export const Overlay = z
   .strict();
 export type Overlay = z.infer<typeof Overlay>;
 
-export const OVERLAY_TOOL_FIELDS = ['name', 'title', 'description', 'hidden', 'pinned', 'tags', 'risk', 'args', 'response', 'examples'] as const;
+export const OVERLAY_TOOL_FIELDS = ['name', 'title', 'description', 'hidden', 'pinned', 'tags', 'risk', 'args', 'response', 'examples', 'readBack'] as const;
 export const OverlayToolField = z.enum(OVERLAY_TOOL_FIELDS);
 export type OverlayToolField = z.infer<typeof OverlayToolField>;
 

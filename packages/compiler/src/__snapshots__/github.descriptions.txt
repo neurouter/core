@@ -1,0 +1,233 @@
+## repos_get
+Get a repository's metadata (default branch, visibility, open issue count, topics).
+Args: owner, repo (required).
+Example: repos_get({"owner":"octocat","repo":"hello-world"})
+
+## issues_list_assignees
+List the users who are eligible to be assigned to issues in a specific repository. This returns the repository's assignable users, not the users currently assigned to a particular issue.
+Args: owner, repo (required); per_page, page.
+Example: issues_list_assignees({"owner":"octocat","repo":"hello-world"})
+
+## repos_list_branches
+List branch names and protection status in a repository. Use this to check whether a named branch exists; it does not return commit history.
+Related: repos_get_branch (one branche by id).
+Args: owner, repo (required); protected, per_page, page.
+Example: repos_list_branches({"owner":"octocat","repo":"hello-world"})
+
+## repos_get_branch
+Get one branch with its latest commit.
+Related: repos_list_branches (find branches).
+Args: owner, repo, branch (required).
+Example: repos_get_branch({"owner":"octocat","repo":"hello-world","branch":"branch_1"})
+
+## repos_list_commits
+List commits in a repository, newest first. To show recent commits from a branch, pass that branch name in `sha`; omit `sha` to use the default branch.
+Args: owner, repo (required); sha, path, author, since, until, per_page, … (1 more).
+Example: repos_list_commits({"owner":"octocat","repo":"hello-world"})
+
+## issues_list_for_repo
+List issues (and pull requests, which GitHub returns through its issues API) in a repository. By default, returns open items.
+Related: issues_get (one issue by id), issues_create (create an issue).
+Args: owner, repo (required); milestone, state, assignee, creator, mentioned, labels, … (5 more).
+Example: issues_list_for_repo({"owner":"octocat","repo":"hello-world","labels":"bug"})
+
+## issues_create
+Create an issue. Only title is required; labels and assignees must already exist in the repository. Writes data.
+Related: issues_get (one issue by id), repos_get (one {owner} by id).
+Args: owner, repo, title (required); body, assignee, milestone, labels, assignees.
+Example: issues_create({"owner":"octocat","repo":"hello-world","title":"Example"})
+Dry run: dry_run=true returns the plan.
+
+## issues_list_comments_for_repo
+List issue comments across a whole repository, for finding recent discussion.
+Related: issues_get_comment (one comment by id), issues_update_comment (change a comment).
+Args: owner, repo (required); sort, direction, since, per_page, page.
+Example: issues_list_comments_for_repo({"owner":"octocat","repo":"hello-world"})
+
+## issues_get_comment
+Get one issue comment by its id.
+Related: issues_list_comments_for_repo (find comments), issues_update_comment (change a comment).
+Args: owner, repo, comment_id (required).
+Example: issues_get_comment({"owner":"octocat","repo":"hello-world","comment_id":1})
+
+## issues_update_comment
+Replace the body of an issue comment. Writes data.
+Related: issues_list_comments_for_repo (find comments), issues_get_comment (one comment by id).
+Args: owner, repo, comment_id, body (required).
+Example: issues_update_comment({"owner":"octocat","repo":"hello-world","comment_id":1,"body":"example"})
+Dry run: dry_run=true returns the plan.
+
+## issues_get
+Fetch an existing issue's details by its repository and issue number, including its title, body, labels, assignees, and state.
+Related: issues_list_for_repo (find issues), issues_create (create an issue).
+Args: owner, repo, issue_number (required).
+Example: issues_get({"owner":"octocat","repo":"hello-world","issue_number":1})
+
+## issues_update
+Update an issue's title, body, state (open/closed), labels, assignees or milestone. Send only the fields to change. Writes data.
+Related: issues_list_for_repo (find issues), issues_get (one issue by id).
+Args: owner, repo, issue_number (required); title, body, assignee, state, state_reason, milestone, … (2 more).
+Example: issues_update({"owner":"octocat","repo":"hello-world","issue_number":1})
+Dry run: dry_run=true returns the plan.
+
+## issues_add_assignees
+Add assignees (logins) to an issue. Writes data.
+Related: issues_get (one issue by id), issues_update (change an issue).
+Args: owner, repo, issue_number (required); assignees.
+Example: issues_add_assignees({"owner":"octocat","repo":"hello-world","issue_number":1})
+Dry run: dry_run=true returns the plan.
+
+## issues_list_comments
+List the comments on one issue or pull request, oldest first.
+Related: issues_create_comment (create a comment).
+Args: owner, repo, issue_number (required); since, per_page, page.
+Example: issues_list_comments({"owner":"octocat","repo":"hello-world","issue_number":1})
+
+## issues_create_comment
+Add a comment to an issue or pull request (pull requests share issue numbers). Writes data.
+Related: issues_get (one issue by id), issues_list_comments (find comments).
+Args: owner, repo, issue_number, body (required).
+Example: issues_create_comment({"owner":"octocat","repo":"hello-world","issue_number":1,"body":"example"})
+Dry run: dry_run=true returns the plan.
+
+## issues_list_labels_on_issue
+List the labels on one issue.
+Related: issues_add_labels (create a label), issues_remove_label (delete a label).
+Args: owner, repo, issue_number (required); per_page, page.
+Example: issues_list_labels_on_issue({"owner":"octocat","repo":"hello-world","issue_number":1})
+
+## issues_set_labels
+Replace all labels on an issue. Send body={"labels":[...]}; an empty list removes all labels. Writes data.
+Related: issues_get (one issue by id), issues_list_labels_on_issue (find labels).
+Args: owner, repo, issue_number (required); body.
+Dry run: dry_run=true returns the plan.
+
+## issues_add_labels
+Add labels to an issue, keeping the existing ones. Send body={"labels":["bug"]}. Writes data.
+Related: issues_get (one issue by id), issues_list_labels_on_issue (find labels).
+Args: owner, repo, issue_number (required); body.
+Example: issues_add_labels({"owner":"octocat","repo":"hello-world","issue_number":1})
+Dry run: dry_run=true returns the plan.
+
+## issues_remove_label
+Remove one label from an issue. Irreversible.
+Related: issues_list_labels_on_issue (find labels), issues_add_labels (create a label).
+Args: owner, repo, issue_number, name (required).
+Example: issues_remove_label({"owner":"octocat","repo":"hello-world","issue_number":1,"name":"label_1"})
+Dry run: dry_run=true returns the plan; then call with confirm from error.next.
+
+## issues_list_labels_for_repo
+List the labels defined in a repository (use the names when labelling issues).
+Related: issues_get_label (one label by id), issues_create_label (create a label).
+Args: owner, repo (required); per_page, page.
+Example: issues_list_labels_for_repo({"owner":"octocat","repo":"hello-world"})
+
+## issues_create_label
+Create a repository label with a name, a hex color (without. Writes data.
+Related: issues_get_label (one label by id), repos_get (one {owner} by id).
+Args: owner, repo, name (required); color, description.
+Example: issues_create_label({"owner":"octocat","repo":"hello-world","name":"label_1"})
+Dry run: dry_run=true returns the plan.
+
+## issues_get_label
+Get one repository label by name.
+Related: issues_list_labels_for_repo (find labels), issues_create_label (create a label).
+Args: owner, repo, name (required).
+Example: issues_get_label({"owner":"octocat","repo":"hello-world","name":"label_1"})
+
+## issues_list_milestones
+List milestones in a repository with their due dates and open/closed issue counts.
+Related: issues_create_milestone (create a milestone).
+Args: owner, repo (required); state, sort, direction, per_page, page.
+Example: issues_list_milestones({"owner":"octocat","repo":"Hello-World","state":"all"})
+
+## issues_create_milestone
+Create a milestone with a title and an optional ISO-8601 due date. Writes data.
+Related: repos_get (one {owner} by id), issues_list_milestones (find milestones).
+Args: owner, repo, title (required); state, description, due_on.
+Example: issues_create_milestone({"owner":"octocat","repo":"hello-world","title":"Example"})
+Dry run: dry_run=true returns the plan.
+
+## pulls_list
+List pull requests in a repository. Use state=open for active work; filter by base branch with base.
+Related: pulls_get (one pull by id), pulls_create (create a pull).
+Args: owner, repo (required); state, head, base, sort, direction, per_page, … (1 more).
+Example: pulls_list({"owner":"octocat","repo":"hello-world"})
+
+## pulls_create
+Open a pull request from head (branch) into base (branch). Writes data.
+Related: pulls_get (one pull by id), repos_get (one {owner} by id).
+Args: owner, repo, head, base (required); title, body, maintainer_can_modify, draft, issue.
+Example: pulls_create({"owner":"octocat","repo":"hello-world","head":"example","base":"example"})
+Dry run: dry_run=true returns the plan.
+
+## pulls_get
+Get one pull request by number, including mergeability, head and base branches.
+Related: pulls_list (find pulls), pulls_create (create a pull).
+Args: owner, repo, pull_number (required).
+Example: pulls_get({"owner":"octocat","repo":"hello-world","pull_number":1})
+
+## pulls_update
+Update a pull request's title, body, state or base branch. Writes data.
+Related: pulls_list (find pulls), pulls_get (one pull by id).
+Args: owner, repo, pull_number (required); title, body, state, base, maintainer_can_modify.
+Example: pulls_update({"owner":"octocat","repo":"hello-world","pull_number":1})
+Dry run: dry_run=true returns the plan.
+
+## pulls_list_review_comments
+List inline review comments on a pull request.
+Args: owner, repo, pull_number (required); sort, direction, since, per_page, page.
+Example: pulls_list_review_comments({"owner":"octocat","repo":"hello-world","pull_number":1})
+
+## pulls_list_commits
+List the commits in a pull request.
+Args: owner, repo, pull_number (required); per_page, page.
+Example: pulls_list_commits({"owner":"octocat","repo":"hello-world","pull_number":1})
+
+## pulls_list_files
+List the files changed in a pull request with additions and deletions.
+Args: owner, repo, pull_number (required); per_page, page.
+Example: pulls_list_files({"owner":"octocat","repo":"hello-world","pull_number":1})
+
+## pulls_check_if_merged
+Check whether a pull request has been merged.
+Related: pulls_merge (change a pull).
+Args: owner, repo, pull_number (required).
+Example: pulls_check_if_merged({"owner":"octocat","repo":"hello-world","pull_number":1})
+
+## pulls_merge
+Merge a pull request. Writes to the base branch. Irreversible.
+Related: pulls_get (one pull by id), pulls_check_if_merged (find pulls).
+Args: owner, repo, pull_number (required); body.
+Example: pulls_merge({"owner":"octocat","repo":"hello-world","pull_number":1,"body":{"merge_method":"squash"}})
+Dry run: dry_run=true returns the plan; then call with confirm from error.next.
+
+## pulls_request_reviewers
+Request reviews from users (logins) or teams on a pull request. Writes data.
+Related: pulls_get (one pull by id), pulls_update (change a pull).
+Args: owner, repo, pull_number (required); reviewers, team_reviewers.
+Example: pulls_request_reviewers({"owner":"octocat","repo":"hello-world","pull_number":1})
+Dry run: dry_run=true returns the plan.
+
+## pulls_list_reviews
+List the reviews on a pull request (approved, changes requested, commented).
+Related: pulls_create_review (create a review).
+Args: owner, repo, pull_number (required); per_page, page.
+Example: pulls_list_reviews({"owner":"octocat","repo":"hello-world","pull_number":1})
+
+## pulls_create_review
+Submit a review on a pull request with event APPROVE, REQUEST_CHANGES or COMMENT. Writes data.
+Related: pulls_get (one pull by id), pulls_list_reviews (find reviews).
+Args: owner, repo, pull_number (required); commit_id, body, event, comments.
+Example: pulls_create_review({"owner":"octocat","repo":"hello-world","pull_number":1})
+Dry run: dry_run=true returns the plan.
+
+## repos_list_tags
+List tags in a repository.
+Args: owner, repo (required); per_page, page.
+Example: repos_list_tags({"owner":"octocat","repo":"hello-world"})
+
+## search_issues_and_pull_requests
+Search issue and pull-request titles, bodies, and comments using keywords and GitHub qualifiers such as `repo:OWNER/REPO`.
+Args: q (required); sort, order, per_page, page.
+Example: search_issues_and_pull_requests({"q":"example"})

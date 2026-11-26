@@ -10,7 +10,8 @@ export { applyOverlay, matchesSelector, selectorClass, compositeTool, type Apply
 export { applyOverlayPatch, diffOverlays, OverlayPatchError, type PatchResult } from './overlay/patch.js';
 export { parsePath, formatPath, getAll, deleteAt, replaceAt, includePaths, flattenAt, validatePaths, PathSyntaxError, type PathSeg } from './overlay/paths.js';
 export { shapeResponse, shapeOutputSchema, wrapStructured, clipToFit, REDACTED_VALUE, type ShapeResult, type ShapeOptions, type TruncationInfo } from './shape.js';
-export { generateStubs, generateOpsStub, pySignatureFor, pyArgMap, pascalCase, MAX_TYPED_DICTS, type StubOptions } from './stubs.js';
+export { generateStubs, generateOpsStub, pySignatureFor, pyArgMap, pyNameMap, pascalCase, MAX_TYPED_DICTS, type StubOptions, type PyArgOptions } from './stubs.js';
+export { scriptApi, scriptPrelude, scriptCommonTypeStubs, generateOpsStubV2, scriptErrorType, scriptErrorClass, pyCallText, pyValue, firstSentence, docstringV2, NR_HOST_STUBS, SCRIPT_ERROR_CLASSES, type ScriptApi, type ScriptApiOptions } from './script-api.js';
 export { lint, LINT_WEIGHTS, type LintOptions } from './lint.js';
 export { diffSpecs, type SpecChangeSummary, type OpRef } from './diff.js';
 export { buildMockModel, objectProps, scalarTypeOf, type MockModel, type OpenApiMockModel, type GraphqlMockModel, type MockOperation, type MockResource, type MockOpKind } from './mock/model.js';
@@ -50,3 +51,4 @@ import type { MockStore } from './mock/store.js';
 export function resetNamespace(store: MockStore, namespace: string, seed?: number): void {
   store.resetNamespace(namespace, seed);
 }
+export { checkExamples, describeTool, synthesizeExample, exampleProblems, leadSentences, relatedTools, hasMoreWithoutCursor, proseEnums, enumInProse, firstSentenceProblem, destructiveProblem, type CheckedExample, type DescribeOptions } from './describe.js';

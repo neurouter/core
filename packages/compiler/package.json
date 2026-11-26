@@ -45,6 +45,7 @@
   "dependencies": {
     "@neurouter/shared": "0.2.1",
     "@scalar/openapi-parser": "0.29.28",
+    "ajv": "8.20.0",
     "yaml": "2.9.1",
     "graphql": "17.1.0",
     "@faker-js/faker": "10.6.0",

@@ -17,7 +17,8 @@ import { hashCanonical } from '../../kernel/lib/jcs.js';
 import type { RunContext } from '../pipeline/context.js';
 import { resolveVisibleTool, writeEnabled } from '../pipeline/pipeline.js';
 import { enabledOps, opsDefinition, reportEnabled, type OpsOp } from '../ops/ops.js';
-import { codeModeAvailable, runScriptEntry } from '../code/run-script.js';
+import { codeModeAvailable, runScriptEntry, toolExample } from '../code/run-script.js';
+import { describeTool } from '@neurouter/compiler';
 import type { TypedSchemaIssues } from '../envelope/render.js';
 import { ADVERTISED_ENVELOPE_SCHEMA, typedEnvelopeSchema } from '../envelope/schema.js';
 import { pagingPlan, v2InputSchema } from '../paging/plan.js';
@@ -118,10 +119,11 @@ export function apiToolEntry(ctx: RunContext, t: ToolDef, deferLoading?: boolean
   const outputSchema = view.contract === 2 ? v2OutputSchema(ctx, view, t) : view.outputSchema === 'typed' ? t.outputSchema : undefined;
   // contract 2 adds cursor/limit/fields (D6); composites keep their schema
   const inputSchema = view.contract === 2 ? agentInputSchema(t) : t.inputSchema;
+  const description = view.contract === 2 ? agentDescription(ctx, t) : t.description;
   return {
     name: t.name,
     ...(t.title ? { title: t.title } : {}),
-    description: t.description,
+    description,
     inputSchema,
     ...(outputSchema ? { outputSchema } : {}),
     annotations: { title: t.title, readOnlyHint: t.risk.readOnly, destructiveHint: t.risk.destructive, idempotentHint: t.risk.idempotent, openWorldHint: t.risk.openWorld },
@@ -130,10 +132,38 @@ export function apiToolEntry(ctx: RunContext, t: ToolDef, deferLoading?: boolean
       [META_WRITES_ENABLED]: writes,
       // both confirm modes ask the user through elicitation; they differ only for clients that cannot be asked
       [META_CONFIRM]: t.risk.write && ctx.bundle.environment.writes.confirm !== 'none' ? 'elicit' : 'none',
-      [META_DEF_HASH]: view.contract === 2 ? hashCanonical({ def: t.defHash, contract: 2, outputSchema: outputSchema ? view.outputSchema : 'none', inputSchema: hashCanonical(inputSchema) }) : t.defHash,
+      [META_DEF_HASH]: view.contract === 2 ? hashCanonical({ def: t.defHash, contract: 2, outputSchema: outputSchema ? view.outputSchema : 'none', inputSchema: hashCanonical(inputSchema), description, ...(t.readBack ? { readBack: t.readBack } : {}) }) : t.defHash,
       [META_DEFER_LOADING]: deferLoading ?? false,
     },
   };
+}
+
+const descriptions = new WeakMap<ToolDef, Map<string, string>>();
+
+/**
+ * The description an agent sees in contract 2 (contract-v2 §4.5, P5): effect first, related tools, arguments, the
+ * compiler-checked example, Pages/Fields and dry-run/confirm lines (names as injected, `nr_` on collisions).
+ * Cached per tool and environment confirm mode.
+ */
+export function agentDescription(ctx: RunContext, t: ToolDef): string {
+  const plan = pagingPlan(t);
+  const tokens = ctx.bundle.environment.writes.confirm === 'none';
+  const key = tokens ? 't' : 'p';
+  let per = descriptions.get(t);
+  const hit = per?.get(key);
+  if (hit) return hit;
+  const limitMax = plan.size ? ((t.inputSchema.properties as Record<string, { maximum?: number }> | undefined)?.[plan.size.arg]?.maximum ?? null) : null;
+  const include = t.shaping?.include;
+  const d = describeTool(t, ctx.bundle.build.tools, {
+    example: toolExample(t),
+    paging: plan.list && plan.names.cursor ? { cursor: plan.names.cursor, limit: plan.names.limit, limitMax } : null,
+    fields: t.kind === 'composite' ? null : { name: plan.names.fields, ...(include?.length ? { defaults: include.map((p) => p.replace(/^[^.[\]]*\[\]\.?/, '')).filter(Boolean) } : {}) },
+    dryRun: plan.names.dryRun,
+    confirm: tokens ? plan.names.confirm : null,
+  });
+  if (!per) descriptions.set(t, (per = new Map()));
+  per.set(key, d);
+  return d;
 }
 
 /** The input schema an agent sees in contract 2: the API tool's schema plus `cursor`/`limit`/`fields` (D6). */
