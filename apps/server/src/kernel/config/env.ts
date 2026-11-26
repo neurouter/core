@@ -39,8 +39,8 @@ export function parseMasterKeys(value: string): Map<string, Buffer> {
   return out;
 }
 
-/** Env schema (Neurouter backend spec §6.1; names shared with Hub keep Hub's names). */
-export const Env = z
+/** Env fields (Neurouter backend spec §6.1; names shared with Hub keep Hub's names), before cross-field checks. */
+export const EnvFields = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     HOST: z.string().default('0.0.0.0'),
@@ -139,8 +139,12 @@ export const Env = z
     NEUROUTER_DEMO_READ_ONLY: zBool.default(false),
     NEUROUTER_PUBLIC_REPORTS: zBool.default(true),
     NEUROUTER_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
-  })
-  .superRefine((e, ctx) => {
+  });
+
+const DB_URL = /^(sqlite:|postgres:\/\/|postgresql:\/\/)/;
+
+/** Env schema of the server process. */
+export const Env = EnvFields.superRefine((e, ctx) => {
     const prod = e.NODE_ENV === 'production';
     if (prod && !e.PUBLIC_URL) ctx.addIssue({ code: 'custom', path: ['PUBLIC_URL'], message: 'PUBLIC_URL is required in production' });
     if (prod && e.PUBLIC_URL && !e.PUBLIC_URL.startsWith('https://'))
@@ -175,10 +179,22 @@ export const Env = z
         ctx.addIssue({ code: 'custom', path: ['NEUROUTER_MASTER_KEYS'], message: (err as Error).message });
       }
     }
-    if (!/^(sqlite:|postgres:\/\/|postgresql:\/\/)/.test(e.DATABASE_URL))
-      ctx.addIssue({ code: 'custom', path: ['DATABASE_URL'], message: 'DATABASE_URL must start with sqlite: or postgres://' });
-    if (e.AUDIT_DATABASE_URL && !/^(sqlite:|postgres:\/\/|postgresql:\/\/)/.test(e.AUDIT_DATABASE_URL))
-      ctx.addIssue({ code: 'custom', path: ['AUDIT_DATABASE_URL'], message: 'AUDIT_DATABASE_URL must start with sqlite: or postgres://' });
+    checkDatabaseUrls(e, ctx);
   });
 
 export type Env = z.infer<typeof Env>;
+
+function checkDatabaseUrls(e: { DATABASE_URL: string; AUDIT_DATABASE_URL?: string | undefined }, ctx: z.RefinementCtx): void {
+  if (!DB_URL.test(e.DATABASE_URL)) ctx.addIssue({ code: 'custom', path: ['DATABASE_URL'], message: 'DATABASE_URL must start with sqlite: or postgres://' });
+  if (e.AUDIT_DATABASE_URL && !DB_URL.test(e.AUDIT_DATABASE_URL))
+    ctx.addIssue({ code: 'custom', path: ['AUDIT_DATABASE_URL'], message: 'AUDIT_DATABASE_URL must start with sqlite: or postgres://' });
+}
+
+/**
+ * The env subset the migration runner needs (`migrate.js`, a Cloud Run job / Helm Job): the database
+ * URLs and pool sizes, the embedding dims (vector column) and NODE_ENV. No PUBLIC_URL, OIDC, master
+ * keys or pepper, so a migrate job can run with only the database secret.
+ */
+export const MigrateEnv = EnvFields.pick({ NODE_ENV: true, DATABASE_URL: true, AUDIT_DATABASE_URL: true, EMBEDDINGS_DIMS: true }).superRefine(checkDatabaseUrls);
+
+export type MigrateEnv = z.infer<typeof MigrateEnv>;

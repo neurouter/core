@@ -5,7 +5,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import type { Scope } from '@neurouter/shared';
-import { Env, parseMasterKeys } from './env.js';
+import { Env, MigrateEnv, parseMasterKeys } from './env.js';
 import { dialectOf, type Dialect } from '../db/url.js';
 
 export interface Config {
@@ -62,6 +62,26 @@ export function loadDotenv(env: NodeJS.ProcessEnv = process.env): string | null 
     }
   }
   return null;
+}
+
+/** What the migration runner needs (see `loadMigrateConfig`). */
+export interface MigrateConfig {
+  env: MigrateEnv;
+  databaseUrl: string;
+  auditDatabaseUrl: string;
+  isProduction: boolean;
+}
+
+/**
+ * Config for the migration runner only: database URLs (same checks as `loadConfig`), pool sizes,
+ * EMBEDDINGS_DIMS and NODE_ENV. Unlike `loadConfig` it does not require the production-only server
+ * settings (PUBLIC_URL, OIDC, master keys, pepper), so a migrate job needs only the database secret.
+ */
+export function loadMigrateConfig(source: Record<string, string | undefined> = process.env): MigrateConfig {
+  const parsed = MigrateEnv.safeParse(source);
+  if (!parsed.success) throw new ConfigError(parsed.error.issues.map((i) => `${i.path.join('.') || '(env)'}: ${i.message}`));
+  const env = parsed.data;
+  return { env, databaseUrl: env.DATABASE_URL, auditDatabaseUrl: env.AUDIT_DATABASE_URL ?? env.DATABASE_URL, isProduction: env.NODE_ENV === 'production' };
 }
 
 /** Parses and derives the runtime config. Throws ConfigError with every problem listed. */

@@ -46,6 +46,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker build --build-arg BAKE_MODEL=false -t neurouter-core:ci .
+      - name: migrate entry (separate deploy step) needs only the database settings
+        run: docker run --rm -e NODE_ENV=production -e DATABASE_URL=sqlite:/tmp/m.db neurouter-core:ci migrate | grep -q '"main"'
       - name: readyz + one MCP call against the baked demo config
         run: |
           set -euo pipefail

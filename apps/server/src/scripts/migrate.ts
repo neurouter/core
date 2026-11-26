@@ -1,16 +1,18 @@
 /**
  * Migration CLI: `npm run db:migrate -- [up|down|status] [--set main|audit]`.
  * `up` applies both sets (main → DATABASE_URL, audit → AUDIT_DATABASE_URL). `down` is dev-only.
+ * Needs only the database settings (`loadMigrateConfig`), so it runs as a separate deploy step
+ * (image: `docker run <image> migrate`; Cloud Run job / Helm Job) with just the DB secret.
  */
 import type { Kysely } from 'kysely';
-import { ConfigError, loadConfig, loadDotenv } from '../kernel/config/load.js';
+import { ConfigError, loadDotenv, loadMigrateConfig } from '../kernel/config/load.js';
 import { createDatabases, migrateAll } from '../kernel/db/index.js';
 import { migrateDown, migrationStatus } from '../kernel/db/migrator.js';
 import type { MigrationSet } from '../kernel/db/migrations/index.js';
 
 async function run(argv: string[]): Promise<number> {
   loadDotenv();
-  const config = loadConfig();
+  const config = loadMigrateConfig();
   const cmd = argv.find((a) => !a.startsWith('--')) ?? 'up';
   const setArg = argv.find((a) => a.startsWith('--set='))?.slice(6) ?? (argv.includes('--set') ? argv[argv.indexOf('--set') + 1] : undefined);
   const sets: MigrationSet[] = setArg === 'main' || setArg === 'audit' ? [setArg] : ['main', 'audit'];
