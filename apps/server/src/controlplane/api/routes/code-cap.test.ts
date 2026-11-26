@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,11 +28,11 @@ describe('instance code-limit cap (settings codeLimitsCap)', () => {
     const env = await db.selectFrom('environments').select(['id']).where('server_id', '=', server.id).where('slug', '=', 'dev').executeTakeFirstOrThrow();
     await db.updateTable('environments').set({ limits: JSON.stringify({ code: { maxToolCalls: 9000, wallTimeSec: 600, maxMemoryMb: 4096 } }) }).where('id', '=', env.id).execute();
     t.s.services.runtime.invalidate();
-    let b = await t.s.services.runtime.getByEnvironmentId(t.s.services.tenantId, env.id);
+    let b = await t.s.services.runtime.getByEnvironmentId(DEFAULT_TENANT_ID, env.id);
     expect(b!.environment.limits.code).toMatchObject({ maxToolCalls: 1000, wallTimeSec: 120, maxMemoryMb: 512, cpuTimeSec: 10 });
     // lowering the cap applies to running environments (and to the defaults)
     await t.json(t.admin, { method: 'PATCH', url: '/api/settings', payload: { codeMode: { defaults: { maxToolCalls: 100 } } } }, 200);
-    b = await t.s.services.runtime.getByEnvironmentId(t.s.services.tenantId, env.id);
+    b = await t.s.services.runtime.getByEnvironmentId(DEFAULT_TENANT_ID, env.id);
     expect(b!.environment.limits.code.maxToolCalls).toBe(100);
     const s = await t.json(t.admin, { url: '/api/settings' }, 200);
     expect(s.codeMode).toMatchObject({ cap: { maxToolCalls: 100 }, defaults: { maxToolCalls: 100 } });

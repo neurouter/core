@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -48,7 +49,7 @@ describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('mock state s
     a = await bootServer(shared);
     b = await bootServer(shared);
     cons = await consoleOn(a);
-    const srv = (await a.services.servers.bySlug(a.services.tenantId, 'petstore'))!;
+    const srv = (await a.services.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!;
     serverId = srv.id;
     const env = (await a.services.servers.environments(srv.id)).find((e) => e.slug === 'dev')!;
     envId = env.id;

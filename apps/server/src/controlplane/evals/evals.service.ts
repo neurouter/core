@@ -469,7 +469,7 @@ export class EvalsService {
   /** The attempt's calls from the audit log (incl. inner script calls), by its eval key. */
   private async observedCalls(tenantId: string, apiKeyId: string): Promise<ObservedCall[]> {
     await this.d.auditStore.flush(5000);
-    const rows = await this.d.auditStore.query({ from: 0, to: this.d.clock.now() + 60_000, limit: 2000, order: 'asc', kinds: ['tool_call', 'ops_call', 'script_run'], principal: apiKeyId } as never);
+    const rows = await this.d.auditStore.query({ tenantId, from: 0, to: this.d.clock.now() + 60_000, limit: 2000, order: 'asc', kinds: ['tool_call', 'ops_call', 'script_run'], principal: apiKeyId } as never);
     return rows.rows.map((r) => ({
       tool: r.tool_name ?? '',
       arguments: (parseJsonColumn<Record<string, unknown>>(r.params_redacted) ?? {}) as Record<string, unknown>,

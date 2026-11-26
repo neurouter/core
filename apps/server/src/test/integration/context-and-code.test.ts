@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -151,8 +152,8 @@ servers:
   it('publishing an overlay changes tools/list (no restart)', async () => {
     const c = await mcpClient(s, 'ghraw', 'mock', await keyFor(s, 'ghraw', 'mock', ['tools:read']));
     const svc = s.services;
-    const srv = (await svc.servers.bySlug(svc.tenantId, 'ghraw'))!;
-    await svc.servers.publishOverlay(svc.tenantId, srv.id, readFileSync(resolve(REPO_ROOT, 'examples/github/curated.overlay.yaml'), 'utf8').replaceAll('github.', 'ghraw.'), { message: 'curate', source: 'console', createdBy: null, basedOnRev: null });
+    const srv = (await svc.servers.bySlug(DEFAULT_TENANT_ID, 'ghraw'))!;
+    await svc.servers.publishOverlay(DEFAULT_TENANT_ID, srv.id, readFileSync(resolve(REPO_ROOT, 'examples/github/curated.overlay.yaml'), 'utf8').replaceAll('github.', 'ghraw.'), { message: 'curate', source: 'console', createdBy: null, basedOnRev: null });
     const names = (await c.listTools()).tools.map((t) => t.name);
     expect(names).toContain('list_issues'); // 41 visible ≤ 40? → curated has pins; full discovery when ≤ 40, else search
     await c.close();

@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { resolve } from 'node:path';
 import type { InjectOptions, LightMyRequestResponse } from 'fastify';
 import { startServer, type RunningServer } from '../../server.js';
@@ -57,7 +58,7 @@ async function withHelpers(s: RunningServer): Promise<TestContext> {
     let row = await db.selectFrom('users').select('id').where('email', '=', email).executeTakeFirst();
     if (!row) {
       const id = newId();
-      await db.insertInto('users').values({ id, email, name: email.split('@')[0]!, role, role_source: 'local', created_at: Date.now(), updated_at: Date.now() }).execute();
+      await db.insertInto('users').values({ id, tenant_id: DEFAULT_TENANT_ID, email, name: email.split('@')[0]!, role, role_source: 'local', created_at: Date.now(), updated_at: Date.now() }).execute();
       row = { id };
     }
     const sess = await sessions.create(row.id);

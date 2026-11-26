@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -9,13 +10,13 @@ const GOLDEN = resolve(import.meta.dirname, 'mock-eval-golden.json');
 /** What an eval run on the GitHub demo produced: per task-run pass/fail and the scores (stub LLM, deterministic). */
 async function evalSummary(s: RunningServer, slug: string): Promise<Record<string, unknown>> {
   const svc = s.services;
-  const srv = (await svc.servers.bySlug(svc.tenantId, slug))!;
+  const srv = (await svc.servers.bySlug(DEFAULT_TENANT_ID, slug))!;
   const env = (await svc.servers.environments(srv.id)).find((e) => e.slug === 'mock')!;
-  const run = await svc.evals.createRun({ serverId: srv.id, environmentId: env.id, preset: 'quick', modes: ['tool', 'code'], trigger: 'cli', createdBy: null, wait: true } as never);
+  const run = await svc.evals.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, environmentId: env.id, preset: 'quick', modes: ['tool', 'code'], trigger: 'cli', createdBy: null, wait: true } as never);
   expect(run.status).toBe('succeeded');
   const score = svc.evals.score(run)!;
-  const results = await svc.evals.taskResults(run.id);
-  const tasks = (await svc.evals.suiteTasks(run.suite_id)).map((t) => ({ key: t.key, category: t.category, prompt: t.prompt, reference: t.reference_calls }));
+  const results = await svc.evals.taskResults(DEFAULT_TENANT_ID, run.id);
+  const tasks = (await svc.evals.suiteTasks(DEFAULT_TENANT_ID, run.suite_id)).map((t) => ({ key: t.key, category: t.category, prompt: t.prompt, reference: t.reference_calls }));
   return {
     headline: score.headline,
     tasks,

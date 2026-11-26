@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import { sql, type Kysely } from 'kysely';
@@ -42,9 +43,9 @@ describe('schema drift (SQLite)', () => {
     dbs = await createTestDatabases();
     const db = dbs.main.db;
     const now = Date.now();
-    await db.insertInto('users').values({ id: 'u1', email: 'a@example.com', created_at: now, updated_at: now }).execute();
+    await db.insertInto('users').values({ id: 'u1', tenant_id: DEFAULT_TENANT_ID, email: 'a@example.com', created_at: now, updated_at: now }).execute();
     await expect(
-      db.insertInto('users').values({ id: 'u2', email: 'b@example.com', status: 'nope' as 'active', created_at: now, updated_at: now }).execute(),
+      db.insertInto('users').values({ id: 'u2', tenant_id: DEFAULT_TENANT_ID, email: 'b@example.com', status: 'nope' as 'active', created_at: now, updated_at: now }).execute(),
     ).rejects.toThrow(/CHECK/);
     await expect(
       db.insertInto('web_sessions').values({ id_hash: Buffer.from('x'), user_id: 'missing', csrf_token: 'c', created_at: now, expires_at: now, last_seen_at: now }).execute(),
@@ -85,7 +86,7 @@ describe('schema drift (SQLite)', () => {
   it('is idempotent and tracks main and audit sets separately', async () => {
     dbs = createDatabases({ databaseUrl: 'sqlite::memory:' });
     const first = await migrateAll(dbs, { embeddingDims: TEST_EMBEDDING_DIMS });
-    expect(first.main).toEqual(['0001_core', '0002_servers', '0003_auth', '0004_ops', '0005_evals', '0009_mock_state']);
+    expect(first.main).toEqual(['0001_core', '0002_servers', '0003_auth', '0004_ops', '0005_evals', '0008_tenant_scope', '0009_mock_state']);
     expect(first.audit).toEqual(['0006_audit', '0007_metrics']);
     expect(await migrateAll(dbs, { embeddingDims: TEST_EMBEDDING_DIMS })).toEqual({ main: [], audit: [] });
     const tables = userTables(sqliteOf(dbs));

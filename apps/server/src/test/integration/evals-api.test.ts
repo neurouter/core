@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { consoleOn, type TestContext } from '../fakes/app-context.js';
 import { bootServer } from '../fakes/server.js';
@@ -10,7 +11,7 @@ describe('evals REST flow (stub provider)', () => {
     process.env.NEUROUTER_EVAL_LLM = 'stub';
     t = await consoleOn(await bootServer({ NEUROUTER_EVAL_LLM: 'stub' }));
     const s = t.s.services;
-    serverId = (await s.servers.bySlug(s.tenantId, 'petstore'))!.id;
+    serverId = (await s.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!.id;
   }, 60_000);
   afterAll(async () => {
     delete process.env.NEUROUTER_EVAL_LLM;
@@ -85,7 +86,7 @@ describe('eval runs need a key for each model provider', () => {
   let serverId: string;
   beforeAll(async () => {
     t = await consoleOn(await bootServer({ OPENAI_API_KEY: 'sk-test-openai-only' }));
-    serverId = (await t.s.services.servers.bySlug(t.s.services.tenantId, 'petstore'))!.id;
+    serverId = (await t.s.services.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!.id;
   }, 60_000);
   afterAll(async () => t?.close());
 

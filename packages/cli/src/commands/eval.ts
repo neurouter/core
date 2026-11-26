@@ -42,7 +42,8 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
   try {
     running = await startServer({ env, loadDotenv: false, jobs: false });
     const s = running.services;
-    const tenant = s.tenantId;
+    const tenant = (await s.tenancy.defaultTenant())?.id;
+    if (!tenant) throw new Error('this deployment has no default organization');
     let serverId: string;
     let slug: string;
     if (o.config) {
@@ -64,30 +65,30 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     let suiteId: string;
     if (o.suite && !o.generate) {
       const file = JSON.parse(readFileSync(o.suite, 'utf8')) as SuiteFile;
-      const suite = await s.evals.saveSuite(serverId, null, file.tasks, { importedFrom: o.suite }, null, true);
+      const suite = await s.evals.saveSuite(tenant, serverId, null, file.tasks, { importedFrom: o.suite }, null, true);
       suiteId = suite.id;
     } else {
       const [single, multi, ambiguous, impossible] = o.counts.split(',').map((x) => Number(x));
       console.error('generating eval suite…');
-      const suite = await s.evals.generateSuite(serverId, { counts: { single: single ?? 8, multi: multi ?? 8, ambiguous: ambiguous ?? 4, impossible: impossible ?? 4 }, createdBy: null });
+      const suite = await s.evals.generateSuite(tenant, serverId, { counts: { single: single ?? 8, multi: multi ?? 8, ambiguous: ambiguous ?? 4, impossible: impossible ?? 4 }, createdBy: null });
       suiteId = suite.id;
     }
-    const tasks = (await s.evals.suiteTasks(suiteId)).map((r) => ({ key: r.key, category: r.category, prompt: r.prompt })) as unknown as EvalTask[];
+    const tasks = (await s.evals.suiteTasks(tenant, suiteId)).map((r) => ({ key: r.key, category: r.category, prompt: r.prompt })) as unknown as EvalTask[];
     if (o.saveSuite) {
       const { taskFromRow } = await import('@neurouter/server');
-      const full = (await s.evals.suiteTasks(suiteId)).map(taskFromRow);
+      const full = (await s.evals.suiteTasks(tenant, suiteId)).map(taskFromRow);
       const file: SuiteFile = { version: 1, server: slug, generatedFrom: null, tasks: full };
       writeFileSync(o.saveSuite, JSON.stringify(file, null, 2));
       console.error(`suite saved to ${o.saveSuite} (${full.length} tasks)`);
     }
     const modes = o.modes.split(',').map((m) => m.trim()) as Array<'tool' | 'code'>;
     console.error(`running ${tasks.length} tasks × ${modes.join('+')} × ${o.repeats} attempt(s)…`);
-    const run = await s.evals.createRun({ serverId, suiteId, environmentId: envRow.id, models: o.models ? o.models.split(',').map((m) => m.trim()) : null, modes, repeats: Number(o.repeats), trigger: 'cli', createdBy: null, wait: true });
+    const run = await s.evals.createRun(tenant, { serverId, suiteId, environmentId: envRow.id, models: o.models ? o.models.split(',').map((m) => m.trim()) : null, modes, repeats: Number(o.repeats), trigger: 'cli', createdBy: null, wait: true });
     if (run.status !== 'succeeded') throw new Error(`eval run ${run.status}: ${run.error ?? ''}`);
     const score = s.evals.score(run)!;
-    const results = await s.evals.taskResults(run.id);
+    const results = await s.evals.taskResults(tenant, run.id);
     const suggestions = await s.dbs.main.db.selectFrom('suggestions').selectAll().where('run_id', '=', run.id).execute();
-    const prompts = Object.fromEntries((await s.evals.suiteTasks(suiteId)).map((t) => [t.key, { category: t.category, prompt: t.prompt }]));
+    const prompts = Object.fromEntries((await s.evals.suiteTasks(tenant, suiteId)).map((t) => [t.key, { category: t.category, prompt: t.prompt }]));
     const report = buildReport({
       server: { slug, name: slug },
       run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString() },

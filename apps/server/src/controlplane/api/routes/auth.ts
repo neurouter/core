@@ -32,7 +32,8 @@ export async function evalsConfigured(c: ApiContext, t: TenantRef | null): Promi
 
 export async function buildMe(c: ApiContext, req: FastifyRequest, user: ConsoleUser, csrfToken: string): Promise<Me> {
   // the session may be brand new (link sign-in, demo visitor): resolve the tenant here when the guard did not
-  const tc = req.tenantCtx ?? (await c.tenancy.forConsole(req, user.id, null));
+  // (public routes carry the public tenant with no role: resolve the user's membership instead)
+  const tc = req.tenantCtx?.role ? req.tenantCtx : await c.tenancy.forConsole(req, user.id, null);
   const t = tc?.tenant ?? null;
   const role = tc ? capabilityRole(tc.role) : user.role;
   const codeMode = t ? (await c.settings.get('codeModeEnabled', t.id)) && c.ports.executorStatus().ok : false;

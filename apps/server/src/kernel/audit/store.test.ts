@@ -35,7 +35,7 @@ function store(opts: Partial<SqlAuditStoreOptions> = {}) {
 let seq = 0;
 function ev(over: Partial<AuditEventInput> = {}): AuditEventInput {
   seq++;
-  return { id: newId(), ts: now + seq, kind: 'tool_call', decision: 'allowed', status: 'ok', userId: 'u1', apiKeyId: 'a1', serverId: 's1', toolId: 't1', toolName: 'gh__list', latencyMs: 12, ...over };
+  return { id: newId(), tenantId: 't1', ts: now + seq, kind: 'tool_call', decision: 'allowed', status: 'ok', userId: 'u1', apiKeyId: 'a1', serverId: 's1', toolId: 't1', toolName: 'gh__list', latencyMs: 12, ...over };
 }
 
 beforeEach(async () => {
@@ -72,7 +72,7 @@ describe('SqlAuditStore writer + chain', () => {
     const s = store();
     s.record(ev({ params: { query: 'find report', password: 'hunter2' }, output: { content: [{ type: 'text', text: 'x' }] } }));
     await s.flush();
-    const [row] = (await s.query({ from: T0, to: T0 + DAY, limit: 10 })).rows;
+    const [row] = (await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 10 })).rows;
     expect(JSON.parse(row!.params_redacted!)).toEqual({ query: 'find report', password: { $redacted: 'sensitive-key' } });
     expect(row!.params_text).toBe('find report');
     expect(row!.output_size).toBe(JSON.stringify({ content: [{ type: 'text', text: 'x' }] }).length);
@@ -179,31 +179,31 @@ describe('SqlAuditStore query', () => {
     s.record(ev({ decision: 'denied_acl', status: 'blocked', decisionReason: 'not_permitted_or_blocked', errorMessage: 'kaboom upstream' }));
     for (let i = 0; i < 5; i++) s.record(ev());
     await s.flush();
-    await expect(s.query({ from: T0, to: T0, limit: 5 })).rejects.toMatchObject({ code: 'validation_failed' });
-    const page1 = await s.query({ from: T0, to: T0 + DAY, limit: 3 });
+    await expect(s.query({ tenantId: 't1', from: T0, to: T0, limit: 5 })).rejects.toMatchObject({ code: 'validation_failed' });
+    const page1 = await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 3 });
     expect(page1.rows.map((r) => r.seq)).toEqual([8, 7, 6]);
-    const page2 = await s.query({ from: T0, to: T0 + DAY, limit: 3, cursorSeq: page1.nextSeq });
+    const page2 = await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 3, cursorSeq: page1.nextSeq });
     expect(page2.rows.map((r) => r.seq)).toEqual([5, 4, 3]);
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, serverIds: ['s2'] })).rows.map((r) => r.seq)).toEqual([2]);
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, serverIds: [] })).rows).toEqual([]);
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, decisions: ['denied_acl'] })).rows.map((r) => r.seq)).toEqual([3]);
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, userId: 'u2' })).rows.map((r) => r.seq)).toEqual([1]);
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, q: 'quarterly' })).rows.map((r) => r.seq)).toEqual([1]);
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, q: 'quart' })).rows.map((r) => r.seq)).toEqual([1]); // prefix
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, q: 'revenue-secret' })).rows).toEqual([]); // redacted → not findable
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, q: 'kaboom' })).rows.map((r) => r.seq)).toEqual([3]);
-    expect((await s.query({ from: T0, to: T0 + DAY, limit: 50, q: '"); drop table audit_log; --' })).rows).toEqual([]);
-    expect((await s.query({ from: T0 + DAY, to: T0 + 2 * DAY, limit: 50 })).rows).toEqual([]);
-    expect(await s.count({ from: T0, to: T0 + DAY }, 5)).toBe(6);
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, serverIds: ['s2'] })).rows.map((r) => r.seq)).toEqual([2]);
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, serverIds: [] })).rows).toEqual([]);
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, decisions: ['denied_acl'] })).rows.map((r) => r.seq)).toEqual([3]);
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, userId: 'u2' })).rows.map((r) => r.seq)).toEqual([1]);
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, q: 'quarterly' })).rows.map((r) => r.seq)).toEqual([1]);
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, q: 'quart' })).rows.map((r) => r.seq)).toEqual([1]); // prefix
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, q: 'revenue-secret' })).rows).toEqual([]); // redacted → not findable
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, q: 'kaboom' })).rows.map((r) => r.seq)).toEqual([3]);
+    expect((await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 50, q: '"); drop table audit_log; --' })).rows).toEqual([]);
+    expect((await s.query({ tenantId: 't1', from: T0 + DAY, to: T0 + 2 * DAY, limit: 50 })).rows).toEqual([]);
+    expect(await s.count({ tenantId: 't1', from: T0, to: T0 + DAY }, 5)).toBe(6);
     const all: number[] = [];
-    for await (const r of s.export({ from: T0, to: T0 + DAY, order: 'asc' }, 4)) all.push(r.seq);
+    for await (const r of s.export({ tenantId: 't1', from: T0, to: T0 + DAY, order: 'asc' }, 4)) all.push(r.seq);
     expect(all).toEqual([1, 2, 3, 4]);
-    expect(await s.decisionCounts({ from: T0, to: T0 + DAY, kinds: ['tool_call'] })).toEqual(expect.arrayContaining([{ decision: 'denied_acl', reason: 'not_permitted_or_blocked', count: 1 }]));
+    expect(await s.decisionCounts({ tenantId: 't1', from: T0, to: T0 + DAY, kinds: ['tool_call'] })).toEqual(expect.arrayContaining([{ decision: 'denied_acl', reason: 'not_permitted_or_blocked', count: 1 }]));
   });
 
   it('rejects q with 422 when FTS is disabled', async () => {
     const s = store({ ftsEnabled: () => false });
-    await expect(s.query({ from: T0, to: T0 + DAY, limit: 5, q: 'x' })).rejects.toMatchObject({ code: 'validation_failed' });
+    await expect(s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 5, q: 'x' })).rejects.toMatchObject({ code: 'validation_failed' });
   });
 });
 
@@ -243,10 +243,10 @@ describe('retention + archive', () => {
     await seed(s);
     const out = await s.applyRetention(T0 - 5 * DAY);
     expect(out).toMatchObject({ cutSeq: 5, deleted: 5, archived: true, skipped: false });
-    expect((await s.query({ from: T0 - 30 * DAY, to: T0 + DAY, limit: 50 })).rows.map((r) => r.seq)).toEqual([7, 6]);
+    expect((await s.query({ tenantId: 't1', from: T0 - 30 * DAY, to: T0 + DAY, limit: 50 })).rows.map((r) => r.seq)).toEqual([7, 6]);
     expect(await s.verify({})).toMatchObject({ ok: true, firstSeq: 6, lastSeq: 7 });
     // FTS rows were deleted with the data
-    expect((await s.query({ from: T0 - 30 * DAY, to: T0 + DAY, limit: 50, q: 'd-10' })).rows).toEqual([]);
+    expect((await s.query({ tenantId: 't1', from: T0 - 30 * DAY, to: T0 + DAY, limit: 50, q: 'd-10' })).rows).toEqual([]);
     const days = await readdir(join(dir, 'audit/2026/11'));
     expect(days.sort()).toEqual(['14', '15']);
     const files = (await readdir(join(dir, 'audit/2026/11/14'))).sort();
@@ -313,7 +313,7 @@ describe('export format', () => {
     const s = store();
     s.record(ev({ errorMessage: 'bad, "quoted"' }));
     await s.flush();
-    const [row] = (await s.query({ from: T0, to: T0 + DAY, limit: 1 })).rows;
+    const [row] = (await s.query({ tenantId: 't1', from: T0, to: T0 + DAY, limit: 1 })).rows;
     const line = csvLine(row!);
     expect(line).toContain('2026-11-24T10:00:00.001Z');
     expect(line).toContain('"bad, ""quoted"""');
