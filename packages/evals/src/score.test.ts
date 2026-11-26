@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { preliminaryScore, recommend, scoreCell, scoreRun } from './score.js';
+import { greater, preliminaryScore, recommend, scoreCell, scoreRun } from './score.js';
 import { result, task } from './test/fixtures.js';
 import type { CellScore } from './types.js';
 
@@ -56,6 +56,25 @@ describe('recommend', () => {
   it('generates the recommendation text', () => {
     const r = recommend([cell('tool', 60, 0.5, 2000), cell('code', 80, 0.9, 1000)]);
     expect(r.text).toBe('code mode: +40 pts success, −50% tokens on multi-step tasks; tool mode is better for single lookups');
+  });
+  it('does not call a mode better for single lookups when both pass the same share (float noise)', () => {
+    // 8 single tasks × 3 repeats, 14/24 passes in both modes, spread differently over the tasks: the
+    // per-task means come out as 0.5833333333333333 (tool) and 0.5833333333333334 (code)
+    const singles = Array.from({ length: 8 }, (_, i) => task({ key: `s${i}`, category: 'single', referenceCalls: [{ tool: 'a', arguments: {} }] }));
+    const multi = task({ key: 'm', category: 'multi', referenceCalls: [{ tool: 'a', arguments: {} }, { tool: 'b', arguments: {} }] });
+    const passes = { tool: [0, 0, 0, 2, 3, 3, 3, 3], code: [0, 0, 0, 3, 3, 3, 3, 2] } as const;
+    const results = (['tool', 'code'] as const).flatMap((mode) => [
+      ...singles.flatMap((t, i) => [1, 2, 3].map((a) => result({ key: `${t.key}|m|${mode}|${a}`, taskKey: t.key, mode, attempt: a, passed: a <= passes[mode][i]! }))),
+      ...[1, 2, 3].map((a) => result({ key: `m|m|${mode}|${a}`, taskKey: 'm', category: 'multi', mode, attempt: a, passed: true, inputTokens: mode === 'tool' ? 1000 : 3000 })),
+    ]);
+    const input = { tasks: [...singles, multi], results, models: ['m'], modes: ['tool', 'code'] as Array<'tool' | 'code'>, lintScore: 80 };
+    const tool = scoreCell(input, 'm', 'tool');
+    const code = scoreCell(input, 'm', 'code');
+    expect(tool.categorySuccess.single).not.toBe(code.categorySuccess.single); // the float noise is real
+    const r = scoreRun(input);
+    expect(r.recommendationText).not.toContain('better for single lookups');
+    expect(greater(0.5833333333333334, 0.5833333333333333)).toBe(false);
+    expect(greater(15 / 24, 14 / 24)).toBe(true);
   });
   it('single mode measured', () => expect(recommend([cell('tool', 60, 0.5)]).mode).toBe('tool'));
 });

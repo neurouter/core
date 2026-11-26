@@ -142,7 +142,9 @@ export function recommend(primaryCells: CellScore[]): { mode: EvalMode | null; t
   const dt = ot > 0 ? Math.round(((ot - rt) / ot) * 100) : 0;
   const sign = (n: number) => (n >= 0 ? `+${n}` : `−${Math.abs(n)}`);
   const tokens = dt >= 0 ? `−${dt}% tokens` : `+${Math.abs(dt)}% tokens`;
-  const single = (other.categorySuccess.single ?? 0) > (rec.categorySuccess.single ?? 0) ? `; ${other.mode} mode is better for single lookups` : '';
+  // category rates are means of per-task pass rates (floats): 14/24 can come out as 0.58333…34 in one
+  // cell and 0.58333…33 in the other, so compare with a tolerance far below one attempt's share
+  const single = greater(other.categorySuccess.single ?? 0, rec.categorySuccess.single ?? 0) ? `; ${other.mode} mode is better for single lookups` : '';
   return { mode, text: `${mode} mode: ${sign(ds)} pts success, ${tokens} on multi-step tasks${single}` };
 }
 
@@ -156,6 +158,13 @@ export interface PreliminaryScore {
 export function preliminaryScore(lint: Pick<LintReport, 'score'> | number): PreliminaryScore {
   const score = Math.round(typeof lint === 'number' ? lint : lint.score);
   return { score, band: readinessBand(score), confidence: 'preliminary' };
+}
+
+/** Rates closer than this are equal (one attempt in a suite moves a rate by ≥ 1/10,000 long before this). */
+export const RATE_EPSILON = 1e-9;
+/** `a > b` for rates, with `RATE_EPSILON` tolerance. */
+export function greater(a: number, b: number): boolean {
+  return a - b > RATE_EPSILON;
 }
 
 function clamp01(x: number): number {
