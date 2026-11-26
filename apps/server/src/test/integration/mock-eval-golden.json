@@ -1,6 +1,6 @@
 {
   "github": {
-    "headline": 76,
+    "headline": 74,
     "tasks": [
       {
         "key": "ambiguous-get_comment-1",
@@ -30,43 +30,49 @@
         "key": "multi-list_issue_labels-get_issue-2",
         "category": "multi",
         "prompt": "First list the labels on one issue (use owner=\"demo\", repo=\"demo\", issue_number=1), then get one issue by its number, including body, labels, assignees and state (use owner=\"octocat\", repo=\"hello-world\", issue_number=1).",
-        "reference": "[{\"tool\":\"list_issue_labels\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"issue_number\":1},\"toolKey\":\"operationId:issues/list-labels-on-issue\"},{\"tool\":\"get_issue\",\"arguments\":{\"owner\":\"octocat\",\"repo\":\"hello-world\",\"issue_number\":1},\"toolKey\":\"operationId:issues/get\"}]"
+        "reference": "[{\"tool\":\"list_issue_labels\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"issue_number\":1},\"required\":[\"owner\",\"repo\",\"issue_number\"],\"toolKey\":\"operationId:issues/list-labels-on-issue\"},{\"tool\":\"get_issue\",\"arguments\":{\"owner\":\"octocat\",\"repo\":\"hello-world\",\"issue_number\":1},\"required\":[\"owner\",\"repo\",\"issue_number\"],\"toolKey\":\"operationId:issues/get\"}]"
       },
       {
         "key": "multi-list_labels-get_comment-4",
         "category": "multi",
         "prompt": "First list the labels defined in a repository (use the names when labelling issues) (use owner=\"demo\", repo=\"demo\"), then get one issue comment by its id (use owner=\"demo\", repo=\"demo\", comment_id=1).",
-        "reference": "[{\"tool\":\"list_labels\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\"},\"toolKey\":\"operationId:issues/list-labels-for-repo\"},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1},\"toolKey\":\"operationId:issues/get-comment\"}]"
+        "reference": "[{\"tool\":\"list_labels\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\"},\"required\":[\"owner\",\"repo\"],\"toolKey\":\"operationId:issues/list-labels-for-repo\"},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1},\"required\":[\"owner\",\"repo\",\"comment_id\"],\"toolKey\":\"operationId:issues/get-comment\"}]"
       },
       {
         "key": "multi-list_pull_request_commits-get_comment-3",
         "category": "multi",
         "prompt": "First list the commits in a pull request (use owner=\"demo\", repo=\"demo\", pull_number=1), then get one issue comment by its id (use owner=\"demo\", repo=\"demo\", comment_id=1).",
-        "reference": "[{\"tool\":\"list_pull_request_commits\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"pull_number\":1},\"toolKey\":\"operationId:pulls/list-commits\"},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1},\"toolKey\":\"operationId:issues/get-comment\"}]"
+        "reference": "[{\"tool\":\"list_pull_request_commits\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"pull_number\":1},\"required\":[\"owner\",\"repo\",\"pull_number\"],\"toolKey\":\"operationId:pulls/list-commits\"},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1},\"required\":[\"owner\",\"repo\",\"comment_id\"],\"toolKey\":\"operationId:issues/get-comment\"}]"
       },
       {
         "key": "multi-search_issues-get_comment-1",
         "category": "multi",
         "prompt": "First search issues and pull requests with GitHub search syntax, e.g (use q=\"demo\"), then get one issue comment by its id (use owner=\"demo\", repo=\"demo\", comment_id=1).",
-        "reference": "[{\"tool\":\"search_issues\",\"arguments\":{\"q\":\"demo\"},\"toolKey\":\"operationId:search/issues-and-pull-requests\"},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1},\"toolKey\":\"operationId:issues/get-comment\"}]"
+        "reference": "[{\"tool\":\"search_issues\",\"arguments\":{\"q\":\"demo\"},\"required\":[\"q\"],\"toolKey\":\"operationId:search/issues-and-pull-requests\"},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1},\"required\":[\"owner\",\"repo\",\"comment_id\"],\"toolKey\":\"operationId:issues/get-comment\"}]"
       },
       {
-        "key": "single-get_pull_request-3",
+        "key": "single-get_pull_request-1",
         "category": "single",
         "prompt": "Get one pull request by number, including mergeability, head and base branches (use owner=\"demo\", repo=\"demo\", pull_number=1)",
-        "reference": "[{\"tool\":\"get_pull_request\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"pull_number\":1},\"toolKey\":\"operationId:pulls/get\"}]"
+        "reference": "[{\"tool\":\"get_pull_request\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"pull_number\":1},\"required\":[\"owner\",\"repo\",\"pull_number\"],\"toolKey\":\"operationId:pulls/get\"}]"
       },
       {
-        "key": "single-get_repository-2",
+        "key": "single-get_repository-4",
         "category": "single",
         "prompt": "Get a repository's metadata (default branch, visibility, open issue count, topics) (use owner=\"demo\", repo=\"demo\")",
-        "reference": "[{\"tool\":\"get_repository\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\"},\"toolKey\":\"operationId:repos/get\"}]"
+        "reference": "[{\"tool\":\"get_repository\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\"},\"required\":[\"owner\",\"repo\"],\"toolKey\":\"operationId:repos/get\"}]"
       },
       {
-        "key": "single-list_repo_comments-4",
+        "key": "single-list_review_comments-1",
         "category": "single",
-        "prompt": "List issue comments across a whole repository, for finding recent discussion (use owner=\"demo\", repo=\"demo\")",
-        "reference": "[{\"tool\":\"list_repo_comments\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\"},\"toolKey\":\"operationId:issues/list-comments-for-repo\"}]"
+        "prompt": "List inline review comments on a pull request (use owner=\"demo\", repo=\"demo\", pull_number=1)",
+        "reference": "[{\"tool\":\"list_review_comments\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"pull_number\":1},\"required\":[\"owner\",\"repo\",\"pull_number\"],\"toolKey\":\"operationId:pulls/list-review-comments\"}]"
+      },
+      {
+        "key": "single-search_issues-3",
+        "category": "single",
+        "prompt": "Search issues and pull requests with GitHub search syntax, e.g (use q=\"demo\")",
+        "reference": "[{\"tool\":\"search_issues\",\"arguments\":{\"q\":\"demo\"},\"required\":[\"q\"],\"toolKey\":\"operationId:search/issues-and-pull-requests\"}]"
       }
     ],
     "results": [
@@ -343,16 +349,16 @@
             "assertion": {
               "type": "called",
               "tool": "get_issue",
+              "argsMatch": "subset",
               "args": {
                 "owner": "octocat",
                 "repo": "hello-world",
                 "issue_number": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:issues/get"
             },
             "passed": true,
-            "detail": "get_issue called 1×"
+            "detail": "get_issue called 1× with {\"owner\":\"octocat\",\"repo\":\"hello-world\",\"issue_number\":1}"
           },
           {
             "assertion": {
@@ -360,6 +366,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 6
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 6)"
           }
         ]
       },
@@ -384,16 +398,16 @@
             "assertion": {
               "type": "called",
               "tool": "get_issue",
+              "argsMatch": "subset",
               "args": {
                 "owner": "octocat",
                 "repo": "hello-world",
                 "issue_number": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:issues/get"
             },
             "passed": true,
-            "detail": "get_issue called 1×"
+            "detail": "get_issue called 1× with {\"owner\":\"octocat\",\"repo\":\"hello-world\",\"issue_number\":1}"
           },
           {
             "assertion": {
@@ -401,6 +415,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 6
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 6)"
           }
         ]
       },
@@ -425,12 +447,12 @@
             "assertion": {
               "type": "called",
               "tool": "get_comment",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo",
                 "comment_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:issues/get-comment"
             },
             "passed": false,
@@ -442,6 +464,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 6
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 6)"
           }
         ]
       },
@@ -466,12 +496,12 @@
             "assertion": {
               "type": "called",
               "tool": "get_comment",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo",
                 "comment_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:issues/get-comment"
             },
             "passed": false,
@@ -483,6 +513,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 6
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 6)"
           }
         ]
       },
@@ -507,12 +545,12 @@
             "assertion": {
               "type": "called",
               "tool": "get_comment",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo",
                 "comment_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:issues/get-comment"
             },
             "passed": false,
@@ -524,6 +562,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 6
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 6)"
           }
         ]
       },
@@ -548,12 +594,12 @@
             "assertion": {
               "type": "called",
               "tool": "get_comment",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo",
                 "comment_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:issues/get-comment"
             },
             "passed": false,
@@ -565,6 +611,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 6
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 6)"
           }
         ]
       },
@@ -589,12 +643,12 @@
             "assertion": {
               "type": "called",
               "tool": "get_comment",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo",
                 "comment_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:issues/get-comment"
             },
             "passed": false,
@@ -606,6 +660,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 6
+            },
+            "passed": true,
+            "detail": "0 upstream calls (budget 6)"
           }
         ]
       },
@@ -630,12 +692,12 @@
             "assertion": {
               "type": "called",
               "tool": "get_comment",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo",
                 "comment_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:issues/get-comment"
             },
             "passed": false,
@@ -647,11 +709,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 6
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 6)"
           }
         ]
       },
       {
-        "task": "single-get_pull_request-3",
+        "task": "single-get_pull_request-1",
         "mode": "code",
         "attempt": 1,
         "passed": true,
@@ -662,16 +732,16 @@
             "assertion": {
               "type": "called",
               "tool": "get_pull_request",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo",
                 "pull_number": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:pulls/get"
             },
             "passed": true,
-            "detail": "get_pull_request called 1×"
+            "detail": "get_pull_request called 1× with {\"owner\":\"demo\",\"repo\":\"demo\",\"pull_number\":1}"
           },
           {
             "assertion": {
@@ -679,11 +749,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
       {
-        "task": "single-get_pull_request-3",
+        "task": "single-get_pull_request-1",
         "mode": "tool",
         "attempt": 1,
         "passed": false,
@@ -694,12 +772,12 @@
             "assertion": {
               "type": "called",
               "tool": "get_pull_request",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo",
                 "pull_number": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:pulls/get"
             },
             "passed": false,
@@ -711,11 +789,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
       {
-        "task": "single-get_repository-2",
+        "task": "single-get_repository-4",
         "mode": "code",
         "attempt": 1,
         "passed": true,
@@ -726,15 +812,15 @@
             "assertion": {
               "type": "called",
               "tool": "get_repository",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo"
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:repos/get"
             },
             "passed": true,
-            "detail": "get_repository called 1×"
+            "detail": "get_repository called 1× with {\"owner\":\"demo\",\"repo\":\"demo\"}"
           },
           {
             "assertion": {
@@ -742,11 +828,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
       {
-        "task": "single-get_repository-2",
+        "task": "single-get_repository-4",
         "mode": "tool",
         "attempt": 1,
         "passed": false,
@@ -757,11 +851,11 @@
             "assertion": {
               "type": "called",
               "tool": "get_repository",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
                 "repo": "demo"
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:repos/get"
             },
             "passed": false,
@@ -773,11 +867,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
       {
-        "task": "single-list_repo_comments-4",
+        "task": "single-list_review_comments-1",
         "mode": "code",
         "attempt": 1,
         "passed": false,
@@ -787,16 +889,17 @@
           {
             "assertion": {
               "type": "called",
-              "tool": "list_repo_comments",
+              "tool": "list_review_comments",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
-                "repo": "demo"
+                "repo": "demo",
+                "pull_number": 1
               },
-              "argsMatch": "subset",
-              "toolKey": "operationId:issues/list-comments-for-repo"
+              "toolKey": "operationId:pulls/list-review-comments"
             },
             "passed": false,
-            "detail": "list_repo_comments was never called"
+            "detail": "list_review_comments was never called"
           },
           {
             "assertion": {
@@ -804,11 +907,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "0 upstream calls (budget 4)"
           }
         ]
       },
       {
-        "task": "single-list_repo_comments-4",
+        "task": "single-list_review_comments-1",
         "mode": "tool",
         "attempt": 1,
         "passed": false,
@@ -818,16 +929,17 @@
           {
             "assertion": {
               "type": "called",
-              "tool": "list_repo_comments",
+              "tool": "list_review_comments",
+              "argsMatch": "subset",
               "args": {
                 "owner": "demo",
-                "repo": "demo"
+                "repo": "demo",
+                "pull_number": 1
               },
-              "argsMatch": "subset",
-              "toolKey": "operationId:issues/list-comments-for-repo"
+              "toolKey": "operationId:pulls/list-review-comments"
             },
             "passed": false,
-            "detail": "list_repo_comments was never called"
+            "detail": "list_review_comments was never called"
           },
           {
             "assertion": {
@@ -835,13 +947,97 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 4)"
+          }
+        ]
+      },
+      {
+        "task": "single-search_issues-3",
+        "mode": "code",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "gave_up",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "search_issues",
+              "argsMatch": "subset",
+              "args": {
+                "q": "demo"
+              },
+              "toolKey": "operationId:search/issues-and-pull-requests"
+            },
+            "passed": false,
+            "detail": "search_issues was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "0 upstream calls (budget 4)"
+          }
+        ]
+      },
+      {
+        "task": "single-search_issues-3",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "search_issues",
+              "argsMatch": "subset",
+              "args": {
+                "q": "demo"
+              },
+              "toolKey": "operationId:search/issues-and-pull-requests"
+            },
+            "passed": true,
+            "detail": "search_issues called 1× with {\"q\":\"demo\"}"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 4)"
           }
         ]
       }
     ]
   },
   "petstore": {
-    "headline": 88,
+    "headline": 93,
     "tasks": [
       {
         "key": "ambiguous-get_pet_by_id-1",
@@ -871,49 +1067,49 @@
         "key": "multi-find_pets_by_tags-get_order_by_id-2",
         "category": "multi",
         "prompt": "First finds Pets by tags (use tags=[]), then find purchase order by ID (use order_id=1).",
-        "reference": "[{\"tool\":\"find_pets_by_tags\",\"arguments\":{\"tags\":[]},\"toolKey\":\"operationId:findPetsByTags\"},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1},\"toolKey\":\"operationId:getOrderById\"}]"
+        "reference": "[{\"tool\":\"find_pets_by_tags\",\"arguments\":{\"tags\":[]},\"required\":[\"tags\"],\"toolKey\":\"operationId:findPetsByTags\"},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1},\"required\":[\"order_id\"],\"toolKey\":\"operationId:getOrderById\"}]"
       },
       {
         "key": "multi-login_user-get_order_by_id-3",
         "category": "multi",
         "prompt": "First logs user into the system, then find purchase order by ID (use order_id=1).",
-        "reference": "[{\"tool\":\"login_user\",\"arguments\":{},\"toolKey\":\"operationId:loginUser\"},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1},\"toolKey\":\"operationId:getOrderById\"}]"
+        "reference": "[{\"tool\":\"login_user\",\"arguments\":{},\"required\":[],\"toolKey\":\"operationId:loginUser\"},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1},\"required\":[\"order_id\"],\"toolKey\":\"operationId:getOrderById\"}]"
       },
       {
         "key": "multi-logout_user-get_order_by_id-4",
         "category": "multi",
         "prompt": "First logs out current logged in user session, then find purchase order by ID (use order_id=1).",
-        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{},\"toolKey\":\"operationId:logoutUser\"},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1},\"toolKey\":\"operationId:getOrderById\"}]"
+        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{},\"required\":[],\"toolKey\":\"operationId:logoutUser\"},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1},\"required\":[\"order_id\"],\"toolKey\":\"operationId:getOrderById\"}]"
       },
       {
         "key": "multi-logout_user-get_pet_by_id-1",
         "category": "multi",
         "prompt": "First logs out current logged in user session, then find pet by ID (use pet_id=17).",
-        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{},\"toolKey\":\"operationId:logoutUser\"},{\"tool\":\"get_pet_by_id\",\"arguments\":{\"pet_id\":17},\"toolKey\":\"operationId:getPetById\"}]"
+        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{},\"required\":[],\"toolKey\":\"operationId:logoutUser\"},{\"tool\":\"get_pet_by_id\",\"arguments\":{\"pet_id\":17},\"required\":[\"pet_id\"],\"toolKey\":\"operationId:getPetById\"}]"
       },
       {
-        "key": "single-find_pets_by_status-3",
+        "key": "single-find_pets_by_status-2",
         "category": "single",
-        "prompt": "Finds Pets by status (use status=\"available\")",
-        "reference": "[{\"tool\":\"find_pets_by_status\",\"arguments\":{\"status\":\"available\"},\"toolKey\":\"operationId:findPetsByStatus\"}]"
+        "prompt": "Finds Pets by status (use status=\"pending\")",
+        "reference": "[{\"tool\":\"find_pets_by_status\",\"arguments\":{\"status\":\"pending\"},\"required\":[\"status\"],\"toolKey\":\"operationId:findPetsByStatus\"}]"
       },
       {
-        "key": "single-get_inventory-4",
-        "category": "single",
-        "prompt": "Returns pet inventories by status",
-        "reference": "[{\"tool\":\"get_inventory\",\"arguments\":{},\"toolKey\":\"operationId:getInventory\"}]"
-      },
-      {
-        "key": "single-get_order_by_id-2",
+        "key": "single-get_order_by_id-3",
         "category": "single",
         "prompt": "Find purchase order by ID (use order_id=1)",
-        "reference": "[{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1},\"toolKey\":\"operationId:getOrderById\"}]"
+        "reference": "[{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1},\"required\":[\"order_id\"],\"toolKey\":\"operationId:getOrderById\"}]"
       },
       {
         "key": "single-login_user-1",
         "category": "single",
         "prompt": "Logs user into the system",
-        "reference": "[{\"tool\":\"login_user\",\"arguments\":{},\"toolKey\":\"operationId:loginUser\"}]"
+        "reference": "[{\"tool\":\"login_user\",\"arguments\":{},\"required\":[],\"toolKey\":\"operationId:loginUser\"}]"
+      },
+      {
+        "key": "single-logout_user-4",
+        "category": "single",
+        "prompt": "Logs out current logged in user session",
+        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{},\"required\":[],\"toolKey\":\"operationId:logoutUser\"}]"
       }
     ],
     "results": [
@@ -1190,14 +1386,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_order_by_id",
+              "argsMatch": "subset",
               "args": {
                 "order_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getOrderById"
             },
             "passed": true,
-            "detail": "get_order_by_id called 1×"
+            "detail": "get_order_by_id called 1× with {\"order_id\":1}"
           },
           {
             "assertion": {
@@ -1205,6 +1401,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 4)"
           }
         ]
       },
@@ -1229,14 +1433,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_order_by_id",
+              "argsMatch": "subset",
               "args": {
                 "order_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getOrderById"
             },
             "passed": true,
-            "detail": "get_order_by_id called 1×"
+            "detail": "get_order_by_id called 1× with {\"order_id\":1}"
           },
           {
             "assertion": {
@@ -1244,6 +1448,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 4)"
           }
         ]
       },
@@ -1268,14 +1480,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_order_by_id",
+              "argsMatch": "subset",
               "args": {
                 "order_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getOrderById"
             },
             "passed": true,
-            "detail": "get_order_by_id called 1×"
+            "detail": "get_order_by_id called 1× with {\"order_id\":1}"
           },
           {
             "assertion": {
@@ -1283,6 +1495,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 4)"
           }
         ]
       },
@@ -1307,14 +1527,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_order_by_id",
+              "argsMatch": "subset",
               "args": {
                 "order_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getOrderById"
             },
             "passed": true,
-            "detail": "get_order_by_id called 1×"
+            "detail": "get_order_by_id called 1× with {\"order_id\":1}"
           },
           {
             "assertion": {
@@ -1322,6 +1542,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 4)"
           }
         ]
       },
@@ -1346,14 +1574,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_order_by_id",
+              "argsMatch": "subset",
               "args": {
                 "order_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getOrderById"
             },
             "passed": true,
-            "detail": "get_order_by_id called 1×"
+            "detail": "get_order_by_id called 1× with {\"order_id\":1}"
           },
           {
             "assertion": {
@@ -1361,6 +1589,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 4)"
           }
         ]
       },
@@ -1385,14 +1621,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_order_by_id",
+              "argsMatch": "subset",
               "args": {
                 "order_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getOrderById"
             },
             "passed": true,
-            "detail": "get_order_by_id called 1×"
+            "detail": "get_order_by_id called 1× with {\"order_id\":1}"
           },
           {
             "assertion": {
@@ -1400,6 +1636,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 4)"
           }
         ]
       },
@@ -1424,14 +1668,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_pet_by_id",
+              "argsMatch": "subset",
               "args": {
                 "pet_id": 17
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getPetById"
             },
             "passed": true,
-            "detail": "get_pet_by_id called 1×"
+            "detail": "get_pet_by_id called 1× with {\"pet_id\":17}"
           },
           {
             "assertion": {
@@ -1439,6 +1683,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 4)"
           }
         ]
       },
@@ -1463,14 +1715,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_pet_by_id",
+              "argsMatch": "subset",
               "args": {
                 "pet_id": 17
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getPetById"
             },
             "passed": true,
-            "detail": "get_pet_by_id called 1×"
+            "detail": "get_pet_by_id called 1× with {\"pet_id\":17}"
           },
           {
             "assertion": {
@@ -1478,11 +1730,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 4
+            },
+            "passed": true,
+            "detail": "2 upstream calls (budget 4)"
           }
         ]
       },
       {
-        "task": "single-find_pets_by_status-3",
+        "task": "single-find_pets_by_status-2",
         "mode": "code",
         "attempt": 1,
         "passed": true,
@@ -1493,14 +1753,14 @@
             "assertion": {
               "type": "called",
               "tool": "find_pets_by_status",
-              "args": {
-                "status": "available"
-              },
               "argsMatch": "subset",
+              "args": {
+                "status": "pending"
+              },
               "toolKey": "operationId:findPetsByStatus"
             },
             "passed": true,
-            "detail": "find_pets_by_status called 1×"
+            "detail": "find_pets_by_status called 1× with {\"status\":\"pending\"}"
           },
           {
             "assertion": {
@@ -1508,11 +1768,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
       {
-        "task": "single-find_pets_by_status-3",
+        "task": "single-find_pets_by_status-2",
         "mode": "tool",
         "attempt": 1,
         "passed": true,
@@ -1523,14 +1791,14 @@
             "assertion": {
               "type": "called",
               "tool": "find_pets_by_status",
-              "args": {
-                "status": "available"
-              },
               "argsMatch": "subset",
+              "args": {
+                "status": "pending"
+              },
               "toolKey": "operationId:findPetsByStatus"
             },
             "passed": true,
-            "detail": "find_pets_by_status called 1×"
+            "detail": "find_pets_by_status called 1× with {\"status\":\"pending\"}"
           },
           {
             "assertion": {
@@ -1538,63 +1806,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
-          }
-        ]
-      },
-      {
-        "task": "single-get_inventory-4",
-        "mode": "code",
-        "attempt": 1,
-        "passed": false,
-        "failureCause": "gave_up",
-        "toolCalls": 1,
-        "assertions": [
-          {
-            "assertion": {
-              "type": "called",
-              "tool": "get_inventory",
-              "toolKey": "operationId:getInventory"
-            },
-            "passed": false,
-            "detail": "get_inventory was never called"
           },
           {
             "assertion": {
-              "type": "framing"
+              "type": "max_calls",
+              "n": 3
             },
             "passed": true,
-            "detail": "begin_task first, end_task last"
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
       {
-        "task": "single-get_inventory-4",
-        "mode": "tool",
-        "attempt": 1,
-        "passed": false,
-        "failureCause": "wrong_tool",
-        "toolCalls": 1,
-        "assertions": [
-          {
-            "assertion": {
-              "type": "called",
-              "tool": "get_inventory",
-              "toolKey": "operationId:getInventory"
-            },
-            "passed": false,
-            "detail": "get_inventory was never called"
-          },
-          {
-            "assertion": {
-              "type": "framing"
-            },
-            "passed": true,
-            "detail": "begin_task first, end_task last"
-          }
-        ]
-      },
-      {
-        "task": "single-get_order_by_id-2",
+        "task": "single-get_order_by_id-3",
         "mode": "code",
         "attempt": 1,
         "passed": true,
@@ -1605,14 +1829,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_order_by_id",
+              "argsMatch": "subset",
               "args": {
                 "order_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getOrderById"
             },
             "passed": true,
-            "detail": "get_order_by_id called 1×"
+            "detail": "get_order_by_id called 1× with {\"order_id\":1}"
           },
           {
             "assertion": {
@@ -1620,11 +1844,19 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
       {
-        "task": "single-get_order_by_id-2",
+        "task": "single-get_order_by_id-3",
         "mode": "tool",
         "attempt": 1,
         "passed": true,
@@ -1635,14 +1867,14 @@
             "assertion": {
               "type": "called",
               "tool": "get_order_by_id",
+              "argsMatch": "subset",
               "args": {
                 "order_id": 1
               },
-              "argsMatch": "subset",
               "toolKey": "operationId:getOrderById"
             },
             "passed": true,
-            "detail": "get_order_by_id called 1×"
+            "detail": "get_order_by_id called 1× with {\"order_id\":1}"
           },
           {
             "assertion": {
@@ -1650,6 +1882,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
@@ -1676,6 +1916,14 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       },
@@ -1702,6 +1950,82 @@
             },
             "passed": true,
             "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
+          }
+        ]
+      },
+      {
+        "task": "single-logout_user-4",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "logout_user",
+              "toolKey": "operationId:logoutUser"
+            },
+            "passed": true,
+            "detail": "logout_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
+          }
+        ]
+      },
+      {
+        "task": "single-logout_user-4",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "logout_user",
+              "toolKey": "operationId:logoutUser"
+            },
+            "passed": true,
+            "detail": "logout_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          },
+          {
+            "assertion": {
+              "type": "max_calls",
+              "n": 3
+            },
+            "passed": true,
+            "detail": "1 upstream calls (budget 3)"
           }
         ]
       }

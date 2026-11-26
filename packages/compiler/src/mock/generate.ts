@@ -220,7 +220,8 @@ const CURRENCIES = ['usd', 'eur', 'gbp', 'usd', 'cad', 'aud', 'jpy', 'chf', 'sek
 /** Version-2 string heuristics by field semantics; null = no opinion (fall through to version 1). */
 function realisticString(name: string, schema: JsonSchema, ctx: GenCtx): string | null {
   const f = ctx.faker;
-  const n = name.toLowerCase();
+  // camelCase as snake_case (`postalCode` → `postal_code`)
+  const n = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
   const res = (ctx.resource ?? '').toLowerCase();
   if (n === 'currency' || n.endsWith('_currency') || schema.format === 'currency') {
     const c = f.helpers.arrayElement(CURRENCIES);
@@ -245,6 +246,12 @@ function realisticString(name: string, schema: JsonSchema, ctx: GenCtx): string 
   if (n.endsWith('url') || n.endsWith('_uri') || n === 'href' || n === 'website' || n === 'homepage') return `https://www.${f.internet.domainWord()}.com/${f.word.noun()}`;
   if (n === 'country' || n.endsWith('_country')) return f.location.countryCode();
   if (n === 'city') return f.location.city();
+  if (n === 'postal_code' || n === 'zip' || n === 'zip_code' || n === 'postcode') return f.location.zipCode();
+  if (n === 'line1' || n === 'address_line1' || n === 'street' || n === 'address') return f.location.streetAddress();
+  if (n === 'line2' || n === 'address_line2') return `Suite ${f.number.int({ min: 100, max: 999 })}`;
+  if (n === 'state' && /address/.test(res)) return f.location.state({ abbreviated: true });
+  if (n === 'sku') return `SKU-${f.string.alphanumeric({ length: 6, casing: 'upper' })}`;
+  if (n === 'note' || n === 'notes' || n === 'memo' || n === 'statement_descriptor') return sentence(f.hacker.phrase());
   if (n === 'company') return f.company.name();
   return null;
 }
@@ -269,7 +276,8 @@ function heuristicString(name: string, schema: JsonSchema, ctx: GenCtx): string 
   if (n === 'color') return f.color.rgb({ prefix: '' });
   if (n === 'sha') return f.git.commitSha();
   if (typeof schema.pattern === 'string' || schema.minLength !== undefined || schema.maxLength !== undefined) return lengthString(schema, ctx);
-  return f.lorem.word();
+  // version 2: an English word, not lorem ipsum
+  return (ctx.dv ?? MOCK_DATA_VERSION) !== 1 ? f.word.noun() : f.lorem.word();
 }
 
 /** A string of the schema's length (long strings capped at 24 characters, never below minLength). */

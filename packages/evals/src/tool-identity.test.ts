@@ -36,7 +36,7 @@ describe('tool identity (suites survive overlay renames)', () => {
     expect(v.ok).toBe(true);
     const task = (v as { task: EvalTask }).task;
     expect(task.assertions[0]).toEqual({ type: 'called', tool: 'issues_get', toolKey: 'operationId:issues/get' });
-    expect(task.referenceCalls[0]).toEqual({ tool: 'issues_get', toolKey: 'operationId:issues/get', arguments: { issue_number: 1 } });
+    expect(task.referenceCalls[0]).toEqual({ tool: 'issues_get', toolKey: 'operationId:issues/get', arguments: { issue_number: 1 }, required: ['issue_number'] });
     expect(stampToolKeys(task, [{ name: 'issues_get', key: 'other' }]).assertions[0]).toMatchObject({ toolKey: 'operationId:issues/get' });
   });
 

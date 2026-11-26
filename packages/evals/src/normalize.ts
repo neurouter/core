@@ -55,7 +55,7 @@ export function answerHas(answer: string, expected: unknown, ctx: MatchContext =
   if (expected === null || expected === undefined) return { ok: false, how: null };
   const exp = typeof expected === 'string' ? expected : typeof expected === 'number' || typeof expected === 'boolean' ? String(expected) : JSON.stringify(expected);
   // a literal hit counts for text values only ("11" must not match "110"; booleans are matched by meaning)
-  if (typeof expected === 'string' && exp.length >= 3 && !/^-?\d+(\.\d+)?$/.test(exp) && exp !== 'true' && exp !== 'false' && answer.includes(exp)) return { ok: true, how: 'literal' };
+  if (typeof expected === 'string' && exp.length >= 3 && !/^-?\d+(\.\d+)?$/.test(exp) && exp !== 'true' && exp !== 'false' && includesBounded(answer, exp)) return { ok: true, how: 'literal' };
   const kind = ctx.kind ?? inferKind(expected, ctx.field);
   const ok = (() => {
     switch (kind) {
@@ -73,6 +73,17 @@ export function answerHas(answer: string, expected: unknown, ctx: MatchContext =
   return { ok, how: ok ? 'normalized' : null };
 }
 
+/** `exp` occurs in `answer` not glued to a letter or digit (`topup_1` is not in `topup_12`). */
+function includesBounded(answer: string, exp: string): boolean {
+  const word = /[\p{L}\p{N}]/u;
+  for (let i = answer.indexOf(exp); i >= 0; i = answer.indexOf(exp, i + 1)) {
+    const before = answer[i - 1];
+    const after = answer[i + exp.length];
+    if ((!before || !word.test(before) || !word.test(exp[0]!)) && (!after || !word.test(after) || !word.test(exp[exp.length - 1]!))) return true;
+  }
+  return false;
+}
+
 function textStated(answer: string, exp: string): boolean {
   const a = ` ${normText(answer)} `;
   const e = normText(exp);
@@ -80,7 +91,7 @@ function textStated(answer: string, exp: string): boolean {
   if (a.includes(` ${e} `)) return true;
   // glued ids/names: "applepay" vs "apple pay", "HelloWorld" vs "hello-world"
   const glue = (s: string) => s.replace(/\s+/g, '');
-  if (e.length >= 6 && glue(a).includes(glue(e))) return true;
+  if (e.length >= 6 && !/\d/.test(e) && glue(a).includes(glue(e))) return true;
   // long values (template contents, descriptions): token recall
   const et = e.split(' ').filter((t) => t.length > 1);
   if (et.length >= 8) {

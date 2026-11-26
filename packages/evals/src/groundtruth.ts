@@ -48,6 +48,19 @@ export function parseResultText(text: string): unknown {
   }
 }
 
+/**
+ * Contract 1 wraps non-object results (`{"items": [...]}` for arrays, `{"data": x}` for scalars); contract 2
+ * puts the bare value in the envelope's `data`. Unwrapping the contract-1 form makes ground-truth paths
+ * the same on both contracts (`ref[0].data[0].login`).
+ */
+export function unwrapV1(v: unknown): unknown {
+  if (!isObj(v)) return v;
+  const keys = Object.keys(v);
+  if (keys.length === 1 && keys[0] === 'items' && Array.isArray(v.items)) return v.items;
+  if (keys.length === 1 && keys[0] === 'data' && !isObj(v.data) && !Array.isArray(v.data)) return v.data;
+  return v;
+}
+
 /** The outcome of one MCP tool result, for both contracts. */
 export function outcomeFromResult(tool: string, res: McpCallResult): RefOutcome {
   const text = resultText(res);
@@ -57,13 +70,13 @@ export function outcomeFromResult(tool: string, res: McpCallResult): RefOutcome 
     const ok = v.ok && !res.isError;
     return { tool, ok, data: v.data ?? null, error: ok ? null : (v.error?.message ?? v.error?.code ?? 'error') };
   }
-  return { tool, ok: !res.isError, data: v, error: res.isError ? text.slice(0, 300) : null };
+  return { tool, ok: !res.isError, data: unwrapV1(v), error: res.isError ? text.slice(0, 300) : null };
 }
 
 /** The value of a transcript tool-result text (contract 2 envelopes unwrapped to `data`). */
 export function resultValue(text: string): unknown {
   const v = parseResultText(text);
-  return isEnvelope(v) ? (v.data ?? null) : v;
+  return isEnvelope(v) ? (v.data ?? null) : unwrapV1(v);
 }
 
 type Seg = { key: string } | { index: number } | { all: true };

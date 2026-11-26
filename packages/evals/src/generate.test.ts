@@ -26,9 +26,11 @@ describe('generateSuite', () => {
     expect(llm.requests[0]!.max_tokens).toBe(16000);
     expect(llm.requests[0]!.tool_choice).toBeUndefined();
     expect(s.tasks.map((t) => t.key)).toEqual(['a', 'imp']);
-    expect(s.tasks[0]!.assertions.at(-1)).toEqual({ type: 'framing' });
+    expect(s.tasks[0]!.assertions).toContainEqual({ type: 'framing' });
+    // budgets are derived from the reference path (1 call → the floor of 3)
+    expect(s.tasks[0]!.assertions).toContainEqual({ type: 'max_calls', n: 3 });
     expect(String(llm.requests[1]!.messages[0]!.content)).toContain('duplicate prompt');
-    expect(s.generator).toMatchObject({ seed: 3, promptVersion: 'gen-2' });
+    expect(s.generator).toMatchObject({ seed: 3, promptVersion: 'gen-3', mockDataVersion: 2 });
   });
 
   it('regenerates once with the errors appended, then drops with a diagnostic', async () => {
@@ -140,5 +142,58 @@ describe('generator scope and budget (large APIs)', () => {
     expect(sel.tools).toEqual(tools);
     expect(sel.otherTools).toEqual([]);
     expect(sel.samples).toEqual({ '/pet': [{ id: 1 }] });
+  });
+});
+
+describe('generation with outcome-based checks (0.2.2)', () => {
+  const session = { call: async (tool: string, args: Record<string, unknown>) => ({ tool, ok: true, data: tool === 'list_pets' ? [{ id: 1, name: 'Rex' }] : { id: args.petId, name: 'Rex', status: 'available' } }) };
+
+  it('keeps required args, binds literals to the ground truth, calibrates, drops generator budgets, reports topics', async () => {
+    const g = {
+      key: 'pet',
+      category: 'single',
+      prompt: 'What is the status of pet 1?',
+      rubric: 'r',
+      assertions: [{ type: 'called', tool: 'get_pet_by_id', args: { petId: 1, limit: 5 } }, { type: 'answer_contains', anyOf: ['available'] }, { type: 'max_calls', n: 1 }],
+      reference_calls: [{ tool: 'get_pet_by_id', arguments: { petId: 1, limit: 5 }, required_args: ['petId'] }],
+    };
+    const llm = new ScriptedLlmClient([json([g])]);
+    const s = await generateSuite({ llm, model: 'm', server: { name: 'P', slug: 'p' }, tools, samples: {}, counts: { single: 1, multi: 0, ambiguous: 0, impossible: 0 }, openReference: async () => session });
+    const t = s.tasks[0]!;
+    expect(t.referenceCalls[0]!.required).toEqual(['petId']);
+    expect(t.assertions).toContainEqual({ type: 'called', tool: 'get_pet_by_id', args: { petId: 1 }, incidental: { limit: 5 } });
+    expect(t.assertions).toContainEqual({ type: 'answer_contains', from: 'ref[0].data.status', anyOf: ['available'] });
+    expect(t.assertions).toContainEqual({ type: 'max_calls', n: 3 });
+    expect(s.generator.calibration).toMatchObject({ passed: 1, mockDataVersion: 2 });
+    expect(s.generator.coverage).toEqual({ get: 1 });
+    const input = readMarkerInput(String(llm.requests[0]!.messages[0]!.content), GENERATOR_MARKER) as GeneratorCategoryInput;
+    expect(input.topics).toHaveLength(1);
+  });
+
+  it('rejects (and regenerates) a task whose reference fails calibration, with the reason', async () => {
+    const bad = { key: 'bad', category: 'single', prompt: 'Name pet 1', rubric: '', assertions: [{ type: 'answer_contains', anyOf: ['Bella'] }], reference_calls: [{ tool: 'get_pet_by_id', arguments: { petId: 1 }, required_args: ['petId'] }] };
+    const llm = new ScriptedLlmClient([json([bad]), json([{ ...bad, key: 'bad2', prompt: 'Name the pet with id 1' }])]);
+    const s = await generateSuite({ llm, model: 'm', server: { name: 'P', slug: 'p' }, tools, samples: {}, counts: { single: 1, multi: 0, ambiguous: 0, impossible: 0 }, openReference: async () => session });
+    expect(s.tasks).toEqual([]);
+    expect(String(llm.requests[1]!.messages[0]!.content)).toContain('calibration: expected answer value ["Bella"] is not in the reference outcome');
+    expect(s.diagnostics[0]!.message).toContain('calibration');
+  });
+
+  it('rejects near-duplicates (same reference path, or near-identical wording)', async () => {
+    const a = { ...single('a'), prompt: 'Get pet 1 and tell me its name' };
+    const b = { ...single('b'), prompt: 'Please get pet 1 and tell me the name' };
+    const v1 = await validateGenerated(a as never, 'single', { tools }, new Set());
+    expect(v1.ok).toBe(true);
+    const v2 = await validateGenerated(b as never, 'single', { tools }, new Set(), [(v1 as unknown as { task: never }).task]);
+    expect(v2).toMatchObject({ ok: false, errors: [expect.stringContaining('near-duplicate of task a')] });
+  });
+
+  it('reads alternatives and stamps them', async () => {
+    const two: GenTool[] = [...tools, { name: 'find_pet', description: 'Find pet.', inputSchema: { type: 'object', properties: { petId: { type: 'integer' } } }, write: false, key: 'operationId:findPet' }];
+    const g = { ...single('alt'), reference_calls: [{ tool: 'get_pet_by_id', arguments: { petId: 1 }, required_args: ['petId'], alternatives: ['find_pet'] }] };
+    const v = await validateGenerated(g as never, 'single', { tools: two }, new Set());
+    const t = (v as { task: { referenceCalls: unknown[]; assertions: unknown[] } }).task;
+    expect(t.referenceCalls[0]).toMatchObject({ alternatives: [{ tool: 'find_pet', toolKey: 'operationId:findPet' }] });
+    expect(t.assertions[0]).toMatchObject({ type: 'called', anyOf: [{ tool: 'find_pet', toolKey: 'operationId:findPet' }] });
   });
 });
