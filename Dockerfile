@@ -91,8 +91,9 @@ COPY --from=build --chown=node:node /app/models ./models
 COPY --from=build --chown=node:node /app/monty-path /app/monty-sha256 ./
 COPY --chown=node:node examples ./examples
 COPY --chown=node:node neurouter.example.yaml ./neurouter.example.yaml
-COPY --chown=node:node --chmod=0755 deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN mkdir -p /data && chown node:node /data
+# no COPY --chmod: Cloud Build's default `docker build` is the legacy builder (BuildKit-only flag)
+COPY --chown=node:node deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh && mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 3000
 VOLUME ["/data"]
