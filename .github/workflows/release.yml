@@ -72,6 +72,8 @@ jobs:
         with: { ref: '${{ env.TAG }}' }
       - uses: actions/setup-node@v7
         with: { node-version: '26', registry-url: 'https://registry.npmjs.org' }
+      # npm trusted publishing (GitHub OIDC, no token) needs npm >= 11.5.1
+      - run: npm install -g npm@^11.5.1 && npm --version
       - run: npm ci && npm run build
       - run: |
           set -euo pipefail
@@ -84,4 +86,3 @@ jobs:
             # prepack (scripts/prepack.mjs) copies LICENSE/NOTICE, the CLI README and the console build (web-dist) into the tarball
             npm publish -w "$ws" --access public --provenance --ignore-scripts=false
           done
-        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }

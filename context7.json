@@ -1,0 +1,14 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "url": "https://context7.com/neurouter/core",
+  "public_key": "pk_NAzW88ZeCIHF2L9RZQa0s",
+  "projectTitle": "Neurouter",
+  "description": "Turn an OpenAPI or GraphQL API into a governed MCP server with code mode, ops tools and evals that score how well agents use it.",
+  "folders": [],
+  "excludeFolders": ["node_modules", "dist", "apps/web/src/mocks", "**/*.test.ts", "**/*.test.tsx"],
+  "rules": [
+    "Each server/environment has its own stateless MCP endpoint: /mcp/{server}/{env}; every server has a built-in mock environment.",
+    "Configuration: environment variables plus an optional neurouter.yaml (see neurouter.example.yaml); `npx neurouter validate` checks it.",
+    "Local development uses SQLite; production uses Postgres with pgvector."
+  ]
+}

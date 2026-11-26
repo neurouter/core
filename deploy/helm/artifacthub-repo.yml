@@ -1,0 +1,3 @@
+# Artifact Hub repository metadata, pushed to oci://ghcr.io/neurouter/charts/neurouter-core:artifacthub.io
+# by .github/workflows/artifacthub.yml. The repositoryID enables the Verified Publisher badge.
+repositoryID: 4a8f2426-6870-4892-a59d-4d67df1f89bf
