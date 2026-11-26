@@ -8,7 +8,7 @@ export default defineConfig({
     name: 'executor',
     include: ['src/**/*.test.ts'],
     environment: 'node',
-    pool: 'threads',
+    pool: 'forks',
     env: { NODE_ENV: 'test' },
   },
 });

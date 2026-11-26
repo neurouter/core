@@ -1,5 +1,6 @@
 import type { Services } from './deps.js';
 import type { JobScheduler } from './kernel/jobs/scheduler.js';
+import { environmentRuntime } from './kernel/runtime-config.js';
 
 const DAY = 86_400_000;
 
@@ -62,6 +63,32 @@ export function registerJobs(scheduler: JobScheduler, s: Services, extra: Array<
       await db.deleteFrom('web_sessions').where((eb) => eb.or([eb('expires_at', '<=', now), eb('last_seen_at', '<=', now - s.config.env.SESSION_IDLE_MINUTES * 60_000)])).execute();
       await db.deleteFrom('oidc_login_states').where('expires_at', '<=', now).execute();
       await db.deleteFrom('spec_previews').where('expires_at', '<=', now).execute();
+    },
+  });
+  scheduler.register({
+    name: 'environments.health',
+    schedule: '0 */5 * * * *',
+    leaseMs: 5 * 60_000,
+    run: async () => {
+      const db = s.dbs.main.db;
+      const envs = await db.selectFrom('environments').selectAll().where('status', '=', 'active').execute();
+      for (const e of envs) {
+        const rt = environmentRuntime(e);
+        const checkedAt = new Date(s.clock.now()).toISOString();
+        let health: Record<string, unknown>;
+        if (rt.isMock) health = { status: 'up', checkedAt, latencyMs: 0, error: null };
+        else {
+          const started = s.clock.now();
+          const credential = await s.credentials.presence(rt.auth, rt.id).catch(() => 'missing' as const);
+          try {
+            const res = await s.upstreamFetchFor(rt.allowHttp)(rt.baseUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000), redirect: 'manual' });
+            health = { status: res.status < 500 ? 'up' : 'down', checkedAt, latencyMs: s.clock.now() - started, error: res.status < 500 ? null : `HTTP ${res.status}`, credential };
+          } catch (err) {
+            health = { status: 'down', checkedAt, latencyMs: s.clock.now() - started, error: (err as Error).message.slice(0, 200), credential };
+          }
+        }
+        await db.updateTable('environments').set({ health: JSON.stringify(health) }).where('id', '=', e.id).execute();
+      }
     },
   });
   for (const e of extra) e(scheduler, s);

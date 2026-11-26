@@ -4,11 +4,22 @@ import { startServer, type RunningServer } from '../../server.js';
 
 export const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
 
-let nextPort = 39000 + Math.floor(Math.random() * 2000);
+/** A port the OS just reported free (tests run files in parallel, so fixed/random bases collide). */
+export async function freePort(): Promise<number> {
+  const { createServer } = await import('node:net');
+  return new Promise((res, rej) => {
+    const srv = createServer();
+    srv.once('error', rej);
+    srv.listen(0, '127.0.0.1', () => {
+      const port = (srv.address() as { port: number }).port;
+      srv.close(() => res(port));
+    });
+  });
+}
 
 /** Boots a real server (SQLite in memory, in-process executor, embeddings off) on a free port. */
 export async function bootServer(env: Record<string, string> = {}): Promise<RunningServer> {
-  const port = String(nextPort++);
+  const port = String(await freePort());
   return startServer({
     env: {
       NODE_ENV: 'test',

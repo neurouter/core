@@ -60,8 +60,9 @@ export class ToolSearchService {
     const qWords = new Set(stemWords(query));
     const ranked = fused
       .map((c) => {
-        const words = stemWords(allowed.get(c.id) ?? '');
-        const covered = words.length ? words.filter((w) => qWords.has(w)).length / words.length : 0;
+        const words = stemWords(allowed.get(c.id) ?? '').filter((w) => !NAME_STOP.has(w));
+        const hit = (w: string) => qWords.has(w) || [...qWords].some((q) => q.length >= 4 && w.length >= 4 && (q.startsWith(w) || w.startsWith(q)));
+        const covered = words.length ? words.filter(hit).length / words.length : 0;
         return { ...c, score: c.score + covered * 0.01 };
       })
       .sort((a, b) => b.score - a.score || (allowed.get(a.id) ?? '').localeCompare(allowed.get(b.id) ?? ''))
@@ -69,6 +70,9 @@ export class ToolSearchService {
     return { mode, ranked: ranked.map((c) => ({ id: c.id, name: allowed.get(c.id) ?? '', score: Math.round(c.score * 1e6) / 1e6 })) };
   }
 }
+
+/** Connector words that carry no meaning in tool names (`issues_list_for_repo`). */
+const NAME_STOP = new Set(['for', 'by', 'in', 'of', 'the', 'a', 'an', 'to', 'on', 'and', 'or', 'with', 'from']);
 
 /** Lower-cased word stems (`issues_create` → issue, create). */
 export function stemWords(s: string): string[] {
