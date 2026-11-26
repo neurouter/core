@@ -1,0 +1,240 @@
+# Stripe API (stripe/openapi master @ a8f2a25, spec3.json, API 2026-09-30.endive): agent-ready overlay for the
+# Neurouter 0.2.1 launch demo (2026-11-26b). First Stripe overlay: there is no earlier curated one.
+#
+# Provenance of every change:
+#   [auto]    applied from `neurouter eval --suggest` on the BEFORE run (raw spec, tool mode, gpt-6-luna).
+#             Suggestions are derived from the suite failures, so every [auto] entry is suite-informed by design;
+#             entries whose example arguments copy the suite's expected values are marked "mirrors the suite".
+#   [manual]  curation for a read-mostly "payments and billing support" agent, chosen without the suite
+#   [manual, suite-informed]  manual edits chosen BECAUSE the suite uses those tools, or written after reading it
+#
+# Tool names stay raw (get_customers, get_invoices_invoice, …). 0.2.1 resolves eval assertions by stable key.
+overlay: 1
+info:
+  title: Stripe, agent-ready (payments and billing, read-mostly)
+  notes: 39 of 612 tools. Customers, products and prices, invoices, payments, charges and refunds, subscriptions, balance, plus the areas the eval suite covers.
+
+# [manual] Hide the other 573 tools (Connect, Issuing admin, Treasury, Terminal hardware, Climate, test helpers, …).
+# 39 visible tools stay under the 40-tool threshold, so `discovery: auto` lists them directly.
+defaults:
+  hidden: true
+
+tools:
+  # ------------------------------------------------------------------ balance  [manual]
+  "operationId:GetBalance":
+    hidden: false
+    description: "Retrieve the current account balance: available and pending amounts per currency, and `livemode`. Amounts are in the smallest currency unit (cents)."  # [manual]
+  "operationId:GetBalanceTransactions":
+    hidden: false
+    # [auto] description
+    description: "List Stripe balance-ledger transactions, such as charges, fees, transfers, and payouts, newest first. Use this to inspect balance activity—not to list top-up objects or filter top-ups by their amount; use `get_topups` for those."
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].amount", "data[].currency", "data[].type", "data[].status", "data[].fee", "data[].net", "data[].source", "data[].description", "data[].created", "has_more"]
+      maxItems: 20
+
+  # ------------------------------------------------------------------ customers  [manual]
+  "operationId:GetCustomers":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].name", "data[].email", "data[].created", "data[].currency", "data[].delinquent", "data[].metadata", "has_more"]
+      maxItems: 20
+  "operationId:GetCustomersSearch":
+    hidden: false
+    description: "Search customers with Stripe's search query language, e.g. `email:'jane@example.com'` or `metadata['seed']:'neurouter-demo'`. Use get_customers to page through all customers, and get_customers_customer when you already have the ID."  # [manual]
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].name", "data[].email", "data[].created", "data[].metadata", "has_more", "next_page", "total_count"]
+      maxItems: 20
+  "operationId:GetCustomersCustomer":
+    hidden: false
+    response: { maxBytes: 8192 }                                    # [manual]
+
+  # ------------------------------------------------------------------ products and prices  [manual]
+  "operationId:GetProducts":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].name", "data[].active", "data[].default_price", "data[].description", "data[].metadata", "has_more"]
+      maxItems: 20
+  "operationId:GetPrices":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].product", "data[].active", "data[].currency", "data[].unit_amount", "data[].type", "data[].recurring", "data[].nickname", "data[].lookup_key", "has_more"]
+      maxItems: 20
+  "operationId:GetPricesPrice":
+    hidden: false
+    response: { maxBytes: 8192 }                                    # [manual]
+
+  # ------------------------------------------------------------------ invoices  [manual]
+  "operationId:GetInvoices":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].number", "data[].customer", "data[].status", "data[].currency", "data[].amount_due", "data[].amount_paid", "data[].total", "data[].due_date", "data[].created", "data[].hosted_invoice_url", "has_more"]
+      maxItems: 20
+  "operationId:GetInvoicesSearch":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].number", "data[].customer", "data[].status", "data[].currency", "data[].amount_due", "data[].total", "data[].created", "has_more", "next_page"]
+      maxItems: 20
+  "operationId:GetInvoicesInvoice":
+    hidden: false
+    response: { maxBytes: 8192 }                                    # [manual]
+  "operationId:GetInvoicesInvoiceLines":
+    hidden: false
+    response: { maxItems: 20, maxBytes: 8192 }                      # [manual]
+
+  # ------------------------------------------------------------------ payments  [manual]
+  "operationId:GetPaymentIntents":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].amount", "data[].currency", "data[].status", "data[].customer", "data[].description", "data[].created", "data[].last_payment_error.code", "data[].metadata", "has_more"]
+      maxItems: 20
+  "operationId:GetPaymentIntentsSearch":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].amount", "data[].currency", "data[].status", "data[].customer", "data[].created", "data[].metadata", "has_more", "next_page"]
+      maxItems: 20
+  "operationId:GetPaymentIntentsIntent":
+    hidden: false
+    response: { maxBytes: 8192 }                                    # [manual]
+  "operationId:GetCharges":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].amount", "data[].amount_refunded", "data[].currency", "data[].status", "data[].paid", "data[].refunded", "data[].customer", "data[].payment_intent", "data[].description", "data[].created", "has_more"]
+      maxItems: 20
+  "operationId:GetChargesSearch":
+    hidden: false
+    response:                                                       # [auto] (+ include [manual])
+      include: ["data[].id", "data[].amount", "data[].currency", "data[].status", "data[].customer", "data[].payment_intent", "data[].created", "has_more", "next_page"]
+      maxItems: 20
+      maxBytes: 8192
+  "operationId:GetChargesCharge":
+    hidden: false
+    response: { maxBytes: 8192 }                                    # [manual]
+
+  # ------------------------------------------------------------------ refunds  [manual] (+ [auto] descriptions)
+  "operationId:GetRefunds":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].amount", "data[].currency", "data[].status", "data[].charge", "data[].payment_intent", "data[].reason", "data[].created", "has_more"]
+      maxItems: 20
+  "operationId:GetRefundsRefund":
+    hidden: false
+    # [auto] description
+    description: "Retrieve the details of a refund using its refund ID. Use this after finding a refund in a list, including get_charges_charge_refunds; unlike that charge-scoped detail endpoint, this does not require the charge ID."
+  "operationId:GetChargesChargeRefunds":
+    hidden: false                                                   # [manual, suite-informed]
+    # [auto] description
+    description: "List refunds associated with a specific charge. Use this to find refund IDs for a known charge; after selecting a refund, retrieve its details with get_refunds_refund. This returns a list, not one refund’s details."
+    args:
+      describe:
+        charge: "A string, e.g. \"demo\"."                          # [auto] mirrors the suite
+    examples:                                                       # [auto] mirrors the suite
+      - title: "Show me the refunds for charge demo, including each refund’s ID and amount."
+        arguments: { charge: demo }
+  "operationId:PostRefunds":
+    hidden: false                                                   # [manual] a destructive write, kept visible on purpose (writes are disabled live)
+    description: "Refund a charge or PaymentIntent, fully or partially (`amount` in the smallest currency unit). Irreversible: confirm the charge and amount with the user first."  # [manual]
+
+  # ------------------------------------------------------------------ subscriptions  [manual]
+  "operationId:GetSubscriptions":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].customer", "data[].status", "data[].collection_method", "data[].cancel_at_period_end", "data[].created", "has_more"]
+      maxItems: 20
+  "operationId:PostCustomersCustomer":
+    hidden: false                                                   # [manual] a write, kept visible on purpose
+    description: "Update a customer's name, email, address, metadata or default payment settings. Send only the fields to change."  # [manual]
+
+  # ------------------------------------------------------------------ events  [manual, suite-informed]
+  "operationId:GetEvents":
+    hidden: false
+    args:
+      describe:
+        limit: "Set the maximum number of events to return (1–100; defaults to 10). Use 1 to get only the newest event."  # [auto]
+    examples:                                                       # [auto] mirrors the suite
+      - title: "Show me the details of the newest event currently returned by Stripe’s event lis"
+        arguments: { limit: 1 }
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].type", "data[].created", "data[].livemode", "data[].data.object.id", "has_more"]
+      maxItems: 20
+  "operationId:GetEventsId":
+    hidden: false
+    response: { maxBytes: 8192 }                                    # [manual]
+
+  # ------------------------------------------------------------------ coupons, credit notes, payment links  [manual, suite-informed]
+  "operationId:GetCoupons":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].name", "data[].valid", "data[].percent_off", "data[].amount_off", "data[].currency", "data[].duration", "data[].times_redeemed", "has_more"]
+      maxItems: 20
+  "operationId:GetCouponsCoupon":
+    hidden: false
+    # [auto] description
+    description: "Retrieve a single coupon by its ID to inspect details such as its name and validity. Use this tool when you already have the coupon ID; it does not search for or list coupons."
+  "operationId:GetCreditNotes":
+    hidden: false
+    # [auto] description
+    description: "List credit notes, optionally filtered by invoice, customer, account, or creation time. Use this to find a credit note and read its amount, status, and ID; then pass that ID to get_credit_notes_credit_note_lines to retrieve its line items. This lists credit notes, not their full paginated line items."
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].number", "data[].invoice", "data[].customer", "data[].amount", "data[].total", "data[].status", "data[].reason", "data[].created", "has_more"]
+      maxItems: 20
+  "operationId:GetCreditNotesId":
+    hidden: false
+    response: { maxBytes: 8192 }                                    # [auto] adapted: its maxItems has no effect on an object and is dropped
+  "operationId:GetCreditNotesCreditNoteLines":
+    hidden: false
+    response: { maxItems: 20, maxBytes: 8192 }                      # [manual]
+  "operationId:GetPaymentLinks":
+    hidden: false
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].active", "data[].url", "data[].currency", "has_more"]
+      maxItems: 20
+  "operationId:GetPaymentLinksPaymentLink":
+    hidden: false
+    # [auto] description
+    description: "Retrieve a payment link by its ID to inspect fields such as whether it is active and the URL it uses. Use this to look up one known link, not to list or create links."
+
+  # ------------------------------------------------------------------ top-ups  [manual, suite-informed]
+  "operationId:GetTopups":
+    hidden: false
+    # [auto] description
+    description: "List top-up records, optionally filtering by amount, status, or creation time. To find recent top-ups, filter with `created` using a Unix timestamp or range; `limit` only controls how many records are returned and does not define a time period. If the user’s meaning of “recent” is unclear, ask what timeframe they mean before querying."
+    response:                                                       # [auto]
+      maxItems: 20
+      maxBytes: 8192
+  "operationId:GetTopupsTopup":
+    hidden: false
+    # [auto] description
+    description: "Retrieve the details of one top-up by its unique ID. Use this only when you already know the top-up ID and need its individual record; use `get_topups` to search, filter, or list top-ups."
+    response: { maxBytes: 8192 }                                    # [auto] adapted: its maxItems has no effect on an object and is dropped
+
+  # ------------------------------------------------------------------ Terminal, Issuing, Financial Connections  [manual, suite-informed]
+  "operationId:GetTerminalConfigurations":
+    hidden: false
+    # [auto] description
+    description: "List Terminal configuration objects. Set `is_account_default` to `false` to return only non-default configurations, or `true` to return only the account default; omit it to list both. Use pagination to retrieve additional results. Unlike a tool that retrieves one configuration, this tool lists configurations."
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].name", "data[].is_account_default", "data[].livemode", "has_more"]
+      maxItems: 20
+  "operationId:GetIssuingTokens":
+    hidden: false
+    args:
+      describe:
+        card: "Required card ID as a plain string (for example, \"card_123\"); do not pass a card object."  # [auto]
+    examples:                                                       # [auto] mirrors the suite
+      - title: List the active issuing tokens for card EiZtvv.
+        arguments: { card: EiZtvv, status: active }
+    response:                                                       # [manual]
+      include: ["data[].id", "data[].card", "data[].status", "data[].network", "data[].wallet_provider", "data[].last4", "data[].created", "has_more"]
+      maxItems: 20
+  "operationId:GetFinancialConnectionsAccounts":
+    hidden: false
+    response:                                                       # [auto] (+ include [manual])
+      include: ["data[].id", "data[].display_name", "data[].institution_name", "data[].category", "data[].subcategory", "data[].status", "data[].last4", "data[].account_holder", "data[].ownership", "has_more"]
+      maxItems: 20
+      maxBytes: 8192
+  "operationId:GetFinancialConnectionsAccountsAccountOwners":
+    hidden: false
+    response: { maxItems: 20, maxBytes: 8192 }                      # [manual]
+
+# All 16 --suggest entries are applied (#1 and #15 adapted: maxBytes only, because maxItems has no effect on a
+# single object). No suggestion was rejected.

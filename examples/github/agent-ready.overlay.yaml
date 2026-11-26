@@ -1,19 +1,23 @@
 # GitHub REST (api.github.com description, main @ 36dd877) — agent-ready overlay for the Neurouter launch demo.
+# Rerun on Neurouter 0.2.1 (2026-11-26b) with a NEW generated suite.
 #
-# Provenance of every change (see README "Overlay edits"):
-#   [auto]    applied from `neurouter eval --suggest` on the BEFORE run (raw spec, tool mode, gpt-6-luna)
-#   [curated] ported from examples/github/curated.overlay.yaml (hand-written before this suite existed),
-#             WITHOUT its tool/argument renames, so the frozen eval suite runs unchanged
-#   [manual]  edits made for this demo
+# Provenance of every change:
+#   [auto]        applied from `neurouter eval --suggest` on the 0.2.1 BEFORE run (raw spec, tool mode, gpt-6-luna).
+#                 Suggestions are derived from the suite failures, so every [auto] entry is suite-informed by design.
+#   [auto-0.2.0]  applied from --suggest on the 0.2.0 run (previous suite), kept from examples/github
+#   [curated]     ported from examples/github/curated.overlay.yaml (hand-written before either suite existed),
+#                 without its tool/argument renames
+#   [manual]      edits made for the demo
+#   [manual, suite-informed]  manual edits chosen BECAUSE the new suite uses those tools (see README)
 #
-# Tool names are the raw generated names on purpose: eval assertions match tools by name.
+# Tool names stay raw. 0.2.1 resolves eval assertions by stable key (operationId), so renames would also work.
 overlay: 1
 info:
   title: GitHub REST, agent-ready
-  notes: Issues, comments, labels, milestones, pull requests, repositories and search (40 tools).
+  notes: Issues, comments, labels, milestones, pull requests, repositories and search (40 curated tools), plus account, app, Codespaces, gitignore, package and org-settings reads (27 tools).
 
-# [manual] Hide the other ~1240 tools (Actions, Codespaces, Copilot, orgs admin, …). 40 visible tools keep
-# `discovery: auto` in full mode (tools listed directly) instead of search_tools + call_tool.
+# [manual] Hide everything else (1214 tools). With 67 visible tools, `discovery: auto` stays in search mode
+# (search_tools + call_tool; the listed-directly threshold is 40).
 defaults:
   hidden: true
 
@@ -22,7 +26,7 @@ tools:
   "operationId:issues/list-for-repo":
     hidden: false
     pinned: true                                                    # [curated]
-    # [auto] description
+    # [auto-0.2.0] description
     description: "List issues (and pull requests, which GitHub returns through its issues API) in a repository. By default, returns open items. For the newest-created items, set `sort` to `created` and `direction` to `desc`; for items updated most recently, use `sort: updated` and `direction: desc`. Use `state: all` to include both open and closed items."
     args:
       describe:                                                     # [curated]
@@ -32,19 +36,19 @@ tools:
     response:
       include: ["[].number", "[].title", "[].state", "[].user.login", "[].labels[].name", "[].comments", "[].created_at", "[].updated_at", "[].html_url", "[].pull_request.url"]  # [curated]
       flatten: { "[].user.login": author }                          # [curated]
-      maxItems: 20                                                  # [auto]
-      maxBytes: 8192                                                # [auto]
+      maxItems: 20                                                  # [auto-0.2.0]
+      maxBytes: 8192                                                # [auto-0.2.0]
     examples:                                                       # [curated]
       - title: Open bugs
         arguments: { owner: octocat, repo: hello-world, labels: bug }
   "operationId:issues/get":
     hidden: false
     pinned: true                                                    # [curated]
-    # [auto] description
+    # [auto-0.2.0] description
     description: "Fetch an existing issue's details by its repository and issue number, including its title, body, labels, assignees, and state. Use this to inspect an issue before deciding how to handle it; it does not fetch comments or make changes. For comments, use `issues_list_comments`; to edit or close the issue, use `issues_update`. Prefer this over repository or file tools when the request identifies an issue."
     response:
       exclude: ["reactions", "performed_via_github_app", "user.gravatar_id"]  # [curated]
-      maxBytes: 8192                                                # [auto] (its maxItems: 20 has no effect on an object and is omitted)
+      maxBytes: 8192                                                # [auto-0.2.0] (its maxItems: 20 has no effect on an object and is omitted)
     examples:                                                       # [curated]
       - arguments: { owner: octocat, repo: hello-world, issue_number: 1 }
   "operationId:issues/create":
@@ -60,8 +64,8 @@ tools:
     response:
       include: ["[].id", "[].user.login", "[].body", "[].created_at", "[].html_url"]  # [curated]
       flatten: { "[].user.login": author }                          # [curated]
-      maxItems: 20                                                  # [auto]
-      maxBytes: 8192                                                # [auto]
+      maxItems: 20                                                  # [auto-0.2.0]
+      maxBytes: 8192                                                # [auto-0.2.0]
   "operationId:issues/list-comments-for-repo":
     hidden: false
     description: List issue comments across a whole repository, for finding recent discussion.  # [curated]
@@ -89,7 +93,8 @@ tools:
       maxItems: 100
   "operationId:issues/get-label":
     hidden: false
-    description: Get one repository label by name.                  # [curated]
+    # [auto] description (replaces the [curated] one-liner "Get one repository label by name.")
+    description: "Get one label from a repository by its exact name, including its color and description. Use this when the label name is known; to enumerate labels or search among them, use `issues_list_labels_for_repo`."
   "operationId:issues/create-label":
     hidden: false
     description: Create a repository label with a name, a hex color (without #) and an optional description.  # [curated]
@@ -112,7 +117,7 @@ tools:
   # ------------------------------------------------------------------ assignees & milestones
   "operationId:issues/list-assignees":
     hidden: false
-    # [auto] description
+    # [auto-0.2.0] description
     description: "List the users who are eligible to be assigned to issues in a specific repository. This returns the repository's assignable users, not the users currently assigned to a particular issue. Call once with the owner and repository; use pagination only when you need additional results beyond the returned page."
     response:
       include: ["[].login"]                                         # [curated]
@@ -124,12 +129,12 @@ tools:
     description: List milestones in a repository with their due dates and open/closed issue counts.  # [curated]
     args:
       describe:
-        state: "One of \"open\", \"closed\", \"all\", e.g. \"all\"."  # [auto]
+        state: "One of \"open\", \"closed\", \"all\", e.g. \"all\"."  # [auto-0.2.0]
     response:
       include: ["[].number", "[].title", "[].state", "[].due_on", "[].open_issues", "[].closed_issues"]  # [curated]
-      maxItems: 20                                                  # [auto]
-      maxBytes: 8192                                                # [auto]
-    examples:                                                       # [auto]
+      maxItems: 20                                                  # [auto-0.2.0]
+      maxBytes: 8192                                                # [auto-0.2.0]
+    examples:                                                       # [auto-0.2.0]
       - title: Look up the v1.0 milestone in octocat/Hello-World.
         arguments: { owner: octocat, repo: Hello-World, state: all }
   # [manual] shown: needed to read one milestone after finding its number (not in the curated set)
@@ -148,8 +153,8 @@ tools:
     response:
       include: ["[].number", "[].title", "[].state", "[].draft", "[].user.login", "[].head.ref", "[].base.ref", "[].created_at", "[].html_url"]  # [curated]
       flatten: { "[].user.login": author }                          # [curated]
-      maxItems: 20                                                  # [auto]
-      maxBytes: 8192                                                # [auto]
+      maxItems: 20                                                  # [auto-0.2.0]
+      maxBytes: 8192                                                # [auto-0.2.0]
   "operationId:pulls/get":
     hidden: false
     description: Get one pull request by number, including mergeability, head and base branches.  # [curated]
@@ -205,23 +210,23 @@ tools:
       include: ["full_name", "description", "default_branch", "visibility", "open_issues_count", "stargazers_count", "topics", "html_url", "pushed_at"]
   "operationId:repos/list-branches":
     hidden: false
-    # [auto] description (two suggestions for this tool; the first one is used)
+    # [auto-0.2.0] description (two suggestions for this tool; the first one is used)
     description: "List branch names and protection status in a repository. Use this to check whether a named branch exists; it does not return commit history. To show commits from a branch, use repos_list_commits with that branch in `sha`."
     response:
       include: ["[].name", "[].protected"]                          # [curated]
-      maxItems: 20                                                  # [auto]
-      maxBytes: 8192                                                # [auto]
+      maxItems: 20                                                  # [auto-0.2.0]
+      maxBytes: 8192                                                # [auto-0.2.0]
   "operationId:repos/get-branch":
     hidden: false
     description: Get one branch with its latest commit.             # [curated]
   "operationId:repos/list-commits":
     hidden: false
-    # [auto] description: the two suggestions for this tool, merged into one text [manual merge]
+    # [auto-0.2.0] description: the two suggestions for this tool, merged into one text [manual merge]
     description: "List commits in a repository, newest first. To show recent commits from a branch, pass that branch name in `sha`; omit `sha` to use the default branch. Filter by path, author, committer, or date range as needed. Use `per_page` to request the desired number of commits in one response and `page` only to retrieve another page. Use repos_list_branches to list or check branch names, not to retrieve commits."
     response:
       include: ["[].sha", "[].commit.message", "[].commit.author.name", "[].commit.author.date"]  # [curated]
-      maxItems: 20                                                  # [auto]
-      maxBytes: 8192                                                # [auto]
+      maxItems: 20                                                  # [auto-0.2.0]
+      maxBytes: 8192                                                # [auto-0.2.0]
   "operationId:repos/list-tags":
     hidden: false
     description: List tags in a repository.                         # [curated]
@@ -230,18 +235,136 @@ tools:
   # [manual] shown: the README read (not in the curated set)
   "operationId:repos/get-readme":
     hidden: false
-    # [auto] description
+    # [auto-0.2.0] description
     description: "Fetch the preferred README file for a repository. Returns raw contents by default; omit `ref` to use the repository's default branch. Use this for the README specifically, not for listing files or reading an arbitrary repository path."
   "operationId:search/issues-and-pull-requests":
     hidden: false
     pinned: true                                                    # [curated]
-    # [auto] description
+    # [auto-0.2.0] description
     description: "Search issue and pull-request titles, bodies, and comments using keywords and GitHub qualifiers such as `repo:OWNER/REPO`. Use this first to identify the matching issue and its issue number; do not guess a number or use repository listing as a substitute for targeted search. Results can include pull requests."
     response:
       include: ["total_count", "items[].number", "items[].title", "items[].state", "items[].html_url"]  # [curated]
-      maxItems: 20                                                  # [auto]
-      maxBytes: 8192                                                # [auto]
+      maxItems: 20                                                  # [auto-0.2.0]
+      maxBytes: 8192                                                # [auto-0.2.0]
 
-# Not applied: two [auto] composite sketches (do_fetch_return_readme, do_actual_latest_three). Their rationale
+  # ================================================================== added for the 0.2.1 suite
+  # [manual, suite-informed] The new suite (generated over the raw spec) asks about SSH signing keys, Codespaces,
+  # gitignore templates, Marketplace plans, app installations, OIDC, billing, repo public keys, org settings and
+  # packages. None of those were in the curated set, so with `defaults: hidden: true` every such task would be
+  # impossible. Each area below is shown as a small family (the tool the suite uses plus obvious siblings and
+  # look-alikes), not only the single tool a task needs.
+
+  # ------------------------------------------------------------------ account
+  "operationId:users/get-authenticated":
+    hidden: false                                                   # [manual, suite-informed] sibling
+  "operationId:users/get-by-username":
+    hidden: false                                                   # [manual, suite-informed] sibling
+  "operationId:users/list-ssh-signing-keys-for-authenticated-user":
+    hidden: false                                                   # [manual, suite-informed] sibling
+  "operationId:users/get-ssh-signing-key-for-authenticated-user":
+    hidden: false                                                   # [manual, suite-informed]
+    # [auto] description
+    description: "Retrieve details for one SSH signing key belonging to the authenticated GitHub user, identified by its numeric key ID. Returns metadata such as the key's title and creation time; this is not for listing keys or retrieving another user's key. OAuth app tokens and classic personal access tokens require the `read:ssh_signing_key` scope."
+
+  # ------------------------------------------------------------------ repositories of a user / org
+  "operationId:repos/list-for-user":
+    hidden: false                                                   # [manual, suite-informed]
+    # [auto] description: suggestions #6 (short) and #9 (long) merged [manual merge]; the repos half of #7
+    # ("For get a label, use issues_get_label instead.") is not used: it is about another tool.
+    description: "List a user's public repositories, for example to identify a repository before calling a repository-specific tool. Use `sort: updated` or `sort: pushed` with `direction: desc` for the most recently updated or pushed first. Unlike `search_repos`, this lists that user's repositories rather than matching a search query."
+    args:
+      describe:
+        per_page: "Set the number of repositories to return on this page (maximum 100)."  # [auto]
+    examples:                                                       # [auto] NOTE: these arguments equal the suite's expected arguments
+      - title: "List octocat’s public repositories, sorted by most recently updated first."
+        arguments: { username: octocat, sort: updated, direction: desc, per_page: 10 }
+    response:                                                       # [manual]
+      include: ["[].id", "[].name", "[].full_name", "[].description", "[].private", "[].fork", "[].language", "[].default_branch", "[].updated_at", "[].pushed_at", "[].html_url"]
+      maxItems: 30
+  "operationId:repos/list-for-org":
+    hidden: false                                                   # [manual, suite-informed] sibling
+    response:                                                       # [manual]
+      include: ["[].id", "[].name", "[].full_name", "[].description", "[].private", "[].fork", "[].language", "[].updated_at", "[].pushed_at", "[].html_url"]
+      maxItems: 30
+
+  # ------------------------------------------------------------------ repository public keys (look-alikes on purpose)
+  "operationId:agents/get-repo-public-key":
+    hidden: false                                                   # [manual, suite-informed]
+    # [auto] description
+    description: "Retrieve the public key for encrypting repository secrets used by agents. Choose this tool for agent secrets; use actions_get_repo_public_key for GitHub Actions secrets and codespaces_get_repo_public_key for Codespaces secrets."
+  "operationId:actions/get-repo-public-key":
+    hidden: false                                                   # [manual, suite-informed] look-alike
+  "operationId:codespaces/get-repo-public-key":
+    hidden: false                                                   # [manual, suite-informed] look-alike
+  "operationId:dependabot/get-repo-public-key":
+    hidden: false                                                   # [manual, suite-informed] look-alike
+
+  # ------------------------------------------------------------------ Codespaces
+  "operationId:codespaces/list-repo-secrets":
+    hidden: false                                                   # [manual, suite-informed] sibling
+  "operationId:codespaces/get-repo-secret":
+    hidden: false                                                   # [manual, suite-informed]
+    args:
+      describe:
+        secret_name: "A string, e.g. \"secret_1\"."                 # [auto]
+    examples:                                                       # [auto]
+      - title: Get the metadata for the Codespaces secret named secret_1 in octocat/Hello-World
+        arguments: { owner: octocat, repo: Hello-World, secret_name: secret_1 }
+  "operationId:codespaces/list-for-authenticated-user":
+    hidden: false                                                   # [manual, suite-informed]
+
+  # ------------------------------------------------------------------ gitignore
+  "operationId:gitignore/get-all-templates":
+    hidden: false                                                   # [manual, suite-informed]
+  "operationId:gitignore/get-template":
+    hidden: false                                                   # [manual, suite-informed]
+
+  # ------------------------------------------------------------------ GitHub Apps and Marketplace
+  "operationId:apps/list-plans":
+    hidden: false                                                   # [manual, suite-informed] sibling
+  "operationId:apps/list-accounts-for-plan":
+    hidden: false                                                   # [manual, suite-informed]
+    response:                                                       # [auto]
+      maxItems: 20
+      maxBytes: 8192
+  "operationId:apps/get-subscription-plan-for-account":
+    hidden: false                                                   # [manual, suite-informed] sibling
+  "operationId:apps/list-installations-for-authenticated-user":
+    hidden: false                                                   # [manual, suite-informed] sibling
+  "operationId:apps/list-installation-repos-for-authenticated-user":
+    hidden: false                                                   # [manual, suite-informed]
+    # [auto] description
+    description: "List repositories the authenticated user can access through the specified GitHub App installation, including each repository's permissions. Use this to discover repositories for an installation, not to list Codespaces. The returned repository IDs can be passed to the Codespaces tool's `repository_id` filter."
+    response:                                                       # [auto]
+      maxItems: 20
+      maxBytes: 8192
+
+  # ------------------------------------------------------------------ billing
+  "operationId:billing/get-github-billing-premium-request-usage-report-user":
+    hidden: false                                                   # [manual, suite-informed]
+  "operationId:billing/get-github-billing-usage-report-user":
+    hidden: false                                                   # [manual, suite-informed] look-alike
+
+  # ------------------------------------------------------------------ organizations: OIDC, immutable releases, packages
+  "operationId:oidc/list-oidc-custom-property-inclusions-for-org":
+    hidden: false                                                   # [manual, suite-informed]
+  "operationId:orgs/get-immutable-releases-settings":
+    hidden: false                                                   # [manual, suite-informed] sibling
+  "operationId:orgs/set-immutable-releases-settings":
+    hidden: false                                                   # [manual, suite-informed] a write; the ambiguous task checks it is NOT called
+  "operationId:packages/list-packages-for-organization":
+    hidden: false                                                   # [manual, suite-informed]
+    # [auto] description
+    description: "List packages of one specified type published by an organization. `package_type` is required, so this call cannot return every package type at once; to show all packages, call once for each supported type (npm, maven, rubygems, docker, nuget, and container) and combine the results. Use this organization-scoped tool rather than a repository- or user-scoped package listing when the request names an organization."
+  "operationId:packages/list-packages-for-user":
+    hidden: false                                                   # [manual, suite-informed] sibling
+
+# Not applied from the 0.2.1 --suggest output (13 suggestions; 10 applied, 1 merged):
+#   #3  orgs/list-for-authenticated-user description: that tool stays hidden (not part of this toolset)
+#   #10 apps/list-accounts-for-plan-stubbed response cap: the stubbed variant stays hidden
+#   #11 search/labels response cap: search/labels stays hidden (issues_get_label / issues_list_labels_for_repo cover labels)
+#   #7  only its repos/list-for-user half is dropped (wrong tool); its issues/get-label description is applied
+
+# Not applied: two [auto-0.2.0] composite sketches (do_fetch_return_readme, do_actual_latest_three). Their rationale
 # describes mock-data artifacts (synthetic records), not a missing capability, and both just wrap one tool.
 # The curated composite `triage_stale_issues` and profile `triage` are not ported (they use renamed tools).
