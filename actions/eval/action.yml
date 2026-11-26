@@ -2,7 +2,7 @@ name: Neurouter agent-readiness eval
 description: Score how well AI agents can use your API (OpenAPI/GraphQL) through Neurouter, in tool and code mode.
 branding: { icon: check-circle, color: purple }
 inputs:
-  spec: { description: OpenAPI 3.x / GraphQL spec file or URL, required: true }
+  spec: { description: "OpenAPI 3.x / GraphQL spec file or URL (required unless config + server are given)", required: false, default: "" }
   overlay: { description: Overlay YAML, required: false, default: "" }
   suite: { description: Frozen suite JSON (else a suite is generated), required: false, default: "" }
   config: { description: neurouter.yaml (with server), required: false, default: "" }
@@ -11,7 +11,7 @@ inputs:
   modes: { description: tool,code, required: false, default: "tool,code" }
   repeats: { description: Attempts per task, required: false, default: "3" }
   min-score: { description: Fail below this headline score, required: false, default: "0" }
-  neurouter-version: { description: npm version of the neurouter CLI, required: false, default: "0.1.0" }
+  neurouter-version: { description: "npm version of the neurouter CLI (default: the version of this action: its tag, e.g. v0.1.1 → 0.1.1, else the CLI package version at this ref)", required: false, default: "" }
   openai-api-key: { description: "OpenAI API key (pass secrets.OPENAI_API_KEY); needed for gpt-* models", required: false, default: "" }
   anthropic-api-key: { description: "Anthropic API key (pass secrets.ANTHROPIC_API_KEY); needed for claude-* models", required: false, default: "" }
   gemini-api-key: { description: "Gemini API key (pass secrets.GEMINI_API_KEY); needed for gemini-* models", required: false, default: "" }
@@ -30,14 +30,37 @@ runs:
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        NR_SPEC: ${{ inputs.spec }}
+        NR_OVERLAY: ${{ inputs.overlay }}
+        NR_SUITE: ${{ inputs.suite }}
+        NR_CONFIG: ${{ inputs.config }}
+        NR_SERVER: ${{ inputs.server }}
+        NR_MODELS: ${{ inputs.models }}
+        NR_MODES: ${{ inputs.modes }}
+        NR_REPEATS: ${{ inputs.repeats }}
+        NR_MIN_SCORE: ${{ inputs.min-score }}
+        NR_VERSION: ${{ inputs.neurouter-version }}
+        NR_ACTION_REF: ${{ github.action_ref }}
+        NR_ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
+        # CLI version: the input, else this action's own tag (v0.1.1 → 0.1.1), else the CLI package version at this ref
+        VERSION="${NR_VERSION}"
+        if [ -z "$VERSION" ]; then
+          if [[ "${NR_ACTION_REF:-}" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?)$ ]]; then VERSION="${BASH_REMATCH[1]}"
+          else VERSION="$(node -p "require(process.argv[1]).version" "${NR_ACTION_PATH}/../../packages/cli/package.json" 2>/dev/null || echo latest)"; fi
+        fi
         ARGS=()
-        if [ -n "${{ inputs.config }}" ]; then ARGS+=(--config "${{ inputs.config }}" --server "${{ inputs.server }}"); else ARGS+=(--spec "${{ inputs.spec }}"); fi
-        if [ -n "${{ inputs.overlay }}" ]; then ARGS+=(--overlay "${{ inputs.overlay }}"); fi
-        if [ -n "${{ inputs.suite }}" ]; then ARGS+=(--suite "${{ inputs.suite }}"); else ARGS+=(--generate); fi
-        npx -y "neurouter@${{ inputs.neurouter-version }}" eval "${ARGS[@]}" --models "${{ inputs.models }}" --modes "${{ inputs.modes }}" \
-          --repeats "${{ inputs.repeats }}" --min-score "${{ inputs.min-score }}" \
+        if [ -n "$NR_CONFIG" ]; then
+          if [ -z "$NR_SERVER" ]; then echo "::error::server is required with config"; exit 2; fi
+          ARGS+=(--config "$NR_CONFIG" --server "$NR_SERVER")
+        elif [ -n "$NR_SPEC" ]; then ARGS+=(--spec "$NR_SPEC")
+        else echo "::error::set spec, or config + server"; exit 2; fi
+        if [ -n "$NR_OVERLAY" ]; then ARGS+=(--overlay "$NR_OVERLAY"); fi
+        if [ -n "$NR_SUITE" ]; then ARGS+=(--suite "$NR_SUITE"); else ARGS+=(--generate); fi
+        echo "neurouter@${VERSION}"
+        npx -y "neurouter@${VERSION}" eval "${ARGS[@]}" --models "$NR_MODELS" --modes "$NR_MODES" \
+          --repeats "$NR_REPEATS" --min-score "$NR_MIN_SCORE" \
           --out "$RUNNER_TEMP/neurouter-report.json" --md "$RUNNER_TEMP/neurouter-report.md" || STATUS=$?
         cat "$RUNNER_TEMP/neurouter-report.md" >> "$GITHUB_STEP_SUMMARY" || true
         node -e "const r=require(process.argv[1]);console.log('score='+r.score.headline);console.log('mode='+(r.score.recommendedMode??''))" "$RUNNER_TEMP/neurouter-report.json" >> "$GITHUB_OUTPUT" || true
