@@ -1,6 +1,20 @@
 {
   "name": "@neurouter/shared",
   "version": "0.1.0",
+  "description": "Neurouter shared contract: API schemas, neurouter.yaml config schema, domain types",
+  "keywords": [
+    "mcp",
+    "neurouter"
+  ],
+  "homepage": "https://github.com/neurouter/core#readme",
+  "bugs": {
+    "url": "https://github.com/neurouter/core/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neurouter/core.git",
+    "directory": "packages/shared"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -40,15 +54,21 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "typecheck:tests": "tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "node ../../scripts/prepack.mjs"
   },
   "dependencies": {
     "zod": "4.6.7"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

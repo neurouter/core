@@ -1,6 +1,22 @@
 {
   "name": "@neurouter/compiler",
   "version": "0.1.0",
+  "description": "Neurouter compiler: OpenAPI/GraphQL specs to MCP tool models, overlays and mocks",
+  "keywords": [
+    "mcp",
+    "openapi",
+    "graphql",
+    "neurouter"
+  ],
+  "homepage": "https://github.com/neurouter/core#readme",
+  "bugs": {
+    "url": "https://github.com/neurouter/core/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neurouter/core.git",
+    "directory": "packages/compiler"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -15,13 +31,16 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "typecheck:tests": "tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "node ../../scripts/prepack.mjs"
   },
   "dependencies": {
     "@neurouter/shared": "0.1.0",
@@ -30,5 +49,8 @@
     "graphql": "17.1.0",
     "@faker-js/faker": "10.6.0",
     "canonicalize": "5.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

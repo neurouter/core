@@ -7,6 +7,7 @@ export async function cmdServe(o: { config?: string; port: string; host: string;
   const env = serverEnv({ data: o.data, port: o.port, host: o.host, ...(o.config ? { config: o.config } : {}), ...(o.embeddings ? { embeddings: true } : {}) });
   env.LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
   env.LOG_PRETTY ??= 'true';
+  env.SERVE_WEB ??= 'true'; // the console build ships inside @neurouter/server (web-dist)
   const running = await startServer({ env, loadDotenv: false });
   const s = running.services;
   const servers = await s.dbs.main.db.selectFrom('servers as sv').innerJoin('environments as e', 'e.server_id', 'sv.id').select(['sv.slug', 'e.slug as env', 'e.kind']).where('sv.status', '=', 'active').execute();

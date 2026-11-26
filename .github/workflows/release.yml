@@ -51,13 +51,23 @@ jobs:
 
   npm:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm publish --provenance
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version: '26', registry-url: 'https://registry.npmjs.org' }
       - run: npm ci && npm run build
       - run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#v}"
+          # dependency order: each package's @neurouter/* deps are published before it
           for ws in @neurouter/shared @neurouter/compiler @neurouter/evals @neurouter/executor @neurouter/server neurouter; do
-            npm publish -w "$ws" --access public --provenance
+            pv="$(npm pkg get version -w "$ws" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(Object.values(JSON.parse(s))[0]))')"
+            if [ "$pv" != "$v" ]; then echo "$ws is $pv, tag is $v" >&2; exit 1; fi
+            if npm view "$ws@$v" version >/dev/null 2>&1; then echo "$ws@$v already published"; continue; fi
+            # prepack (scripts/prepack.mjs) copies LICENSE/NOTICE, the CLI README and the console build (web-dist) into the tarball
+            npm publish -w "$ws" --access public --provenance --ignore-scripts=false
           done
         env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }

@@ -98,7 +98,11 @@ export function loadConfig(source: Record<string, string | undefined> = process.
   if (isProduction && dialect === 'sqlite') warnings.push('SQLite is intended for local development; use Postgres in production');
 
   const secureCookies = publicUrl.startsWith('https://');
-  const webDistDir = isAbsolute(env.WEB_DIST_DIR) ? env.WEB_DIST_DIR : resolve(SERVER_PACKAGE_DIR, env.WEB_DIST_DIR);
+  const webDistDir = env.WEB_DIST_DIR
+    ? isAbsolute(env.WEB_DIST_DIR)
+      ? env.WEB_DIST_DIR
+      : resolve(SERVER_PACKAGE_DIR, env.WEB_DIST_DIR)
+    : ([resolve(SERVER_PACKAGE_DIR, 'web-dist'), resolve(SERVER_PACKAGE_DIR, '../web/dist')].find((d) => existsSync(resolve(d, 'index.html'))) ?? resolve(SERVER_PACKAGE_DIR, '../web/dist'));
 
   return {
     env,

@@ -105,7 +105,8 @@ export const Env = z
     METRICS_TOKEN: opt(z.string()),
     OTEL_SDK_DISABLED: zBool.default(true),
     /** Built web app. Relative paths resolve against the server package directory. */
-    WEB_DIST_DIR: z.string().default('../web/dist'),
+    /** Console build dir. Default: `web-dist` inside the published package, else the monorepo's `../web/dist`. */
+    WEB_DIST_DIR: opt(z.string()),
     /** Serve WEB_DIST_DIR. Defaults to true in production only (in dev Vite serves the SPA). */
     SERVE_WEB: opt(zBool),
 

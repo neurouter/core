@@ -41,3 +41,11 @@ tmp/
 *.tsbuildinfo
 .neurouter/
 out/
+
+# copied in by scripts/prepack.mjs for npm pack/publish
+apps/server/web-dist/
+packages/*/LICENSE
+packages/*/NOTICE
+apps/*/LICENSE
+apps/*/NOTICE
+packages/cli/README.md

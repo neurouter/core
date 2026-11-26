@@ -1,6 +1,22 @@
 {
   "name": "@neurouter/evals",
   "version": "0.1.0",
+  "description": "Neurouter evals: agent-readiness suites, runner, judge and fix suggestions over OpenAI, Anthropic and Gemini",
+  "keywords": [
+    "mcp",
+    "evals",
+    "llm",
+    "neurouter"
+  ],
+  "homepage": "https://github.com/neurouter/core#readme",
+  "bugs": {
+    "url": "https://github.com/neurouter/core/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neurouter/core.git",
+    "directory": "packages/evals"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -15,13 +31,16 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "typecheck:tests": "tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "node ../../scripts/prepack.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.14.0",
@@ -31,5 +50,8 @@
     "@neurouter/shared": "0.1.0",
     "openai": "7.65.0",
     "zod": "4.6.7"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

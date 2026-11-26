@@ -1,6 +1,25 @@
 {
   "name": "neurouter",
   "version": "0.1.0",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "openapi",
+    "graphql",
+    "ai-agents",
+    "code-mode",
+    "evals",
+    "cli"
+  ],
+  "homepage": "https://github.com/neurouter/core#readme",
+  "bugs": {
+    "url": "https://github.com/neurouter/core/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neurouter/core.git",
+    "directory": "packages/cli"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -11,13 +30,17 @@
     "neurouter": "./dist/main.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "typecheck:tests": "tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "node ../../scripts/prepack.mjs --readme"
   },
   "dependencies": {
     "@neurouter/shared": "0.1.0",
@@ -26,5 +49,8 @@
     "@neurouter/server": "0.1.0",
     "commander": "15.1.0",
     "yaml": "2.9.1"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

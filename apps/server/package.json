@@ -1,6 +1,22 @@
 {
   "name": "@neurouter/server",
   "version": "0.1.0",
+  "description": "Neurouter server: governed MCP gateway with code mode, ops tools, evals and the web console",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "gateway",
+    "neurouter"
+  ],
+  "homepage": "https://github.com/neurouter/core#readme",
+  "bugs": {
+    "url": "https://github.com/neurouter/core/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neurouter/core.git",
+    "directory": "apps/server"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -14,7 +30,10 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "web-dist"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -25,7 +44,8 @@
     "start": "node --max-semi-space-size=16 dist/main.js",
     "db:migrate": "tsx --conditions=@neurouter/source src/scripts/migrate.ts",
     "keys": "tsx --conditions=@neurouter/source src/scripts/keys.ts",
-    "models:fetch": "tsx --conditions=@neurouter/source src/scripts/fetch-model.ts"
+    "models:fetch": "tsx --conditions=@neurouter/source src/scripts/fetch-model.ts",
+    "prepack": "node ../../scripts/prepack.mjs --web"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.5",
@@ -81,5 +101,8 @@
     "@types/better-sqlite3": "9.6.0",
     "@types/pg": "8.23.1",
     "tsx": "4.23.15"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
