@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { ERROR_CATALOG, fillTemplate, META_ERROR_ID, META_NEXT_TOOLS, META_RETRY_AFTER_MS, type ErrorCode } from '@neurouter/shared';
+import { ERROR_CATALOG, fillTemplate, type ErrorCode } from '@neurouter/shared';
 import type { MainDB } from '../../kernel/db/schema.js';
 import { toJsonColumn } from '../../kernel/lib/json.js';
 
@@ -15,13 +15,6 @@ export function base62(bytes: number, len: number): string {
 export const newErrorId = (): string => `err_${base62(24, 16)}`;
 
 export const ERROR_EVENT_TTL_MS = 7 * 86_400_000;
-
-/** Hints at the moment of need (§11.3). */
-export function hintsFor(code: ErrorCode): string[] {
-  const out = ['neurouter_explain_error'];
-  if (['not_permitted', 'writes_disabled', 'unknown_tool', 'upstream_auth'].includes(code)) out.push('neurouter_whoami');
-  return out;
-}
 
 export interface ErrorEventInput {
   tenantId: string;
@@ -63,19 +56,4 @@ export function explain(code: ErrorCode, detail: Record<string, unknown>): { cod
   return { code, title: c.title, explanation: fillTemplate(c.explanation, detail), how_to_fix: fillTemplate(c.howToFix, detail) };
 }
 
-export interface ToolErrorResult {
-  content: Array<{ type: 'text'; text: string }>;
-  isError: true;
-  structuredContent?: Record<string, unknown>;
-  _meta: Record<string, unknown>;
-}
-
-/** MCP error result (`isError: true`, not a JSON-RPC error) carrying error_id + next-tools (§9.6, §11.3). */
-export function errorResult(message: string, errorId: string | null, code: ErrorCode, extra: { retryAfterMs?: number; nextTools?: string[]; meta?: Record<string, unknown> } = {}): ToolErrorResult {
-  const next = [...new Set([...(extra.nextTools ?? []), ...hintsFor(code)])];
-  const suffix = errorId ? ` (error_id=${errorId}; call neurouter_explain_error for how to fix)` : '';
-  const meta: Record<string, unknown> = { [META_NEXT_TOOLS]: next, ...(extra.meta ?? {}) };
-  if (errorId) meta[META_ERROR_ID] = errorId;
-  if (extra.retryAfterMs !== undefined) meta[META_RETRY_AFTER_MS] = extra.retryAfterMs;
-  return { content: [{ type: 'text', text: `${message}${suffix}` }], isError: true, structuredContent: { error: { code, message, ...(errorId ? { error_id: errorId } : {}) } }, _meta: meta };
-}
+export { errorResult, hintsFor, type ToolErrorResult } from '../envelope/v1.js';

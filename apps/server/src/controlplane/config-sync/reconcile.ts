@@ -10,7 +10,7 @@ import type { Clock } from '../../kernel/lib/clock.js';
 import { sha256Hex } from '../../kernel/lib/crypto.js';
 import { newId } from '../../kernel/lib/ids.js';
 import { parseJsonColumn, toJsonColumn } from '../../kernel/lib/json.js';
-import { CONFIG_CHANGED, type UpstreamAuthDescriptor } from '../../kernel/runtime-config.js';
+import { CONFIG_CHANGED, parseExposure, type UpstreamAuthDescriptor } from '../../kernel/runtime-config.js';
 import type { SettingsService } from '../../kernel/settings/settings.service.js';
 import type { ServersService } from '../servers/servers.service.js';
 import type { SpecFetcher } from '../servers/fetch-spec.js';
@@ -171,8 +171,12 @@ export class ConfigSync {
       const { s, index } = r;
       const line = parsed.lines.get(`servers.${index}`) ?? 1;
       const specSource = { ...(r.sourceUrl ? { url: r.sourceUrl } : { path: (s.spec as { path?: string }).path }), ...((s.spec as { format?: string }).format ? { format: (s.spec as { format?: string }).format } : {}), ...((s.spec as { graphql?: unknown }).graphql ? { graphql: (s.spec as { graphql?: unknown }).graphql } : {}), ...((s.spec as { refresh?: string }).refresh ? { refresh: (s.spec as { refresh?: string }).refresh } : {}) };
-      const exposure = { mode: s.exposure?.mode ?? 'auto', discovery: s.exposure?.discovery ?? 'auto', pinned: s.exposure?.pinned ?? [] };
       let server = await this.d.servers.bySlug(tenantId, s.slug);
+      // contract / outputSchema: the file's value when set; otherwise the stored one (existing servers keep v1), new servers get the default
+      const stored = server ? parseExposure(server.exposure) : null;
+      const contract = s.exposure?.contract ?? stored?.contract;
+      const outputSchema = s.exposure?.outputSchema ?? stored?.outputSchema;
+      const exposure = { mode: s.exposure?.mode ?? 'auto', discovery: s.exposure?.discovery ?? 'auto', pinned: s.exposure?.pinned ?? [], ...(contract ? { contract } : {}), ...(outputSchema ? { outputSchema } : {}) };
       try {
         if (!server) {
           const created = await this.d.servers.create({
@@ -288,6 +292,8 @@ export class ConfigSync {
       policies: toJsonColumn(e.policies),
       allowed_hosts: toJsonColumn(e.allowedHosts ?? []),
       allow_http: e.allowHttp ? (1 as const) : (0 as const),
+      // per-environment contract / outputSchema live in discovery_override (`discovery` there is console-managed)
+      ...(e.contract || e.outputSchema ? { discovery_override: toJsonColumn({ ...(e.contract ? { contract: e.contract } : {}), ...(e.outputSchema ? { outputSchema: e.outputSchema } : {}) }) } : {}),
       auto_promote: (e.autoPromote ?? e.kind !== 'prod') ? (1 as const) : (0 as const),
     };
   }

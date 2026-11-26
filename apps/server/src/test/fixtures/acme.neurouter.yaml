@@ -10,6 +10,9 @@ servers:
     spec:
       path: ../../../../../examples/acme-orders/openapi.yaml
     overlay: acme.overlay.yaml
+    # existing-server behaviour: contract 1 unless the client negotiates 2 (the v2 goldens send X-Neurouter-Contract: 2)
+    exposure:
+      contract: 1
     environments:
       - slug: mock
         kind: dev

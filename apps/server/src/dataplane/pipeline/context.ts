@@ -1,4 +1,4 @@
-import type { Scope, TaskFraming, Via } from '@neurouter/shared';
+import type { ContractVersion, OutputSchemaMode, Scope, TaskFraming, Via } from '@neurouter/shared';
 import type { CallTrace } from '../../kernel/observability/tracing.js';
 import type { RuntimeBundle } from '../../kernel/runtime-config.js';
 
@@ -59,6 +59,10 @@ export interface RunContext {
   mockNamespace?: string;
   /** Exposure override (`X-Neurouter-Exposure: tools|code`), any credential; code falls back to tools when unavailable. */
   exposureOverride?: 'tools' | 'code';
+  /** Negotiated agent contract of the session (contract-v2 §1); absent = 1 (console and internal callers). */
+  contract?: ContractVersion;
+  /** `exposure.outputSchema` in effect for this session. */
+  outputSchema?: OutputSchemaMode;
   requestId: string;
 }
 

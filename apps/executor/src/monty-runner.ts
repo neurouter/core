@@ -4,6 +4,7 @@ import { jsonBytes, toJson, truncateUtf8 } from './convert.js';
 import { montyVersion, resolveMontyBinary, verifyMontyBinary } from './monty-info.js';
 import {
   DEFAULT_LIMITS,
+  HOST_ERROR_TYPES,
   MAX_STDOUT_BYTES,
   PREVIEW_BYTES,
   type ExecLogger,
@@ -14,6 +15,7 @@ import {
   type RunRequest,
   type RunResult,
   type RunStatus,
+  type ToolCallError,
 } from './types.js';
 
 /**
@@ -197,7 +199,14 @@ export class MontyRunner {
         return { ok: false, error: { code: 'internal', message: err instanceof Error ? err.message : String(err) } };
       }
     };
-    const toPyError = (e: { code: string; message: string; errorId?: string }) => new Error(`${e.code}: ${e.message}${e.errorId ? ` (error_id=${e.errorId})` : ''}`);
+    const toPyError = (e: ToolCallError) => {
+      if (e.pyType && (HOST_ERROR_TYPES as readonly string[]).includes(e.pyType)) {
+        const err = new Error(e.message);
+        err.name = e.pyType;
+        return err;
+      }
+      return new Error(`${e.code}: ${e.message}${e.errorId ? ` (error_id=${e.errorId})` : ''}`);
+    };
 
     const parallel = async (calls: unknown): Promise<unknown[]> => {
       if (!Array.isArray(calls)) throw new TypeError('ops.parallel expects a list of (tool_name, kwargs) tuples');

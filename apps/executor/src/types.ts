@@ -62,7 +62,15 @@ export interface ToolCallError {
   code: string;
   message: string;
   errorId?: string;
+  /**
+   * Python exception type to raise (contract 2: `LookupError` for not_found, `ValueError` for invalid_args, …);
+   * the message is then raised as is (the host's error object as JSON). Absent: `RuntimeError("<code>: <message>")`.
+   */
+  pyType?: string;
 }
+
+/** Exception types a host error may raise as (built-in Python exceptions only). */
+export const HOST_ERROR_TYPES = ['LookupError', 'ValueError', 'PermissionError', 'TimeoutError', 'AttributeError', 'RuntimeError'] as const;
 
 export type HostCallResult = { ok: true; value: unknown } | { ok: false; error: ToolCallError };
 

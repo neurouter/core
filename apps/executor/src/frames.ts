@@ -1,5 +1,5 @@
 import * as z from 'zod';
-import { PROTOCOL_VERSION } from './types.js';
+import { HOST_ERROR_TYPES, PROTOCOL_VERSION } from './types.js';
 
 /**
  * Executor wire protocol (§10.6): 4-byte big-endian length + UTF-8 JSON, max 2 MiB per frame.
@@ -52,7 +52,7 @@ export const CallFrame = z.object({
   fn: z.string().max(200),
   kwargs: z.record(z.string(), z.unknown()),
 });
-const ToolCallErrorSchema = z.object({ code: z.string().max(200), message: z.string().max(64 * 1024), errorId: z.string().max(200).optional() });
+const ToolCallErrorSchema = z.object({ code: z.string().max(200), message: z.string().max(64 * 1024), errorId: z.string().max(200).optional(), pyType: z.enum(HOST_ERROR_TYPES).optional() });
 export const CallResultFrame = z.union([
   z.object({ type: z.literal('call_result'), runId: RunId, callId: z.number().int().nonnegative(), ok: z.literal(true), value: z.unknown() }),
   z.object({ type: z.literal('call_result'), runId: RunId, callId: z.number().int().nonnegative(), ok: z.literal(false), error: ToolCallErrorSchema }),

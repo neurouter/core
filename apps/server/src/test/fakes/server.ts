@@ -33,6 +33,8 @@ export async function bootServer(env: Record<string, string> = {}): Promise<Runn
       NEUROUTER_EXECUTOR_PREWARM: '1',
       LOG_LEVEL: 'error',
       NEUROUTER_CONFIG: resolve(REPO_ROOT, 'neurouter.example.yaml'),
+      // suites written against agent contract 1 keep it for the servers they create (contract-2 suites pass '2' or negotiate)
+      NEUROUTER_NEW_SERVER_CONTRACT: '1',
       ...env,
     },
     jobs: false,
