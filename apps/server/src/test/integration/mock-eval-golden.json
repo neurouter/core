@@ -866,8 +866,8 @@
       {
         "key": "multi-logout_user-get_pet_by_id-1",
         "category": "multi",
-        "prompt": "First logs out current logged in user session, then find pet by ID (use pet_id=4).",
-        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{}},{\"tool\":\"get_pet_by_id\",\"arguments\":{\"pet_id\":4}}]"
+        "prompt": "First logs out current logged in user session, then find pet by ID (use pet_id=17).",
+        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{}},{\"tool\":\"get_pet_by_id\",\"arguments\":{\"pet_id\":17}}]"
       },
       {
         "key": "single-find_pets_by_status-3",
@@ -1390,7 +1390,7 @@
               "type": "called",
               "tool": "get_pet_by_id",
               "args": {
-                "pet_id": 4
+                "pet_id": 17
               },
               "argsMatch": "subset"
             },
@@ -1427,7 +1427,7 @@
               "type": "called",
               "tool": "get_pet_by_id",
               "args": {
-                "pet_id": 4
+                "pet_id": 17
               },
               "argsMatch": "subset"
             },

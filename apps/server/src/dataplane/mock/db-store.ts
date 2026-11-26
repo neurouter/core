@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import { collectionFull, collectionKeyOf, DEFAULT_SEED, hashSeed, itemJson, MOCK_MAX_ITEMS, SEED_ITEMS, scopeKeyOf, seedItems, type MockNs, type MockResource, type MockScope, type MockStateStore } from '@neurouter/compiler';
+import { collectionFull, collectionKeyOf, collectionSeed, DEFAULT_SEED, itemJson, MOCK_MAX_ITEMS, SEED_ITEMS, seedItems, type MockNs, type MockResource, type MockScope, type MockStateStore } from '@neurouter/compiler';
 import type { MainDB } from '../../kernel/db/schema.js';
 import { parseJsonColumn } from '../../kernel/lib/json.js';
 
@@ -76,7 +76,7 @@ export class DbMockStateStore implements MockStateStore {
           environment_id: ns.environmentId,
           namespace: ns.name,
           collection_key: key,
-          seed: hashSeed(Number(nsRow.seed), r.key, scopeKeyOf(r, scope)),
+          seed: collectionSeed(r, Number(nsRow.seed)),
           next_id: SEED_ITEMS + 1,
           item_count: items.length,
           bytes: items.reduce((n, x) => n + x.bytes, 0),
@@ -229,6 +229,12 @@ export class DbMockStateStore implements MockStateStore {
         .execute();
       return true;
     });
+  }
+
+  /** The namespace's seed: the one it was reset with, else the store seed. */
+  async seedOf(ns: MockNs): Promise<number> {
+    const row = await this.db.selectFrom('mock_namespaces').select('seed').where('tenant_id', '=', ns.tenantId).where('environment_id', '=', ns.environmentId).where('namespace', '=', ns.name).executeTakeFirst();
+    return row ? Number(row.seed) : this.seed;
   }
 
   async reset(ns: MockNs, seed?: number): Promise<void> {

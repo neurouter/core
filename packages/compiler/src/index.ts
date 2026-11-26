@@ -22,6 +22,7 @@ export {
   defaultScopeValue,
   newItem,
   seedItems,
+  collectionSeed,
   scopeKeyOf,
   collectionKeyOf,
   collectionFull,
@@ -41,7 +42,7 @@ export {
 } from './mock/store.js';
 export { handleMockRequest, type MockRequest, type MockResponse } from './mock/handler.js';
 export { handleGraphqlMock } from './mock/graphql.js';
-export { generateValue, seededFaker, hashSeed } from './mock/generate.js';
+export { generateValue, seededFaker, hashSeed, stringFits, exampleFits } from './mock/generate.js';
 export { sha256Hex, jcsHash } from './util.js';
 
 import type { MockStore } from './mock/store.js';

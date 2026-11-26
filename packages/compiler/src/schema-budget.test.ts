@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ToolDef } from '@neurouter/shared';
+import { handleMockRequest } from './mock/handler.js';
+import type { OpenApiMockModel } from './mock/model.js';
+import { MockStore } from './mock/store.js';
 import { defRefName, OMITTED_KEY, OUTPUT_SCHEMA_LIMITS, SchemaResolver } from './openapi/schema.js';
 import { compileFile, compileText, GITHUB_SUBSET, spec31 } from './test/fixtures.js';
 
@@ -132,6 +135,20 @@ describe('schema budgets ($defs, dedupe, trimming)', () => {
     expect(Object.keys(item.properties as object).sort()).toEqual(['closer', 'number']);
     expect((item.properties as Record<string, unknown>).closer).toEqual({ type: 'string' });
     expect(shaped.$defs).toBeUndefined();
+  });
+
+  it('mocks lists whose items are $defs references, with the envelope fields the schema requires', async () => {
+    const r = await compileText(expandableSpec(30, 6));
+    const m = r.mockModel as OpenApiMockModel;
+    expect(m.resources['/v1/obj0']).toBeDefined();
+    const res = await handleMockRequest(m, new MockStore(), 'ns', { method: 'GET', path: '/v1/obj0' });
+    expect(res.status).toBe(200);
+    const body = res.body as Record<string, unknown>;
+    expect(body).toMatchObject({ object: 'list', has_more: false });
+    expect(typeof body.url).toBe('string');
+    const first = (body.data as Array<Record<string, unknown>>)[0]!;
+    expect(first.object).toBe('obj0');
+    expect(typeof first.created).toBe('number');
   });
 
   it('leaves GitHub subset tool names, arguments and input schemas as inlined before (no $ref in inputs)', async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handleMockRequest } from './mock/handler.js';
 import type { OpenApiMockModel } from './mock/model.js';
-import { generateValue, seededFaker } from './mock/generate.js';
+import { exampleFits, generateValue, seededFaker, stringFits } from './mock/generate.js';
 import { MemoryMockStateStore, MOCK_MAX_ITEMS, MockStore, sampleEntities, type MockNs } from './mock/store.js';
 import { compileFile, compileText, COUNTRIES, GITHUB_SUBSET, NOTES_SPEC, PETSTORE } from './test/fixtures.js';
 
@@ -43,7 +43,7 @@ describe('mock model', () => {
 });
 
 describe('mock handler', () => {
-  it('seeds 20 items deterministically per scope', async () => {
+  it('seeds 20 items deterministically per (namespace seed, resource), whatever the namespace name or scope', async () => {
     const m = await model();
     const a = await handleMockRequest(m, new MockStore(), 'ns', { method: 'GET', path: '/projects/p1/notes?per_page=100' });
     const b = await handleMockRequest(m, new MockStore(), 'other', { method: 'GET', path: '/projects/p1/notes?per_page=100' });
@@ -52,8 +52,10 @@ describe('mock handler', () => {
     expect(b.body).toEqual(a.body);
     const c = await handleMockRequest(m, new MockStore({ seed: 7 }), 'ns', { method: 'GET', path: '/projects/p1/notes?per_page=100' });
     expect(c.body).not.toEqual(a.body);
-    const other = await handleMockRequest(m, new MockStore(), 'ns', { method: 'GET', path: '/projects/p2/notes?per_page=100' });
-    expect(other.body).not.toEqual(a.body);
+    // another scope (or another spelling of it) reads the same items: eval tasks generated from samples in
+    // the default scope still match when the agent names the scope differently
+    const other = await handleMockRequest(m, new MockStore(), 'eval:run:1', { method: 'GET', path: '/projects/P2/notes?per_page=100' });
+    expect(other.body).toEqual(a.body);
     expect((a.body as Array<{ id: number }>).map((x) => x.id)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
   });
 
@@ -198,5 +200,90 @@ describe('mock string generation', () => {
     const ctx = { faker: seededFaker(1), defs: {}, depth: 0, index: 2 };
     const v = generateValue({ type: 'string', minLength: 40, maxLength: 64, pattern: '^([0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?)$' }, 'commit_sha', ctx) as string;
     expect(v.length).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe('mock values satisfy their schema', () => {
+  const ctx = (seed = 1, index = 1) => ({ faker: seededFaker(seed), defs: {}, depth: 0, index });
+
+  it('ignores spec examples that violate the schema (GitHub quotes some date-time examples)', () => {
+    const date = { type: 'string', format: 'date-time', examples: ['"2007-10-29T02:42:39.000-07:00"'] };
+    expect(exampleFits(date, date.examples[0])).toBe(false);
+    expect(exampleFits(date, '2007-10-29T02:42:39.000-07:00')).toBe(true);
+    for (let seed = 1; seed < 20; seed++) expect(stringFits(date, generateValue(date, 'date', ctx(seed)) as string)).toBe(true);
+    expect(generateValue({ type: 'string', format: 'email', examples: ['octocat@github.com'] }, 'email', ctx())).toBe('octocat@github.com');
+  });
+
+  it('honours formats, lengths, patterns, enums and numeric bounds', () => {
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ type: 'string', format: 'uuid' }, 'id'],
+      [{ type: 'string', format: 'uri' }, 'html_url'],
+      [{ type: 'string', format: 'email' }, 'contact'],
+      [{ type: 'string', format: 'date' }, 'due_on'],
+      [{ type: 'string', format: 'ipv4' }, 'ip'],
+      [{ type: 'string', maxLength: 5 }, 'description'],
+      [{ type: 'string', minLength: 30 }, 'name'],
+      [{ type: 'string', pattern: '^[a-z]{3}_[0-9]{4}$' }, 'title'],
+      [{ type: 'string', maxLength: 3, pattern: '^[A-Z]+$' }, 'state'],
+    ];
+    for (const [schema, name] of cases)
+      for (let seed = 1; seed < 15; seed++) {
+        const v = generateValue(schema, name, ctx(seed));
+        expect(typeof v === 'string' && stringFits(schema, v), `${JSON.stringify(schema)} → ${JSON.stringify(v)}`).toBe(true);
+      }
+    for (let seed = 1; seed < 15; seed++) {
+      expect(['a', 'b']).toContain(generateValue({ type: 'string', enum: ['a', 'b'] }, 'state', ctx(seed)));
+      const n = generateValue({ type: 'integer', minimum: 10, maximum: 12 }, 'count', ctx(seed)) as number;
+      expect(n >= 10 && n <= 12 && Number.isInteger(n)).toBe(true);
+      const m = generateValue({ type: 'number', exclusiveMinimum: 0, multipleOf: 0.5, maximum: 3 }, 'amount', ctx(seed)) as number;
+      expect(m > 0 && m <= 3 && (m * 2) % 1 === 0).toBe(true);
+    }
+  });
+
+  it('keeps required fields of deep and recursive objects, and respects minItems/uniqueItems', () => {
+    const node = { type: 'object', required: ['name', 'child'], properties: { name: { type: 'string' }, note: { type: 'string' }, child: { anyOf: [{ $ref: '#/$defs/Node' }, { type: 'null' }] } } };
+    const v = generateValue({ $ref: '#/$defs/Node' }, 'node', { ...ctx(), defs: { Node: node } }) as Record<string, unknown>;
+    let cur: Record<string, unknown> | null = v;
+    let depth = 0;
+    while (cur) {
+      expect(typeof cur.name).toBe('string');
+      expect('child' in cur).toBe(true);
+      cur = cur.child as Record<string, unknown> | null;
+      depth++;
+    }
+    expect(depth).toBeGreaterThan(1);
+    const deep = generateValue({ type: 'array', minItems: 2, uniqueItems: true, items: { type: 'string', enum: ['x', 'y', 'z'] } }, 'tags', { ...ctx(), depth: 6 }) as string[];
+    expect(deep.length).toBe(2);
+    expect(new Set(deep).size).toBe(2);
+  });
+
+  it('prefers null over an omitted (too large) part of a nullable field', () => {
+    const s = { anyOf: [{ 'x-neurouter-omitted': 'cash_balance', 'x-neurouter-omitted-type': 'object' }, { type: 'null' }] };
+    expect(generateValue(s, 'cash_balance', ctx())).toBeNull();
+    expect(generateValue({ 'x-neurouter-omitted': 'customer', 'x-neurouter-omitted-type': 'object' }, 'customer', ctx())).toEqual({});
+  });
+});
+
+describe('mock data is the same for eval generation and eval runs', () => {
+  it('samples (gen namespace, default scope) equal what an eval attempt reads with another scope spelling', async () => {
+    const m = (await compileFile(GITHUB_SUBSET)).mockModel as OpenApiMockModel;
+    const store = new MockStore();
+    const samples = await sampleEntities(m, store, 'gen:key:samples-1', 3);
+    const issues = samples.find((x) => x.resource === '/repos/{owner}/{repo}/issues')!;
+    const run = await handleMockRequest(m, new MockStore(), 'eval:run-1:task-1', { method: 'GET', path: '/repos/octocat/Hello-World/issues?per_page=3' });
+    const strip = (it: Record<string, unknown>) => ({ ...it, owner: undefined, repo: undefined });
+    expect((run.body as Array<Record<string, unknown>>).map(strip)).toEqual(issues.items.map(strip));
+  });
+
+  it('answers actions (no resource) the same in every namespace and for any case of the path params', async () => {
+    const m = (await compileFile(GITHUB_SUBSET)).mockModel as OpenApiMockModel;
+    const ops = m.operations.filter((o) => o.kind === 'action' && o.method === 'GET' && o.responseSchema);
+    expect(ops.length).toBeGreaterThan(0);
+    for (const op of ops) {
+      const path = op.pathTemplate.replace(/\{[^}]+\}/g, 'Abc');
+      const a = await handleMockRequest(m, new MockStore(), 'gen:x', { method: 'GET', path });
+      const b = await handleMockRequest(m, new MockStore(), 'eval:y', { method: 'GET', path: path.toLowerCase() });
+      expect(b.body).toEqual(a.body);
+    }
   });
 });
