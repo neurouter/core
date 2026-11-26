@@ -104,6 +104,19 @@ describe('runSuite', () => {
     expect(progress.sort()).toEqual([1, 2, 3, 4]);
   });
 
+  it('efficiency counts work calls only: search_tools discovery in code mode is excluded (as for max_calls)', async () => {
+    const t = task({ key: 'code', assertions: [{ type: 'max_calls', n: 1 }], referenceCalls: [{ tool: 'get_pet_by_id', arguments: { petId: 1 } }] });
+    let n = 0;
+    const llm = new ScriptedLlmClient([], () => {
+      n++;
+      if (n === 1) return llmResponse([use('s1', 'search_tools', { query: 'pet by id' })]);
+      if (n === 2) return llmResponse([use('r1', 'run_script', { code: 'return petstore.get_pet_by_id(pet_id=1)' })]);
+      return llmResponse([text('Rex')]);
+    });
+    const results = await runSuite({ llm, tasks: [t], models: ['m'], modes: ['code'], repeats: 1, openSession: async () => ({ mcp: fakePetstore({ mode: 'code' }) }) });
+    expect(results[0]).toMatchObject({ passed: true, toolCalls: 1 });
+  });
+
   it('aborts the whole run on key errors', async () => {
     await expect(runSuite({ llm: new ScriptedLlmClient([], () => Promise.reject(new LlmKeyError())), tasks: [task()], models: ['m'], modes: ['tool'], repeats: 3, openSession: async () => ({ mcp: fakePetstore() }) })).rejects.toBeInstanceOf(LlmKeyError);
   });

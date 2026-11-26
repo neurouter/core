@@ -21,14 +21,14 @@ function runStep(env: Record<string, string>): { code: number; npx: string[]; ou
   chmodSync(join(bin, 'npx'), 0o755);
   const base = { NR_SPEC: '', NR_OVERLAY: '', NR_SUITE: '', NR_CONFIG: '', NR_SERVER: '', NR_MODELS: 'gpt-6-luna', NR_MODES: 'tool,code', NR_REPEATS: '3', NR_MIN_SCORE: '0', NR_VERSION: '', NR_ACTION_REF: '', NR_ACTION_PATH: join(ROOT, 'actions/eval') };
   let code = 0;
-  let out = '';
+  let out: string;
   try {
     out = execFileSync('bash', ['-c', script], { env: { PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: dir, GITHUB_OUTPUT: join(dir, 'out'), GITHUB_STEP_SUMMARY: join(dir, 'summary'), ...base, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (err) {
     code = (err as { status: number }).status;
     out = String((err as { stdout: string }).stdout);
   }
-  let npx: string[] = [];
+  let npx: string[];
   try {
     npx = readFileSync(join(dir, 'npx-args'), 'utf8').trim().split('\n');
   } catch {

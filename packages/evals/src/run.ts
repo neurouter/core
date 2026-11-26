@@ -1,5 +1,5 @@
 import { agentSystemPrompt } from './prompts.js';
-import { checkAttempt, primaryTool } from './check.js';
+import { checkAttempt, primaryTool, workCalls } from './check.js';
 import { judgeAttempt, needsJudge } from './judge.js';
 import { fallbackUsed, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmToolResultBlock, type LlmToolUseBlock } from './llm/types.js';
 import { resultText, taskIdFromResult, type McpSession } from './mcp.js';
@@ -311,7 +311,8 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext): Promise<TaskR
       judge: check.judge,
       failureCause: check.failureCause,
       primaryTool: check.passed ? null : primaryTool(job.task, record, check),
-      toolCalls: run.toolCallsByAgent,
+      // efficiency counts work calls: discovery (search_tools) is excluded, as for max_calls
+      toolCalls: workCalls(run),
       scripts: run.scripts,
       inputTokens: run.inputTokens,
       outputTokens: run.outputTokens,

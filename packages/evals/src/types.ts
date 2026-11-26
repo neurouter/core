@@ -63,7 +63,7 @@ export type TranscriptItem =
 export interface AttemptRun {
   finalAnswer: string;
   agentCalls: AgentCall[];
-  /** MCP tool calls counted for efficiency: run_script counts 1, ops (`neurouter_*`) tools excluded. `max_calls` also excludes search_tools (see `workCalls`). */
+  /** The agent's MCP tool calls: run_script counts 1, ops (`neurouter_*`) tools excluded. Efficiency and `max_calls` also exclude search_tools (see `workCalls`). */
   toolCallsByAgent: number;
   scripts: number;
   turns: number;
@@ -122,6 +122,7 @@ export interface TaskRunResult {
   failureCause: FailureCause | null;
   /** Expected tool of the failed assertion, or the wrongly called tool (suggestion clustering). */
   primaryTool: string | null;
+  /** Calls counted for efficiency: the agent's non-ops calls minus search_tools (same rule as max_calls, see `workCalls`). */
   toolCalls: number;
   scripts: number;
   inputTokens: number;
