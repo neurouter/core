@@ -1,5 +1,4 @@
 import type { Logger } from 'pino';
-import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { LocalExecutor, parseExecutorUrl, SocketExecutor, spawnEmbeddedExecutor, type EmbeddedExecutor, type Executor } from '@neurouter/executor';
 import { AuditRecorder } from './kernel/audit/recorder.js';
 import { SqlAuditStore, type AuditStore } from './kernel/audit/store.js';
@@ -24,13 +23,18 @@ import { BuiltinSecretProvider } from './kernel/secrets/builtin.provider.js';
 import { EnvelopeService } from './kernel/secrets/envelope.service.js';
 import { EnvKeyring } from './kernel/secrets/keyring.js';
 import { NamedSecrets } from './kernel/secrets/named-secrets.js';
-import { SettingsService } from './kernel/settings/settings.service.js';
+import { SETTING_DEFAULTS, SettingsService } from './kernel/settings/settings.service.js';
+import { EnvRefGate } from './kernel/secrets/env-refs.js';
+import { SingleTenantResolver, type TenantResolver } from './kernel/tenancy/index.js';
+import { DEFAULT_MODEL_KEYS, DEFAULT_QUOTAS, DEFAULT_SECRET_REFS, DEFAULT_USAGE, type NeurouterExtensions } from './extensions.js';
 import { JobsService } from './kernel/jobs/jobs.service.js';
 import { McpAuthenticator } from './dataplane/auth/authenticate.js';
 import { ExternalJwtVerifier } from './dataplane/auth/external-jwt.js';
 import { ClientCredentialsCache, CredentialResolver } from './dataplane/http/credentials.js';
 import { HttpInvoker } from './dataplane/http/invoker.js';
+import { DbMockStateStore } from './dataplane/mock/db-store.js';
 import { InProcessMock } from './dataplane/mock/mock-upstream.js';
+import { MockNamespaceBinder } from './dataplane/mock/namespace.js';
 import { ArgValidator } from './dataplane/pipeline/arg-validate.js';
 import { ErrorEvents } from './dataplane/pipeline/errors.js';
 import { Pipeline } from './dataplane/pipeline/pipeline.js';
@@ -56,7 +60,7 @@ import { ApiKeysService } from './controlplane/keys/api-keys.service.js';
 import { UsersService } from './controlplane/users/users.service.js';
 import { ExecutorHealth } from './dataplane/code/executor-health.js';
 import { EvalsService } from './controlplane/evals/evals.service.js';
-import { sampleEntities, type GraphqlMockModel, type OpenApiMockModel } from '@neurouter/compiler';
+import { MemoryMockStateStore, sampleEntities, type GraphqlMockModel, type MockStateStore, type OpenApiMockModel } from '@neurouter/compiler';
 import { AuthorizationService } from './controlplane/oauth/authorize.js';
 import { CimdResolver } from './controlplane/oauth/cimd.js';
 import { OAuthClientsService } from './controlplane/oauth/clients.service.js';
@@ -83,6 +87,8 @@ export interface ServiceInputs {
   executor?: Executor | null;
   /** OTel logs provider override for the audit sink (tests). */
   otelLogProvider?: () => Promise<LogProviderLike>;
+  /** Extension points (multi-tenancy spec §1.4); core defaults when absent. */
+  extensions?: NeurouterExtensions;
 }
 
 export { upstreamPolicy, outboundPolicy } from './kernel/lib/net/policy.js';
@@ -91,25 +97,37 @@ export { upstreamPolicy, outboundPolicy } from './kernel/lib/net/policy.js';
 export function createServices(input: ServiceInputs) {
   const { config, logger, dbs, clock, coordination: coord } = input;
   const db = dbs.main.db;
-  const tenantId = DEFAULT_TENANT_ID;
   const now = () => clock.now();
+  const ext: NeurouterExtensions = input.extensions ?? {};
+  const tenancy: TenantResolver = ext.tenancy ?? new SingleTenantResolver(db);
+  const secretRefs = ext.secretRefs ?? DEFAULT_SECRET_REFS;
+  const modelKeys = ext.modelKeys ?? DEFAULT_MODEL_KEYS;
+  const quotas = ext.quotas ?? DEFAULT_QUOTAS;
+  const usage = ext.usage ?? DEFAULT_USAGE;
   const settings = new SettingsService(db, clock, coord);
+  /** `env:NAME` references on behalf of a tenant (spec §4.9 G12). */
+  const envRefs = new EnvRefGate({ policy: secretRefs, allow: config.env.NEUROUTER_SECRET_ENV_ALLOW, tenant: (id) => tenancy.byId(id) });
   const keyring = new EnvKeyring(config.masterKeys, config.activeKeyId);
   const closers: Array<() => Promise<void>> = [];
 
   /* ---------------------------------------------------------------- audit + observability */
-  const metrics = new Metrics({ defaultMetrics: input.defaultMetrics ?? true });
+  const metrics = new Metrics({ defaultMetrics: input.defaultMetrics ?? true, perServerLabels: config.env.METRICS_PER_SERVER_LABELS });
   let redactionRules: RedactionRulesService | null = null;
   let failClosed = true;
   let ftsEnabled = true;
   let installId: string | null = null;
   const writeContext = async (): Promise<AuditWriteContext> => {
-    const [keys, full, maxBytes, fc, fts, toolLabel] = await Promise.all([settings.get('auditSearchParamKeys'), settings.get('auditStoreFullOutput'), settings.get('auditFullOutputMaxBytes'), settings.get('auditFailClosed'), settings.get('auditFtsEnabled'), settings.get('metricsToolLabel')]);
+    const [maxBytes, fc, fts, toolLabel] = await Promise.all([settings.get('auditFullOutputMaxBytes'), settings.get('auditFailClosed'), settings.get('auditFtsEnabled'), settings.get('metricsToolLabel')]);
     failClosed = fc;
     ftsEnabled = fts;
     metrics.toolLabel = toolLabel;
     installId ??= (await settings.get('installId')) ?? (await settings.setIfAbsent('installId', newId()));
-    return { redactor: await redactionRules!.redactor(), searchParamKeys: keys, storeFullOutput: full, fullOutputMaxBytes: maxBytes, installId: installId! };
+    // tenant keys (search param keys, full output) come from `tenantContext` per row's tenant; these are the defaults
+    return { redactor: await redactionRules!.redactor(), searchParamKeys: SETTING_DEFAULTS.auditSearchParamKeys, storeFullOutput: SETTING_DEFAULTS.auditStoreFullOutput, fullOutputMaxBytes: maxBytes, installId: installId! };
+  };
+  const tenantWriteContext = async (tenantId: string) => {
+    const [searchParamKeys, storeFullOutput] = await Promise.all([settings.get('auditSearchParamKeys', tenantId), settings.get('auditStoreFullOutput', tenantId)]);
+    return { searchParamKeys, storeFullOutput };
   };
   const archive = input.archive !== undefined ? input.archive : createArchiveStore(config.env.AUDIT_ARCHIVE_URL);
   const postCommit: Array<(rows: readonly CommittedAuditRow[]) => void> = [];
@@ -119,6 +137,7 @@ export function createServices(input: ServiceInputs) {
       clock,
       log: logger,
       context: writeContext,
+      tenantContext: tenantWriteContext,
       failClosed: () => failClosed,
       ftsEnabled: () => ftsEnabled,
       mac: { signer: () => ({ keyId: keyring.activeKekId, key: auditMacKey(keyring.derivationKey()) }), keyFor: (kid) => (keyring.has(kid) ? auditMacKey(keyring.derivationKey(kid)) : null) },
@@ -126,6 +145,9 @@ export function createServices(input: ServiceInputs) {
       onCommitted: (rows) => {
         metrics.observeAudit(rows);
         void recordUsage(db, rows).catch((err: unknown) => logger.warn({ err }, 'usage_daily update failed'));
+        void Promise.resolve()
+          .then(() => usage.record(rows.filter((r) => r.kind === 'tool_call').map((r) => ({ tenantId: r.tenant_id, meter: 'tool_calls' as const, value: 1, at: Number(r.ts), dedupKey: r.id }))))
+          .catch((err: unknown) => logger.warn({ err }, 'usage sink failed'));
         for (const h of postCommit) {
           try {
             h(rows);
@@ -164,16 +186,21 @@ export function createServices(input: ServiceInputs) {
   };
 
   /* ---------------------------------------------------------------- audit export (SIEM sinks, §9.7) */
+  // P0: sinks are configured by the instance's default tenant and receive only that tenant's rows
+  // (per-tenant cursors for many tenants: P1, spec §3.7)
   let otelLogProvider: Promise<LogProviderLike> | null = null;
+  const sinkTenant = async (): Promise<string | null> => (await tenancy.defaultTenant())?.id ?? null;
   const auditSinks = async (): Promise<AuditSink[]> => {
-    const cfg = await settings.get('auditSinks');
+    const tenantId = await sinkTenant();
+    if (!tenantId) return [];
+    const cfg = await settings.get('auditSinks', tenantId);
     const out: AuditSink[] = [];
     if (cfg.webhook.enabled && cfg.webhook.url) {
       const ref = cfg.webhook.secretRef;
       const secret = async (): Promise<string | null> => {
         if (!ref) return null;
         if (ref === 'stored') return namedSecrets.get(tenantId, 'settings', 'audit', 'webhook_secret');
-        return ref.startsWith('env:') ? (process.env[ref.slice(4)] ?? null) : null;
+        return ref.startsWith('env:') ? envRefs.read(tenantId, ref.slice(4)) : null;
       };
       out.push(new WebhookSink({ url: cfg.webhook.url, secret, fetch: outboundFetch!, now }));
     }
@@ -183,7 +210,7 @@ export function createServices(input: ServiceInputs) {
     }
     return out;
   };
-  const sinkDispatcher = new SinkDispatcher({ db: dbs.audit.db, store: auditStore, sinks: auditSinks, clock, log: logger });
+  const sinkDispatcher = new SinkDispatcher({ db: dbs.audit.db, store: auditStore, sinks: auditSinks, tenant: sinkTenant, clock, log: logger });
   closers.push(async () => {
     if (otelLogProvider) await (await otelLogProvider).shutdown().catch(() => {});
   });
@@ -200,27 +227,31 @@ export function createServices(input: ServiceInputs) {
   const search = new ToolSearchService(db, new KeywordIndex(db, dbs.main.dialect), vectorIndex, embedder, logger);
 
   /* ---------------------------------------------------------------- data plane */
-  const runtime = new DbRuntimeConfigSource(db, clock, coord, { codeModeEnabled: () => settings.get('codeModeEnabled'), codeLimitsCap: () => settings.get('codeLimitsCap') });
+  const runtime = new DbRuntimeConfigSource(db, clock, coord, { codeModeEnabled: (tenantId) => settings.get('codeModeEnabled', tenantId), codeLimitsCap: () => settings.get('codeLimitsCap') });
   const bus = new CoordinationEventBus(coord);
   runtime.subscribe(() => bus.publish({ kind: 'tools_list_changed' } as never));
   const rateLimitStore = coord.backend === 'postgres' && dbs.main.dialect === 'postgres' ? new LeaseRateLimitStore(new PgBucketExecutor(db), clock) : (coord.rateLimit ?? new MemoryRateLimitStore(clock));
   const limiter = new RateLimiter(rateLimitStore);
   const external = config.externalAs ? new ExternalJwtVerifier(config.externalAs) : null;
-  const authenticator = new McpAuthenticator(db, clock, { pepper: config.hashPepper, external }, coord);
-  const tracker = new TaskTracker(db, now, (taskId) => void coord.publish('events.task', { taskId }).catch(() => {}));
+  const authenticator = new McpAuthenticator(db, clock, { pepper: config.hashPepper, external, resourceBase: { publicUrl: config.publicUrl, aliases: config.env.NEUROUTER_RESOURCE_ALIASES } }, coord);
+  const tracker = new TaskTracker(db, now, (taskId, tenantId) => void coord.publish('events.task', { taskId, tenantId }).catch(() => {}));
   const errors = new ErrorEvents(db, now);
   const pages = new ResultPages(db, now);
-  const mock = new InProcessMock({ now });
+  // mock state (multi-tenancy spec §7): in the database by default, so every instance shares it
+  const mockStore: MockStateStore = config.env.NEUROUTER_MOCK_STORE === 'memory' ? new MemoryMockStateStore({ now }) : new DbMockStateStore(db, now);
+  const mock = new InProcessMock({ store: mockStore });
+  const mockNamespaces = new MockNamespaceBinder(db, now);
   // constructed early: the data plane's CredentialResolver reads delegated upstream tokens through it
-  const upstreamOAuth = new UpstreamOAuthService({ db, clock, envelope, coord, audit, secrets: namedSecrets.resolver(tenantId), fetch: (allowHttp) => upstreamFetchFor(allowHttp), publicUrl: config.publicUrl, pepper: config.hashPepper, log: logger });
-  const credentials = new CredentialResolver(namedSecrets.resolver(tenantId), {
+  const isMember = async (tenantId: string, userId: string): Promise<boolean> => (await tenancy.roleOf(tenantId, userId)) !== null;
+  const upstreamOAuth = new UpstreamOAuthService({ db, clock, envelope, coord, audit, secrets: namedSecrets.resolver(envRefs), fetch: (allowHttp) => upstreamFetchFor(allowHttp), publicUrl: config.publicUrl, pepper: config.hashPepper, isMember, log: logger });
+  const credentials = new CredentialResolver(namedSecrets.resolver(envRefs), {
     clientCredentials: new ClientCredentialsCache(async (d, secret) => {
       const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: d.clientId ?? '', client_secret: secret, ...(d.scopes?.length ? { scope: d.scopes.join(' ') } : {}) });
       const res = await upstreamFetchFor(false)(d.tokenUrl ?? '', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: body.toString() });
       if (!res.ok) throw new Error(`token endpoint answered ${res.status}`);
       return (await res.json()) as { access_token: string; expires_in?: number };
     }),
-    upstreamTokens: (environmentId, userId) => upstreamOAuth.token(environmentId, userId),
+    upstreamTokens: (tenantId, environmentId, userId) => upstreamOAuth.token(tenantId, environmentId, userId),
     now,
   });
   const http = new HttpInvoker(upstreamFetchFor, now);
@@ -254,7 +285,7 @@ export function createServices(input: ServiceInputs) {
     now,
     log: logger,
     embed: async (text) => (embedder.status() === 'ready' ? embedder.embedQuery(text) : null),
-    onInboxChanged: () => void coord.publish('events.inbox', {}).catch(() => {}),
+    onInboxChanged: (tenantId) => void coord.publish('events.inbox', { tenantId }).catch(() => {}),
   });
 
   /* ---------------------------------------------------------------- code mode */
@@ -282,6 +313,7 @@ export function createServices(input: ServiceInputs) {
         await embedded.ready(15_000);
         executor = embedded.executor;
       }
+      if (executor && ext.executor) executor = ext.executor(executor);
       logger.info({ mode }, 'code-mode executor started');
     } catch (err) {
       logger.error({ err, mode }, 'code-mode executor failed to start; code mode is unavailable');
@@ -298,20 +330,21 @@ export function createServices(input: ServiceInputs) {
   const servers = new ServersService(db, clock, coord, builds, audit);
   const fetchSpec = createSpecFetcher(outboundFetch);
   const introspectGraphql = createGraphqlIntrospector(outboundFetch);
-  const configSync = new ConfigSync({ db, clock, coord, servers, settings, audit, fetchSpec, tenantId });
+  const configSync = new ConfigSync({ db, clock, coord, servers, settings, audit, fetchSpec, tenant: async () => (await tenancy.defaultTenant())?.id ?? null });
   const apiKeys = new ApiKeysService(db, clock, config.hashPepper, audit, coord);
-  const users = new UsersService(db, clock, audit, config);
+  const users = new UsersService(db, clock, audit, config, async () => (await tenancy.defaultTenant())?.id ?? null);
 
   /* ---------------------------------------------------------------- MCP OAuth 2.1 AS + upstream OAuth broker (§13.3, §13.5) */
   const oauthClients = new OAuthClientsService(db, clock, new CimdResolver(outboundFetch, now), settings, config.hashPepper, audit, coord);
-  const oauthTokens = new OAuthTokensService(db, clock, coord, audit, { pepper: config.hashPepper, accessTtlSec: config.env.OAUTH_ACCESS_TOKEN_TTL_SEC, refreshTtlDays: config.env.OAUTH_REFRESH_TOKEN_TTL_DAYS });
+  const resourceBase = { publicUrl: config.publicUrl, aliases: config.env.NEUROUTER_RESOURCE_ALIASES };
+  const oauthTokens = new OAuthTokensService(db, clock, coord, audit, { pepper: config.hashPepper, accessTtlSec: config.env.OAUTH_ACCESS_TOKEN_TTL_SEC, refreshTtlDays: config.env.OAUTH_REFRESH_TOKEN_TTL_DAYS, resourceBase });
   const consoleSessions: ConsoleSessionLookup = new DbSessionLookup(db, clock, { cookieName: config.cookieNames.session, idleMs: config.env.SESSION_IDLE_MINUTES * 60_000 });
-  const authorization = new AuthorizationService(db, clock, oauthClients, oauthTokens, audit, { issuer: config.publicUrl, publicUrl: config.publicUrl, pepper: config.hashPepper, codeModeEnabled: () => settings.get('codeModeEnabled'), loginUrl: (r) => consoleSessions.loginUrl(r) });
+  const authorization = new AuthorizationService(db, clock, oauthClients, oauthTokens, audit, { issuer: config.publicUrl, publicUrl: config.publicUrl, pepper: config.hashPepper, codeModeEnabled: (tenantId) => settings.get('codeModeEnabled', tenantId), isMember, tenancy, resourceAliases: config.env.NEUROUTER_RESOURCE_ALIASES, loginUrl: (r) => consoleSessions.loginUrl(r) });
 
   /* ---------------------------------------------------------------- evals (§15) */
   const localUrl = { value: config.publicUrl };
-  const mockModelFor = async (environmentId: string): Promise<OpenApiMockModel | null> => {
-    const b = await runtime.getByEnvironmentId(tenantId, environmentId);
+  const mockModelFor = async (tenant: string, environmentId: string): Promise<OpenApiMockModel | null> => {
+    const b = await runtime.getByEnvironmentId(tenant, environmentId);
     const m = b?.build.mockModel() as OpenApiMockModel | GraphqlMockModel | null | undefined;
     return m && m.kind === 'openapi' ? m : null;
   };
@@ -325,26 +358,27 @@ export function createServices(input: ServiceInputs) {
     servers,
     builds,
     auditStore,
-    tenantId,
     env: config.env as unknown as Record<string, string | undefined>,
+    modelKeys,
+    tenancy,
     defaultModel: config.env.NEUROUTER_EVAL_MODEL,
     metrics,
     log: logger,
-    onProgress: (runId, done, total) => void coord.publish('events.eval', { runId, done, total }).catch(() => {}),
+    onProgress: (tenantId, runId, done, total) => void coord.publish('events.eval', { tenantId, runId, done, total }).catch(() => {}),
     ports: {
       baseUrl: () => localUrl.value,
-      resetMock: (ns) => mock.reset(ns),
-      mockSamples: async (environmentId, ns, n) => {
-        const m = await mockModelFor(environmentId);
+      resetMock: (ns) => mockStore.reset(ns),
+      mockSamples: async (ns, n) => {
+        const m = await mockModelFor(ns.tenantId, ns.environmentId);
         if (!m) return {};
-        return Object.fromEntries(sampleEntities(m, mock.store, ns, n).map((e) => [e.resource, e.items]));
+        return Object.fromEntries((await sampleEntities(m, mockStore, ns, n)).map((e) => [e.resource, e.items]));
       },
-      mockState: (environmentId, ns) => async (resource, scope, where) => {
-        const m = await mockModelFor(environmentId);
+      mockState: (ns) => async (resource, scope, where) => {
+        const m = await mockModelFor(ns.tenantId, ns.environmentId);
         const r = m ? (m.resources[resource] ?? Object.values(m.resources).find((x) => x.name === resource)) : undefined;
         if (!m || !r) return [];
         const sc = { ...Object.fromEntries(r.scopeParams.map((p) => [p, r.defaultScope[p] ?? 'demo'])), ...(scope ?? {}) };
-        return mock.store.collection(ns, r, sc).items.filter((it) => Object.entries(where).every(([k, v]) => JSON.stringify((it as Record<string, unknown>)[k]) === JSON.stringify(v)));
+        return (await mockStore.list(ns, r, sc)).filter((it) => Object.entries(where).every(([k, v]) => JSON.stringify((it as Record<string, unknown>)[k]) === JSON.stringify(v)));
       },
     },
   });
@@ -368,10 +402,11 @@ export function createServices(input: ServiceInputs) {
   };
 
   return {
-    config, logger, clock, dbs, coord, version: input.version, tenantId,
+    config, logger, clock, dbs, coord, version: input.version,
+    extensions: ext, tenancy, quotas, usage, secretRefs, modelKeys, envRefs,
     settings, keyring, metrics, auditStore, audit, sinkDispatcher, redactionRules: redactionRules!, envelope, secretProvider, namedSecrets, jobs, postCommit,
     outboundFetch, upstreamFetchFor, embedder, vectorIndex, indexer: indexer!, search,
-    runtime, bus, limiter, authenticator, tracker, errors, pages, mock, credentials, http, pipeline, ops, scripts, dispatcher,
+    runtime, bus, limiter, authenticator, tracker, errors, pages, mock, mockStore, mockNamespaces, credentials, http, pipeline, ops, scripts, dispatcher,
     executor: () => executor, executorHealth, startExecutor,
     builds, servers, fetchSpec, introspectGraphql, configSync, apiKeys, users,
     oauthClients, oauthTokens, authorization, consoleSessions, upstreamOAuth,
@@ -397,11 +432,11 @@ async function recordTrafficExample(db: Services['dbs']['main']['db'], serverId:
   const { sha256Hex } = await import('./kernel/lib/crypto.js');
   const { toJsonColumn } = await import('./kernel/lib/json.js');
   const shape = sha256Hex(JSON.stringify(Object.keys(args).sort()));
-  const existing = await db.selectFrom('examples').select(['id', 'success_count', 'args_hash']).where('server_id', '=', serverId).where('tool_name', '=', tool).where('kind', '=', 'call').execute();
+  const existing = await db.selectFrom('examples').select(['id', 'success_count', 'args_hash']).where('tenant_id', '=', tenantId).where('server_id', '=', serverId).where('tool_name', '=', tool).where('kind', '=', 'call').execute();
   const hit = existing.find((e) => e.args_hash === shape);
   const t = Date.now();
   if (hit) {
-    await db.updateTable('examples').set({ success_count: hit.success_count + 1, last_success_at: t }).where('id', '=', hit.id).execute();
+    await db.updateTable('examples').set({ success_count: hit.success_count + 1, last_success_at: t }).where('id', '=', hit.id).where('tenant_id', '=', tenantId).execute();
     return;
   }
   if (existing.length >= 3) return;

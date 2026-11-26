@@ -8,6 +8,8 @@ export class StaticMigrationProvider implements MigrationProvider {
   constructor(
     private readonly migrations: readonly DialectMigration[],
     private readonly ctx: MigrationContext,
+    /** Extension migrations (multi-tenancy spec §1.4), merged by name after core's. */
+    private readonly extra: Record<string, Migration> = {},
   ) {}
 
   async getMigrations(): Promise<Record<string, Migration>> {
@@ -15,6 +17,10 @@ export class StaticMigrationProvider implements MigrationProvider {
     for (const m of this.migrations) {
       if (out[m.name]) throw new Error(`Duplicate migration name ${m.name}`);
       out[m.name] = { up: (db) => m.up(db, this.ctx), down: (db) => m.down(db, this.ctx) };
+    }
+    for (const [name, m] of Object.entries(this.extra)) {
+      if (out[name]) throw new Error(`Extension migration ${name} clashes with a core migration`);
+      out[name] = m;
     }
     return out;
   }
@@ -24,13 +30,15 @@ export function migrationsFor(set: MigrationSet): readonly DialectMigration[] {
   return set === 'main' ? MAIN_MIGRATIONS : AUDIT_MIGRATIONS;
 }
 
-export function createMigrator(db: Kysely<unknown>, set: MigrationSet, ctx: MigrationContext): Migrator {
+export function createMigrator(db: Kysely<unknown>, set: MigrationSet, ctx: MigrationContext, extra: Record<string, Migration> = {}): Migrator {
   return new Migrator({
     db,
-    provider: new StaticMigrationProvider(migrationsFor(set), ctx),
+    provider: new StaticMigrationProvider(migrationsFor(set), ctx, extra),
     migrationTableName: MIGRATION_TABLES[set].table,
     migrationLockTableName: MIGRATION_TABLES[set].lock,
-    allowUnorderedMigrations: false,
+    // with extension migrations (named `c0001_…`, sorting after core's), a later core release adds
+    // migrations that sort before already-applied extension ones: allow that order
+    allowUnorderedMigrations: Object.keys(extra).length > 0,
   });
 }
 
@@ -54,8 +62,8 @@ function unwrap(set: MigrationSet, res: MigrationResultSet): string[] {
  * Applies pending migrations under Kysely's DB-level lock (safe with many replicas).
  * Returns the names applied.
  */
-export async function migrateToLatest(db: Kysely<unknown>, set: MigrationSet, ctx: MigrationContext): Promise<string[]> {
-  return unwrap(set, await createMigrator(db, set, ctx).migrateToLatest());
+export async function migrateToLatest(db: Kysely<unknown>, set: MigrationSet, ctx: MigrationContext, extra: Record<string, Migration> = {}): Promise<string[]> {
+  return unwrap(set, await createMigrator(db, set, ctx, extra).migrateToLatest());
 }
 
 /** Dev only: rolls back the latest migration of a set. */

@@ -96,6 +96,7 @@ export function buildProgram(): Command {
     .requiredOption('--env <slug>')
     .option('--scopes <list>', 'tools:read,tools:write,code:run', 'tools:read,code:run')
     .option('--name <name>', 'key name', 'cli')
+    .option('--tenant <slug>', 'organization slug (default: the default organization)')
     .option('--data <dir>', 'data directory', './.neurouter')
     .action(async (o) => (await serveCmd()).cmdKeysCreate(o));
   return program;

@@ -67,7 +67,7 @@ export class LoginService {
 
   async finish(currentUrl: URL, meta: { ip?: string | null; userAgent?: string | null } = {}): Promise<LoginOutcome> {
     const fail = (error: Exclude<LoginErrorCode, 'session_expired'>, reason: string, userId: string | null = null): LoginOutcome => {
-      this.audit.auth({ userId, action: 'auth.login', status: 'blocked', reason, ip: meta.ip ?? null, userAgent: meta.userAgent ?? null });
+      this.audit.auth({ tenantId: null, userId, action: 'auth.login', status: 'blocked', reason, ip: meta.ip ?? null, userAgent: meta.userAgent ?? null });
       return { ok: false, error, reason };
     };
     if (!this.provider) return fail('idp_error', 'oidc_not_configured');
@@ -104,7 +104,7 @@ export class LoginService {
     const name = typeof claims.name === 'string' && claims.name.trim() ? claims.name.trim().slice(0, 200) : email.split('@')[0]!;
     const user = await this.users.upsertOidc({ email, name, issuer: this.provider.issuer, subject: sub, role: roleFromClaims(claims, this.cfg) });
     if (user.status !== 'active') return fail('disabled', 'user_disabled', user.id);
-    this.audit.auth({ userId: user.id, action: 'auth.login', reason: 'oidc', ip: meta.ip ?? null, userAgent: meta.userAgent ?? null });
+    this.audit.auth({ tenantId: user.tenant_id, userId: user.id, action: 'auth.login', reason: 'oidc', ip: meta.ip ?? null, userAgent: meta.userAgent ?? null });
     return { ok: true, userId: user.id, returnTo: row.return_to, idToken };
   }
 

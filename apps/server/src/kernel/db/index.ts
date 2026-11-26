@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import type { Migration } from 'kysely/migration';
 import type Database from 'better-sqlite3';
 import type pg from 'pg';
 import type { AuditDB, MainDB } from './schema.js';
@@ -79,9 +80,9 @@ export function createDatabases(opts: CreateDatabasesOptions): Databases {
 }
 
 /** Runs the main migration set on `main` and the audit set on `audit` (both, even when they share a DB). */
-export async function migrateAll(dbs: Databases, ctx: Omit<MigrationContext, 'dialect'>): Promise<{ main: string[]; audit: string[] }> {
-  const main = await migrateToLatest(dbs.main.db as Kysely<unknown>, 'main', { ...ctx, dialect: dbs.main.dialect });
-  const audit = await migrateToLatest(dbs.audit.db as Kysely<unknown>, 'audit', { ...ctx, dialect: dbs.audit.dialect });
+export async function migrateAll(dbs: Databases, ctx: Omit<MigrationContext, 'dialect'>, extra: { main?: Record<string, Migration>; audit?: Record<string, Migration> } = {}): Promise<{ main: string[]; audit: string[] }> {
+  const main = await migrateToLatest(dbs.main.db as Kysely<unknown>, 'main', { ...ctx, dialect: dbs.main.dialect }, extra.main ?? {});
+  const audit = await migrateToLatest(dbs.audit.db as Kysely<unknown>, 'audit', { ...ctx, dialect: dbs.audit.dialect }, extra.audit ?? {});
   return { main, audit };
 }
 

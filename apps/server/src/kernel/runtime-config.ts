@@ -242,7 +242,7 @@ export class DbRuntimeConfigSource implements RuntimeConfigSource {
     private readonly db: Kysely<MainDB>,
     private readonly clock: Clock,
     private readonly coord: CoordinationStore,
-    private readonly opts: { ttlMs?: number; codeModeEnabled: () => Promise<boolean>; codeLimitsCap?: () => Promise<CodeLimits> },
+    private readonly opts: { ttlMs?: number; codeModeEnabled: (tenantId: string) => Promise<boolean>; codeLimitsCap?: () => Promise<CodeLimits> },
   ) {
     coord.subscribe(CONFIG_CHANGED, (payload) => {
       this.cache.clear();
@@ -293,10 +293,11 @@ export class DbRuntimeConfigSource implements RuntimeConfigSource {
   private async load(tenantId: string, environmentId: string): Promise<RuntimeBundle | null> {
     const e = await this.db.selectFrom('environments').selectAll().where('id', '=', environmentId).where('tenant_id', '=', tenantId).executeTakeFirst();
     if (!e) return null;
-    const s = await this.db.selectFrom('servers').selectAll().where('id', '=', e.server_id).executeTakeFirstOrThrow();
+    const s = await this.db.selectFrom('servers').selectAll().where('id', '=', e.server_id).where('tenant_id', '=', tenantId).executeTakeFirst();
+    if (!s) return null;
     const buildId = e.build_id ?? s.latest_build_id;
     if (!buildId) return null;
-    const build = await this.loadBuild(buildId);
+    const build = await this.loadBuild(buildId, tenantId);
     if (!build) return null;
     const ks = await this.db.selectFrom('kill_switches').selectAll().where('tenant_id', '=', tenantId).execute();
     const killSwitches: KillSwitch[] = ks.map((k) => ({ scope: k.scope, target: k.target, kind: k.kind, reason: k.reason }));
@@ -304,26 +305,27 @@ export class DbRuntimeConfigSource implements RuntimeConfigSource {
     // the instance cap wins over per-environment code limits (§10.5)
     if (this.opts.codeLimitsCap) environment.limits = { ...environment.limits, code: clampCodeLimits(environment.limits.code, await this.opts.codeLimitsCap()).limits };
     const server = { id: s.id, slug: s.slug, name: s.name, description: s.description, kind: s.kind, opsTools: parseOpsTools(s.ops_tools), exposure: parseExposure(s.exposure), status: s.status };
-    const codeModeEnabled = await this.opts.codeModeEnabled();
+    const codeModeEnabled = await this.opts.codeModeEnabled(tenantId);
     const bundleHash = hashCanonical({ server, environment, build: build.hash, killSwitches, codeModeEnabled });
     return { bundleHash, tenantId, server, environment, build, killSwitches, codeModeEnabled };
   }
 
   async withBuild(bundle: RuntimeBundle, buildId: string): Promise<RuntimeBundle | null> {
-    const own = await this.db.selectFrom('builds').select('server_id').where('id', '=', buildId).executeTakeFirst();
+    const own = await this.db.selectFrom('builds').select('server_id').where('id', '=', buildId).where('tenant_id', '=', bundle.tenantId).executeTakeFirst();
     if (!own || own.server_id !== bundle.server.id) return null;
-    const build = await this.loadBuild(buildId);
+    const build = await this.loadBuild(buildId, bundle.tenantId);
     if (!build) return null;
     return { ...bundle, build, bundleHash: hashCanonical({ base: bundle.bundleHash, build: build.hash }) };
   }
 
-  /** Builds are immutable: cached by id (bounded). */
-  async loadBuild(buildId: string): Promise<RuntimeBuild | null> {
-    const cached = this.builds.get(buildId);
+  /** Builds are immutable: cached by (tenant, id) (bounded). */
+  async loadBuild(buildId: string, tenantId: string): Promise<RuntimeBuild | null> {
+    const key = `${tenantId}|${buildId}`;
+    const cached = this.builds.get(key);
     if (cached) return cached;
-    const b = await this.db.selectFrom('builds').selectAll().where('id', '=', buildId).executeTakeFirst();
+    const b = await this.db.selectFrom('builds').selectAll().where('id', '=', buildId).where('tenant_id', '=', tenantId).executeTakeFirst();
     if (!b || b.status !== 'ok') return null;
-    const rows = await this.db.selectFrom('tools').select(['id', 'name', 'def']).where('build_id', '=', buildId).orderBy('seq').execute();
+    const rows = await this.db.selectFrom('tools').select(['id', 'name', 'def']).where('build_id', '=', buildId).where('tenant_id', '=', tenantId).orderBy('seq').execute();
     const tools = rows.map((r) => parseJsonColumn<ToolDef>(r.def)!);
     let mock: unknown = undefined;
     const mockBlob = b.mock_model;
@@ -341,7 +343,7 @@ export class DbRuntimeConfigSource implements RuntimeConfigSource {
       },
     };
     if (this.builds.size > 50) this.builds.delete(this.builds.keys().next().value!);
-    this.builds.set(buildId, build);
+    this.builds.set(key, build);
     return build;
   }
 }

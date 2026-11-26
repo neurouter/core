@@ -16,6 +16,7 @@ export const CHECKPOINT_EVERY_MS = 5 * 60_000;
 export async function writeCheckpoint(db: Kysely<AuditDB>, kind: CheckpointKind, signer: MacSigner, now: number, at?: { seq: number; hash: string }): Promise<AuditCheckpoint | null> {
   let target = at;
   if (!target) {
+    // tenant-scope: system-job (checkpoints cover the instance-wide hash chain (per-tenant chains: P1))
     const head = await db.selectFrom('audit_log').select(['seq', 'hash']).orderBy('seq', 'desc').limit(1).executeTakeFirst();
     if (!head) return null;
     target = { seq: Number(head.seq), hash: head.hash };
@@ -27,6 +28,7 @@ export async function writeCheckpoint(db: Kysely<AuditDB>, kind: CheckpointKind,
 
 /** Periodic checkpoint (leader job): every 10,000 entries or 5 minutes, when the head moved. */
 export async function maybePeriodicCheckpoint(db: Kysely<AuditDB>, signer: MacSigner, now: number, opts = { everyRows: CHECKPOINT_EVERY_ROWS, everyMs: CHECKPOINT_EVERY_MS }): Promise<AuditCheckpoint | null> {
+  // tenant-scope: system-job (checkpoints cover the instance-wide hash chain (per-tenant chains: P1))
   const head = await db.selectFrom('audit_log').select(['seq', 'hash']).orderBy('seq', 'desc').limit(1).executeTakeFirst();
   if (!head) return null;
   const last = await db.selectFrom('audit_checkpoints').select(['seq', 'created_at']).orderBy('seq', 'desc').orderBy('created_at', 'desc').limit(1).executeTakeFirst();

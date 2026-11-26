@@ -11,6 +11,31 @@ export interface NetPolicy {
   denyCidrs: readonly string[];
   /** `https` only, except plain http to loopback (dev) or anywhere (internal upstreams). */
   allowHttp: 'never' | 'loopback' | 'always';
+  /**
+   * Host names never reachable (multi-tenancy spec §9.1 `NEUROUTER_DENY_HOSTS`): `host`, `host:port`
+   * or `*.suffix`. Checked on the URL, so a redirect to a denied host is refused too.
+   */
+  denyHosts?: readonly string[];
+}
+
+/** True when `url` targets a denied host (`host`, `host:port`, `*.suffix`; case-insensitive). */
+export function hostDenied(url: URL, denyHosts: readonly string[] | undefined): boolean {
+  if (!denyHosts?.length) return false;
+  const host = hostOf(url).toLowerCase().replace(/\.$/, '');
+  const port = url.port || (url.protocol === 'https:' ? '443' : url.protocol === 'http:' ? '80' : '');
+  for (const raw of denyHosts) {
+    const d = raw.trim().toLowerCase();
+    if (!d) continue;
+    if (d.startsWith('*.')) {
+      if (host.endsWith(d.slice(1)) || host === d.slice(2)) return true;
+      continue;
+    }
+    const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(d);
+    if (!m) continue;
+    const h = m[1]!.replace(/^\[|\]$/g, '');
+    if (h === host && (!m[2] || m[2] === port)) return true;
+  }
+  return false;
 }
 
 export class SsrfError extends Error {
@@ -81,6 +106,7 @@ export function assertUrlAllowed(raw: string | URL, policy: NetPolicy): URL {
   } else if (url.protocol !== 'https:') {
     throw new SsrfError(`Scheme ${url.protocol} is not allowed`, 'scheme');
   }
+  if (hostDenied(url, policy.denyHosts)) throw new SsrfError(`Blocked: ${host} is a denied host`, 'blocked_address');
   if (literal) {
     const reason = blockedReason(host, policy);
     if (reason) throw new SsrfError(`Blocked: ${reason}`, 'blocked_address');

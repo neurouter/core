@@ -27,7 +27,8 @@ type Q = SelectQueryBuilder<AuditDB, 'audit_log', object>;
 /** Applies every filter. The time range always applies first (partition pruning on PG). */
 export function applyFilters<O>(qb: SelectQueryBuilder<AuditDB, 'audit_log', O>, q: Omit<AuditQuery, 'limit' | 'cursorSeq' | 'order'>, dialect: Dialect, ftsEnabled = true): SelectQueryBuilder<AuditDB, 'audit_log', O> {
   if (!(q.to > q.from)) throw AppError.validation('`to` must be after `from`', [{ path: ['to'], message: 'Must be after from', code: 'invalid_range' }]);
-  let x = qb.where('audit_log.ts', '>=', q.from).where('audit_log.ts', '<', q.to);
+  if (!q.tenantId) throw new Error('audit queries require a tenantId');
+  let x = qb.where('audit_log.tenant_id', '=', q.tenantId).where('audit_log.ts', '>=', q.from).where('audit_log.ts', '<', q.to);
   if (q.serverIds !== undefined) x = q.serverIds.length ? x.where('audit_log.server_id', 'in', [...q.serverIds]) : x.where(sql<SqlBool>`1 = 0`);
   if (q.userId) x = x.where('audit_log.user_id', '=', q.userId);
   if (q.toolId) x = x.where('audit_log.tool_id', '=', q.toolId);
@@ -58,6 +59,7 @@ export function applyFilters<O>(qb: SelectQueryBuilder<AuditDB, 'audit_log', O>,
 
 export async function queryRows(db: Kysely<AuditDB>, dialect: Dialect, q: AuditQuery, ftsEnabled = true): Promise<{ rows: AuditRow[]; nextSeq: number | null }> {
   const desc = (q.order ?? 'desc') === 'desc';
+  // tenant-scope: child-of-scoped (applyFilters() adds the mandatory tenant_id predicate)
   let qb = applyFilters(db.selectFrom('audit_log').selectAll('audit_log'), q, dialect, ftsEnabled) as unknown as Q;
   if (q.cursorSeq !== undefined && q.cursorSeq !== null) qb = qb.where('audit_log.seq', desc ? '<' : '>', q.cursorSeq);
   const rows = (await qb.orderBy('audit_log.seq', desc ? 'desc' : 'asc').limit(q.limit + 1).execute()) as AuditRow[];
@@ -83,6 +85,7 @@ export async function* streamRows(db: Kysely<AuditDB>, dialect: Dialect, q: Omit
 /** Blocked calls by decision and reason (metrics `block_reason` breakdown). */
 export async function decisionCounts(db: Kysely<AuditDB>, dialect: Dialect, q: Omit<AuditQuery, 'limit' | 'cursorSeq' | 'order'>): Promise<DecisionCount[]> {
   const rows = await applyFilters(
+    // tenant-scope: child-of-scoped (applyFilters() adds the mandatory tenant_id predicate)
     db.selectFrom('audit_log').select(['audit_log.decision', 'audit_log.decision_reason', sql<number>`count(*)`.as('n')]),
     q,
     dialect,
@@ -95,6 +98,7 @@ export async function decisionCounts(db: Kysely<AuditDB>, dialect: Dialect, q: O
 /** Calls per minute bucket for the filter (session detail mini chart). */
 export async function countsByMinute(db: Kysely<AuditDB>, dialect: Dialect, q: Omit<AuditQuery, 'limit' | 'cursorSeq' | 'order'>): Promise<{ t: number; calls: number }[]> {
   const bucket = sql<number>`(audit_log.ts - (audit_log.ts % 60000))`;
+  // tenant-scope: child-of-scoped (applyFilters() adds the mandatory tenant_id predicate)
   const rows = await applyFilters(db.selectFrom('audit_log').select([bucket.as('b'), sql<number>`count(*)`.as('n')]), q, dialect)
     .groupBy(bucket)
     .orderBy(bucket)
@@ -104,7 +108,9 @@ export async function countsByMinute(db: Kysely<AuditDB>, dialect: Dialect, q: O
 
 /** Row count capped at `cap + 1` (export truncation header without a full count). */
 export async function countCapped(db: Kysely<AuditDB>, dialect: Dialect, q: Omit<AuditQuery, 'limit' | 'cursorSeq' | 'order'>, cap: number, ftsEnabled = true): Promise<number> {
+  // tenant-scope: child-of-scoped (applyFilters() adds the mandatory tenant_id predicate)
   const inner = applyFilters(db.selectFrom('audit_log').select(sql<number>`1`.as('one')), q, dialect, ftsEnabled).limit(cap + 1);
+  // tenant-scope: child-of-scoped (counts the tenant-filtered subquery above)
   const r = await db.selectFrom(inner.as('x')).select(sql<number>`count(*)`.as('n')).executeTakeFirst();
   return Number(r?.n ?? 0);
 }

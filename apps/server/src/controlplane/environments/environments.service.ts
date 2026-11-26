@@ -67,9 +67,9 @@ export class EnvironmentsService {
   }
 
   async create(serverId: string, body: EnvironmentCreate): Promise<EnvRow> {
-    const clash = await this.db.selectFrom('environments').select('id').where('server_id', '=', serverId).where('slug', '=', body.slug).executeTakeFirst();
+    const clash = await this.db.selectFrom('environments').where('tenant_id', '=', this.tenantId).select('id').where('server_id', '=', serverId).where('slug', '=', body.slug).executeTakeFirst();
     if (clash) throw AppError.conflict(`An environment named "${body.slug}" already exists`);
-    const s = await this.db.selectFrom('servers').select(['latest_build_id']).where('id', '=', serverId).executeTakeFirstOrThrow();
+    const s = await this.db.selectFrom('servers').where('tenant_id', '=', this.tenantId).select(['latest_build_id']).where('id', '=', serverId).executeTakeFirstOrThrow();
     const now = this.clock.now();
     const id = newId();
     if (body.baseUrl === 'mock:' && body.auth.type !== 'none') throw AppError.validation('Mock environments take no credential', [{ path: ['auth'], message: 'Use auth type none for mock:', code: 'invalid_auth' }]);
@@ -125,7 +125,7 @@ export class EnvironmentsService {
       const w = environmentRuntime(e).writes;
       if (w.enabled && w.confirm === 'none') set.writes = toJsonColumn({ ...w, confirm: 'elicit' });
     }
-    await this.db.updateTable('environments').set(set).where('id', '=', id).execute();
+    await this.db.updateTable('environments').where('tenant_id', '=', this.tenantId).set(set).where('id', '=', id).execute();
     await this.changed(e);
     return this.get(id);
   }
@@ -135,7 +135,7 @@ export class EnvironmentsService {
     assertConsoleManaged(this.config, e, 'This environment');
     if (e.builtin === 1) throw AppError.conflict('The built-in mock environment cannot be deleted');
     if (confirm !== e.slug) throw AppError.validation('Type the environment slug to confirm', [{ path: ['confirm'], message: `must equal ${e.slug}`, code: 'confirm_mismatch' }]);
-    await this.db.deleteFrom('environments').where('id', '=', id).execute();
+    await this.db.deleteFrom('environments').where('tenant_id', '=', this.tenantId).where('id', '=', id).execute();
     await this.changed(e);
   }
 
@@ -148,7 +148,7 @@ export class EnvironmentsService {
       if (body.confirmEnvironmentSlug !== e.slug) throw AppError.validation('Type the environment slug to enable production writes', [{ path: ['confirmEnvironmentSlug'], message: `must equal ${e.slug}`, code: 'confirm_mismatch' }]);
     }
     const confirm = e.kind === 'prod' && body.confirm === 'none' ? 'elicit' : body.confirm;
-    await this.db.updateTable('environments').set({ writes: toJsonColumn({ enabled: body.enabled, tools: body.tools ?? null, confirm }), updated_at: this.clock.now() }).where('id', '=', id).execute();
+    await this.db.updateTable('environments').where('tenant_id', '=', this.tenantId).set({ writes: toJsonColumn({ enabled: body.enabled, tools: body.tools ?? null, confirm }), updated_at: this.clock.now() }).where('id', '=', id).execute();
     await this.changed(e);
     return this.get(id);
   }
@@ -168,23 +168,23 @@ export class EnvironmentsService {
     if (e.kind === 'prod' && confirm === 'none') confirm = 'elicit';
     const enabled = tools.length > 0;
     const all = tools.length === allWriteTools.length && allWriteTools.every((t) => tools.includes(t));
-    await this.db.updateTable('environments').set({ writes: toJsonColumn({ enabled, tools: enabled ? (all ? null : tools) : null, confirm }), updated_at: this.clock.now() }).where('id', '=', id).execute();
+    await this.db.updateTable('environments').where('tenant_id', '=', this.tenantId).set({ writes: toJsonColumn({ enabled, tools: enabled ? (all ? null : tools) : null, confirm }), updated_at: this.clock.now() }).where('id', '=', id).execute();
     await this.changed(e);
     return this.get(id);
   }
 
   async pinBuild(id: string, buildId: string): Promise<EnvRow> {
     const e = await this.get(id);
-    const b = await this.db.selectFrom('builds').select(['server_id', 'status']).where('id', '=', buildId).executeTakeFirst();
+    const b = await this.db.selectFrom('builds').where('tenant_id', '=', this.tenantId).select(['server_id', 'status']).where('id', '=', buildId).executeTakeFirst();
     if (!b || b.server_id !== e.server_id) throw AppError.validation('The build belongs to another server', [{ path: ['buildId'], message: 'build of another server', code: 'build_mismatch' }]);
     if (b.status !== 'ok') throw AppError.validation('Cannot pin a failed build', [{ path: ['buildId'], message: 'failed build', code: 'build_failed' }]);
-    await this.db.updateTable('environments').set({ build_id: buildId, updated_at: this.clock.now() }).where('id', '=', id).execute();
+    await this.db.updateTable('environments').where('tenant_id', '=', this.tenantId).set({ build_id: buildId, updated_at: this.clock.now() }).where('id', '=', id).execute();
     await this.changed(e);
     return this.get(id);
   }
 
   async recordHealth(id: string, h: { status: 'up' | 'down' | 'unknown'; latencyMs: number | null; error: string | null }): Promise<void> {
-    await this.db.updateTable('environments').set({ health: toJsonColumn({ ...h, checkedAt: this.clock.now() }) }).where('id', '=', id).execute();
+    await this.db.updateTable('environments').where('tenant_id', '=', this.tenantId).set({ health: toJsonColumn({ ...h, checkedAt: this.clock.now() }) }).where('id', '=', id).execute();
   }
 
   headersOf(e: EnvRow): Record<string, string> {

@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,12 +53,12 @@ describe('audit export sinks (settings auditSinks → SinkDispatcher job)', () =
     writeFileSync(f, `version: 1\nsettings:\n  audit:\n    webhook: { url: https://siem2.example.test/hook, secret: env:NR_TEST_HOOK_SECRET }\n    otelLogs: false\nservers:\n  - slug: pets3\n    name: Pets\n    spec: { path: ${PETSTORE} }\n`);
     const r = await t.s.services.configSync.loadFile(f);
     expect(r.ok).toBe(true);
-    expect(await t.s.services.settings.get('auditSinks')).toEqual({ webhook: { url: 'https://siem2.example.test/hook', secretRef: 'env:NR_TEST_HOOK_SECRET', enabled: true }, otelLogs: { enabled: false } });
+    expect(await t.s.services.settings.get('auditSinks', DEFAULT_TENANT_ID)).toEqual({ webhook: { url: 'https://siem2.example.test/hook', secretRef: 'env:NR_TEST_HOOK_SECRET', enabled: true }, otelLogs: { enabled: false } });
     process.env.NR_TEST_HOOK_SECRET = 'file-secret-0123456789';
     try {
       await t.s.services.auditStore.flush();
       posts.length = 0;
-      t.s.services.audit.system('test.event', { kind: 'config_apply', targetType: 'config', targetId: 'x' });
+      t.s.services.audit.system(DEFAULT_TENANT_ID, 'test.event', { kind: 'config_apply', targetType: 'config', targetId: 'x' });
       await t.s.services.auditStore.flush();
       await t.s.services.sinkDispatcher.runOnce();
     } finally {

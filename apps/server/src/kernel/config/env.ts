@@ -98,6 +98,13 @@ export const Env = z
     UPSTREAM_ALLOW_PRIVATE_NETWORKS: zBool.default(true),
     /** Added to the cloud-metadata floor (kernel/lib/net/policy.ts), never replacing it. */
     UPSTREAM_DENY_CIDRS: zCsv.default(['169.254.0.0/16', 'fd00:ec2::/32']),
+    /** Hosts no upstream may target (multi-tenancy spec §9.1), e.g. the gateway's own domain. Default: the PUBLIC_URL host. Set to `none` to disable. */
+    NEUROUTER_DENY_HOSTS: zCsv.optional(),
+    /**
+     * Allow-list for `env:NAME` secret references in environments and GraphQL imports (spec §4.9 G12): exact names or
+     * `PREFIX*` patterns. Unset = any name that is not a gateway-internal variable (those are always refused).
+     */
+    NEUROUTER_SECRET_ENV_ALLOW: zCsv.default([]),
     /** Opt out of the cloud-metadata deny floor (only for deliberately proxied metadata services). */
     UPSTREAM_ALLOW_METADATA: zBool.default(false),
     OUTBOUND_ALLOW_PRIVATE_NETWORKS: zBool.default(false),
@@ -108,6 +115,8 @@ export const Env = z
     NO_PROXY: zCsv.default([]),
 
     METRICS_ENABLED: zBool.default(true),
+    /** `server`/`environment` labels on Prometheus series (spec §12.1; the cloud turns them off: slugs repeat across tenants). */
+    METRICS_PER_SERVER_LABELS: zBool.default(true),
     METRICS_TOKEN: opt(z.string()),
     OTEL_SDK_DISABLED: zBool.default(true),
     /** Built web app. Relative paths resolve against the server package directory. */
@@ -121,6 +130,8 @@ export const Env = z
     NEUROUTER_CONFIG_MODE: z.enum(['file', 'hybrid', 'console']).default('hybrid'),
     NEUROUTER_ROLE: z.enum(['all']).default('all'),
     NEUROUTER_EXECUTOR_MODE: z.enum(['embedded', 'remote', 'local', 'off']).default('embedded'),
+    /** Mock state (multi-tenancy spec §7): `db` (shared by every instance) or `memory` (one process; the CLI). */
+    NEUROUTER_MOCK_STORE: z.enum(['db', 'memory']).default('db'),
     NEUROUTER_EXECUTOR_URL: opt(z.string()),
     NEUROUTER_EXECUTOR_TOKEN: opt(z.string()),
     NEUROUTER_EXECUTOR_SOCKET: z.string().default('/tmp/neurouter-executor.sock'),
@@ -139,6 +150,10 @@ export const Env = z
     NEUROUTER_DEMO_READ_ONLY: zBool.default(false),
     NEUROUTER_PUBLIC_REPORTS: zBool.default(true),
     NEUROUTER_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+    /** Former public base URLs whose `/mcp/...` resource URIs stay valid for OAuth tokens (spec §11 M4), comma-separated. */
+    NEUROUTER_RESOURCE_ALIASES: zCsv.default([]),
+    /** Maintenance window (spec §11 M3): 503 on `/mcp` and on mutating `/api` calls. */
+    NEUROUTER_MAINTENANCE: zBool.default(false),
   })
   .superRefine((e, ctx) => {
     const prod = e.NODE_ENV === 'production';

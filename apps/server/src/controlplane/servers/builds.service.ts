@@ -52,12 +52,14 @@ export class BuildsService {
   ) {}
 
   async specBytes(specRevisionId: string): Promise<{ bytes: Buffer; format: SpecFormat; hash: string }> {
+    // tenant-scope: child-of-scoped (ids from a tenant-scoped server and its revisions)
     const r = await this.db.selectFrom('spec_revisions').select(['content', 'format', 'content_hash']).where('id', '=', specRevisionId).executeTakeFirstOrThrow();
     return { bytes: gunzipSync(r.content), format: r.format, hash: r.content_hash };
   }
 
   /** Pure compile (no writes): previews, overlay validation, suggestion validation. */
   async compileWith(serverId: string, overlayYaml: string | null, specRevisionId?: string): Promise<CompileResult> {
+    // tenant-scope: child-of-scoped (ids from a tenant-scoped server and its revisions)
     const s = await this.db.selectFrom('servers').select(['slug', 'spec_source', 'current_spec_revision_id', 'exposure']).where('id', '=', serverId).executeTakeFirstOrThrow();
     const revId = specRevisionId ?? s.current_spec_revision_id;
     if (!revId) throw new Error('server has no spec');
@@ -74,6 +76,7 @@ export class BuildsService {
 
   async overlayYaml(overlayRevisionId: string | null): Promise<string | null> {
     if (!overlayRevisionId) return null;
+    // tenant-scope: child-of-scoped (ids from a tenant-scoped server and its revisions)
     const r = await this.db.selectFrom('overlay_revisions').select('yaml').where('id', '=', overlayRevisionId).executeTakeFirst();
     return r?.yaml ?? null;
   }
@@ -82,6 +85,7 @@ export class BuildsService {
   async build(serverId: string, specRevisionId: string, overlayRevisionId: string | null, opts: { temporary?: boolean; overlayYaml?: string | null; pin?: boolean } = {}): Promise<BuildOutcome> {
     const yaml = opts.overlayYaml !== undefined ? opts.overlayYaml : await this.overlayYaml(overlayRevisionId);
     const result = await this.compileWith(serverId, yaml, specRevisionId);
+    // tenant-scope: tenant-from-row (the server id comes from a tenant-scoped caller; its tenant scopes the build rows)
     const s = await this.db.selectFrom('servers').select(['tenant_id']).where('id', '=', serverId).executeTakeFirstOrThrow();
     const existing = await this.db.selectFrom('builds').selectAll().where('tenant_id', '=', s.tenant_id).where('server_id', '=', serverId).where('hash', '=', result.hash).executeTakeFirst();
     if (existing) {
@@ -141,6 +145,7 @@ export class BuildsService {
         await indexBuildTools(trx, this.dialect, id);
       }
     });
+    // tenant-scope: child-of-scoped (build just written for a tenant-scoped server)
     const build = await this.db.selectFrom('builds').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
     if (status === 'ok' && !opts.temporary && opts.pin !== false) await this.afterBuild(serverId, id, 'pin');
     if (status === 'ok') this.opts.onBuild?.(id);
@@ -149,25 +154,32 @@ export class BuildsService {
 
   /** latest_build_id + pins: dev/qa/mock environments follow the latest build; prod only with autoPromote. */
   private async afterBuild(serverId: string, buildId: string, _why: 'pin' | 'promote'): Promise<void> {
+    // tenant-scope: child-of-scoped (build just written for a tenant-scoped server)
     await this.db.updateTable('builds').set({ temporary: 0 }).where('id', '=', buildId).execute();
+    // tenant-scope: child-of-scoped (build just written for a tenant-scoped server)
     await this.db.updateTable('servers').set({ latest_build_id: buildId, updated_at: this.clock.now() }).where('id', '=', serverId).execute();
+    // tenant-scope: child-of-scoped (build just written for a tenant-scoped server)
     const envs = await this.db.selectFrom('environments').select(['id', 'kind', 'auto_promote', 'build_id']).where('server_id', '=', serverId).execute();
     for (const e of envs) {
       if (e.kind === 'prod' && !(e.auto_promote === 1)) {
+        // tenant-scope: child-of-scoped (environments of a tenant-scoped server)
         if (!e.build_id) await this.db.updateTable('environments').set({ build_id: buildId }).where('id', '=', e.id).execute();
         continue;
       }
+      // tenant-scope: child-of-scoped (environments of a tenant-scoped server)
       await this.db.updateTable('environments').set({ build_id: buildId, updated_at: this.clock.now() }).where('id', '=', e.id).execute();
     }
     await this.coord.publish(CONFIG_CHANGED, { serverId });
   }
 
   async pin(environmentId: string, buildId: string): Promise<void> {
+    // tenant-scope: child-of-scoped (environment id checked by the caller)
     await this.db.updateTable('environments').set({ build_id: buildId, updated_at: this.clock.now() }).where('id', '=', environmentId).execute();
     await this.coord.publish(CONFIG_CHANGED, { environmentId });
   }
 
   async tools(buildId: string): Promise<ToolDef[]> {
+    // tenant-scope: child-of-scoped (build ids of tenant-scoped servers)
     const rows = await this.db.selectFrom('tools').select('def').where('build_id', '=', buildId).orderBy('seq').execute();
     return rows.map((r) => parseJsonColumn<ToolDef>(r.def)!);
   }

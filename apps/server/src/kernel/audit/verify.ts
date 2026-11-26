@@ -20,7 +20,9 @@ export interface VerifyDeps {
  */
 export async function verifyChain(d: VerifyDeps, range: { fromSeq?: number; toSeq?: number } = {}): Promise<AuditVerifyOutcome> {
   const pageSize = d.pageSize ?? 5000;
+  // tenant-scope: system-job (verifies the instance-wide hash chain (per-tenant chains: P1))
   const minRow = await d.db.selectFrom('audit_log').select('seq').orderBy('seq', 'asc').limit(1).executeTakeFirst();
+  // tenant-scope: system-job (verifies the instance-wide hash chain (per-tenant chains: P1))
   const maxRow = await d.db.selectFrom('audit_log').select('seq').orderBy('seq', 'desc').limit(1).executeTakeFirst();
   const empty: AuditVerifyOutcome = { ok: true, checked: 0, firstSeq: null, lastSeq: null, checkpointsVerified: 0, brokenAt: null };
   if (!minRow || !maxRow) return empty;
@@ -41,11 +43,13 @@ export async function verifyChain(d: VerifyDeps, range: { fromSeq?: number; toSe
       const cut = await d.db.selectFrom('audit_checkpoints').select(['hash']).where('seq', '=', from - 1).where('kind', '=', 'retention_cut').orderBy('created_at', 'desc').executeTakeFirst();
       expectedPrev = cut?.hash ?? null;
       if (expectedPrev === null) {
+        // tenant-scope: system-job (verifies the instance-wide hash chain (per-tenant chains: P1))
         const first = await d.db.selectFrom('audit_log').select(['id', 'prev_hash']).where('seq', '=', from).executeTakeFirst();
         return fail(from, first?.id ?? null, 'broken_link', null, first?.prev_hash ?? null, 0, 0);
       }
     }
   } else {
+    // tenant-scope: system-job (verifies the instance-wide hash chain (per-tenant chains: P1))
     const before = await d.db.selectFrom('audit_log').select('hash').where('seq', '=', from - 1).executeTakeFirst();
     expectedPrev = before?.hash ?? null; // null → the row before is missing: reported as a gap below
   }
@@ -61,6 +65,7 @@ export async function verifyChain(d: VerifyDeps, range: { fromSeq?: number; toSe
   let nextSeq = from;
   let cursor = from - 1;
   for (;;) {
+    // tenant-scope: system-job (verifies the instance-wide hash chain (per-tenant chains: P1))
     const rows = await d.db.selectFrom('audit_log').selectAll().where('seq', '>', cursor).where('seq', '<=', to).orderBy('seq', 'asc').limit(pageSize).execute();
     if (!rows.length) break;
     for (const r of rows) {

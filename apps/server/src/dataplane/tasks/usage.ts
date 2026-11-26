@@ -32,6 +32,7 @@ export async function recordUsage(db: Kysely<MainDB>, rows: readonly CommittedAu
 
 /** Top-N tools by 7-day calls for an environment (pinned-by-usage, §9.4). */
 export async function topToolsByUsage(db: Kysely<MainDB>, environmentId: string, sinceDay: string, n = 5): Promise<string[]> {
+  // tenant-scope: child-of-scoped (environment id of a tenant-scoped bundle)
   const rows = await db.selectFrom('usage_daily').select(['tool_name', (eb) => eb.fn.sum<number>('calls').as('c')]).where('environment_id', '=', environmentId).where('day', '>=', sinceDay).groupBy('tool_name').orderBy('c', 'desc').limit(n).execute();
   return rows.map((r) => r.tool_name);
 }

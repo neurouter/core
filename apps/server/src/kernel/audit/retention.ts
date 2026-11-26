@@ -66,6 +66,7 @@ export async function archiveUpTo(db: Kysely<AuditDB>, archive: ArchiveStore, cu
     total += c.lines.length;
   };
   for (;;) {
+    // tenant-scope: system-job (retention archives the instance-wide chain)
     const rows = (await db.selectFrom('audit_log').selectAll().where('seq', '>', cursor).where('seq', '<=', cutSeq).orderBy('seq', 'asc').limit(pageSize).execute()) as AuditRow[];
     if (!rows.length) break;
     for (const r of rows) {
@@ -93,6 +94,7 @@ export async function archiveUpTo(db: Kysely<AuditDB>, archive: ArchiveStore, cu
  */
 export async function applyRetention(d: RetentionDeps, cutoff: number): Promise<RetentionOutcome> {
   const out: RetentionOutcome = { cutoff, cutSeq: null, deleted: 0, archived: false, skipped: false, partitionsDropped: 0 };
+  // tenant-scope: system-job (retention archives the instance-wide chain)
   const cut = await d.db.selectFrom('audit_log').select(['seq', 'hash']).where('ts', '<', cutoff).orderBy('seq', 'desc').limit(1).executeTakeFirst();
   if (cut) {
     const cutSeq = Number(cut.seq);
@@ -115,21 +117,25 @@ export async function applyRetention(d: RetentionDeps, cutoff: number): Promise<
     if (d.dialect === 'postgres') {
       const drop = droppable(await listPartitions(d.db), cutoff);
       for (const name of drop) {
+        // tenant-scope: system-job (retention drops whole monthly partitions)
         const n = await d.db.selectFrom(sql.table(name).as('p') as never).select(sql<number>`count(*)`.as('n')).executeTakeFirst();
         await sql.raw(`drop table if exists ${name}`).execute(d.db);
         out.deleted += Number((n as { n?: number } | undefined)?.n ?? 0);
         out.partitionsDropped++;
       }
+      // tenant-scope: system-job (retention archives the instance-wide chain)
       const res = await d.db.deleteFrom('audit_log').where('seq', '<=', cutSeq).executeTakeFirst();
       out.deleted += Number(res.numDeletedRows);
     } else {
       const batch = d.deleteBatch ?? 10_000;
       for (;;) {
+        // tenant-scope: system-job (retention archives the instance-wide chain)
         const ids = await d.db.selectFrom('audit_log').select('seq').where('seq', '<=', cutSeq).orderBy('seq', 'asc').limit(batch).execute();
         if (!ids.length) break;
         const hi = Number(ids[ids.length - 1]!.seq);
         await d.db.transaction().execute(async (trx) => {
           await sql`insert into audit_fts(audit_fts, rowid, params_text, tool_name, error_message, decision_reason) select 'delete', seq, params_text, tool_name, error_message, decision_reason from audit_log where seq <= ${hi}`.execute(trx);
+          // tenant-scope: system-job (retention archives the instance-wide chain)
           const res = await trx.deleteFrom('audit_log').where('seq', '<=', hi).executeTakeFirst();
           out.deleted += Number(res.numDeletedRows);
         });

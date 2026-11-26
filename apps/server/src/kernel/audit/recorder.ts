@@ -2,9 +2,12 @@ import type { Logger } from 'pino';
 import type { AuditDecision, AuditStatus } from '@neurouter/shared';
 import type { Clock } from '../lib/clock.js';
 import { newId } from '../lib/ids.js';
+import { INSTANCE_SCOPE_ID } from '../tenancy/index.js';
 import type { AuditEventInput, AuditStore } from './store.js';
 
 export interface AdminAuditInput {
+  /** Owning tenant (spec §4.5, G15). Null only for platform events (filed under INSTANCE_SCOPE_ID). */
+  tenantId: string | null;
   actorUserId: string | null;
   action: string;
   targetType: string;
@@ -18,6 +21,8 @@ export interface AdminAuditInput {
 }
 
 export interface AuthAuditInput {
+  /** Owning tenant (spec §4.5, G15). Null only for platform events (filed under INSTANCE_SCOPE_ID). */
+  tenantId: string | null;
   userId: string | null;
   action: string;
   decision?: AuditDecision;
@@ -58,6 +63,7 @@ export class AuditRecorder {
   admin(e: AdminAuditInput): void {
     this.record({
       kind: 'admin_action',
+      tenantId: e.tenantId ?? INSTANCE_SCOPE_ID,
       userId: e.actorUserId,
       action: e.action,
       targetType: e.targetType,
@@ -74,6 +80,7 @@ export class AuditRecorder {
   auth(e: AuthAuditInput): void {
     this.record({
       kind: 'auth_event',
+      tenantId: e.tenantId ?? INSTANCE_SCOPE_ID,
       userId: e.userId,
       action: e.action,
       decision: e.decision ?? 'allowed',
@@ -84,9 +91,11 @@ export class AuditRecorder {
     });
   }
 
-  system(action: string, details: { targetType?: string; targetId?: string; reason?: string; changes?: unknown; kind?: 'config_apply' | 'eval_run' | 'admin_action' } = {}): void {
+  /** `tenantId` null = platform event (INSTANCE_SCOPE_ID). */
+  system(tenantId: string | null, action: string, details: { targetType?: string; targetId?: string; reason?: string; changes?: unknown; kind?: 'config_apply' | 'eval_run' | 'admin_action' } = {}): void {
     this.record({
       kind: details.kind ?? 'admin_action',
+      tenantId: tenantId ?? INSTANCE_SCOPE_ID,
       action,
       targetType: details.targetType ?? null,
       targetId: details.targetId ?? null,

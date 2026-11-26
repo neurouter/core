@@ -4,6 +4,8 @@ import type { MainDB } from '../../kernel/db/schema.js';
 import type { Dialect } from '../../kernel/db/url.js';
 
 export interface VectorRow {
+  /** The tool's tenant (stored with the vector; spec §4.7). */
+  tenantId: string;
   toolId: string;
   toolSeq: number;
   modelId: string;
@@ -43,7 +45,7 @@ abstract class BaseVectorIndex implements VectorIndex {
 
   async upsert(rows: readonly VectorRow[], now: number): Promise<void> {
     if (!rows.length) return;
-    const values = rows.map((r) => ({ tool_id: r.toolId, tool_seq: r.toolSeq, model_id: r.modelId, dims: r.vector.length, text_hash: r.textHash, embedding: this.encode(r.vector), updated_at: now }));
+    const values = rows.map((r) => ({ tenant_id: r.tenantId, tool_id: r.toolId, tool_seq: r.toolSeq, model_id: r.modelId, dims: r.vector.length, text_hash: r.textHash, embedding: this.encode(r.vector), updated_at: now }));
     await this.db
       .insertInto('tool_embeddings')
       .values(values)
@@ -61,11 +63,13 @@ abstract class BaseVectorIndex implements VectorIndex {
   }
 
   async hashes(modelId: string): Promise<Map<string, string>> {
+    // tenant-scope: system-job (index maintenance across tenants)
     const rows = await this.db.selectFrom('tool_embeddings').select(['tool_id', 'text_hash']).where('model_id', '=', modelId).execute();
     return new Map(rows.map((r) => [r.tool_id, r.text_hash]));
   }
 
   async clear(): Promise<void> {
+    // tenant-scope: system-job (index maintenance across tenants)
     await this.db.deleteFrom('tool_embeddings').execute();
   }
 

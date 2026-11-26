@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { bootServer, keyFor, mcpClient } from '../../../test/fakes/server.js';
@@ -11,7 +12,7 @@ describe('tasks, keys, inbox, audit (agent traffic)', () => {
   let serverId: string;
   beforeAll(async () => {
     t = await consoleOn(await bootServer());
-    serverId = (await t.s.services.servers.bySlug(t.s.services.tenantId, 'petstore'))!.id;
+    serverId = (await t.s.services.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!.id;
   }, 90_000);
   afterAll(async () => {
     await c?.close().catch(() => {});

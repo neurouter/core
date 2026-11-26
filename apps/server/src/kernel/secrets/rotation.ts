@@ -33,7 +33,9 @@ export async function rotateKeys(
     if (deps.extraReencrypt) reencrypted += await deps.extraReencrypt(dek.id);
     const retired = await deps.db.selectFrom('encryption_keys').select('id').where('status', '=', 'retired').execute();
     for (const { id } of retired) {
+      // tenant-scope: system-job (DEK rotation across tenants)
       const s = await deps.db.selectFrom('secrets').select('id').where('dek_id', '=', id).limit(1).executeTakeFirst();
+      // tenant-scope: system-job (DEK rotation across tenants)
       const t = await deps.db.selectFrom('upstream_tokens').select('id').where('dek_id', '=', id).limit(1).executeTakeFirst();
       if (!s && !t) {
         await deps.db.deleteFrom('encryption_keys').where('id', '=', id).execute();

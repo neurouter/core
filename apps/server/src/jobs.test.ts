@@ -15,7 +15,7 @@ describe('background jobs', () => {
   afterAll(async () => t?.close());
 
   it('registers the §12.4 jobs', () => {
-    expect([...jobs.keys()]).toEqual(expect.arrayContaining(['tasks.close-idle', 'retention.sweep', 'audit.checkpoint', 'audit.retention', 'environments.health', 'oauth.cleanup', 'search.index-build']));
+    expect([...jobs.keys()]).toEqual(expect.arrayContaining(['tasks.close-idle', 'retention.sweep', 'audit.checkpoint', 'audit.retention', 'environments.health', 'oauth.cleanup', 'search.index-build', 'mock.gc']));
   });
 
   it('environments.health records health for every active environment (mock: up)', async () => {
@@ -28,5 +28,15 @@ describe('background jobs', () => {
   it('retention.sweep and tasks.close-idle run without errors', async () => {
     await jobs.get('retention.sweep')!();
     await jobs.get('tasks.close-idle')!();
+  });
+
+  it('mock.gc drops expired mock namespaces (DB mock store)', async () => {
+    const db = t.s.services.dbs.main.db;
+    const env = (await db.selectFrom('environments').select(['id', 'tenant_id']).executeTakeFirstOrThrow());
+    const ns = { tenantId: env.tenant_id, environmentId: env.id, name: 'gen:expired' };
+    await t.s.services.mockStore.reset(ns, 1);
+    await db.updateTable('mock_namespaces').set({ expires_at: 1 }).where('tenant_id', '=', env.tenant_id).where('environment_id', '=', env.id).where('namespace', '=', ns.name).execute();
+    await jobs.get('mock.gc')!();
+    expect(await db.selectFrom('mock_namespaces').select('namespace').where('tenant_id', '=', env.tenant_id).where('namespace', '=', ns.name).executeTakeFirst()).toBeUndefined();
   });
 });

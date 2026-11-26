@@ -43,17 +43,23 @@ export async function cmdConsoleLink(o: { data: string }): Promise<void> {
 }
 
 /** `npx neurouter keys create`: an API key bound to one server + environment. Prints the token once. */
-export async function cmdKeysCreate(o: { server: string; env: string; scopes: string; name: string; data: string }): Promise<void> {
+export async function cmdKeysCreate(o: { server: string; env: string; scopes: string; name: string; data: string; tenant?: string }): Promise<void> {
   const running = await startServer({ env: serverEnv({ data: o.data }), listen: false, jobs: false, loadDotenv: false, services: { executor: null } });
   try {
     const s = running.services;
-    const srv = await s.servers.bySlug(s.tenantId, o.server);
+    // multi-tenancy spec §3.8: `--tenant <slug>`, else the deployment's default tenant
+    const tenant = o.tenant ? await s.tenancy.bySlug(o.tenant) : await s.tenancy.defaultTenant();
+    if (!tenant) throw new Error(o.tenant ? `unknown organization ${o.tenant}` : 'this deployment has no default organization; pass --tenant <slug>');
+    const srv = await s.servers.bySlug(tenant.id, o.server);
     if (!srv) throw new Error(`unknown server ${o.server}`);
     const env = (await s.servers.environments(srv.id)).find((e) => e.slug === o.env);
     if (!env) throw new Error(`unknown environment ${o.server}/${o.env}`);
     const scopes = o.scopes.split(',').map((x) => Scope.parse(x.trim()));
-    const admin = await s.users.ensureBootstrapAdmin();
-    const { token, warnings } = await s.apiKeys.create({ tenantId: s.tenantId, name: o.name, serverId: srv.id, environmentId: env.id, scopes, ownerUserId: admin.id });
+    const boot = await s.users.ensureBootstrapAdmin();
+    // the key's owner is an admin of the key's tenant
+    const admin = boot.tenant_id === tenant.id ? boot : await s.dbs.main.db.selectFrom('users').select('id').where('tenant_id', '=', tenant.id).where('role', '=', 'admin').where('status', '=', 'active').orderBy('created_at').executeTakeFirst();
+    if (!admin) throw new Error(`organization ${tenant.slug} has no admin to own the key`);
+    const { token, warnings } = await s.apiKeys.create({ tenantId: tenant.id, name: o.name, serverId: srv.id, environmentId: env.id, scopes, ownerUserId: admin.id });
     for (const w of warnings) console.error(`warning: ${w}`);
     console.log(token);
   } finally {

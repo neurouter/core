@@ -27,7 +27,7 @@ export class LocalLinkService {
     const now = this.clock.now();
     const expiresAt = now + LOCAL_LINK_TTL_MS;
     await this.db.insertInto('local_links').values({ token_hash: sha256(token), user_id: user.id, expires_at: expiresAt, used_at: null, created_at: now }).execute();
-    this.audit.auth({ userId: user.id, action: 'auth.local_link.create' });
+    this.audit.auth({ tenantId: user.tenant_id, userId: user.id, action: 'auth.local_link.create' });
     return { url: `${this.publicUrl}/auth/link#t=${token}`, token, expiresAt, userId: user.id };
   }
 

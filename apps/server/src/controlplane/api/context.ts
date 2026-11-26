@@ -23,6 +23,9 @@ import type { UsersService } from '../users/users.service.js';
 import type { ConsolePorts } from './ports.js';
 import type { EvalsService } from '../evals/evals.service.js';
 import type { Views } from './views.js';
+import type { TenantResolver } from '../../kernel/tenancy/types.js';
+import type { EnvRefGate } from '../../kernel/secrets/env-refs.js';
+import type { ModelKeyPolicy } from '../../kernel/tenancy/types.js';
 
 /** Everything the console API needs, built by the composition root (no data-plane types). */
 export interface ApiContext {
@@ -31,7 +34,14 @@ export interface ApiContext {
   clock: Clock;
   dbs: Databases;
   coord: CoordinationStore;
-  tenantId: string;
+  /** Tenant resolution (spec §3); handlers read the request's tenant with `tenantOf(req)`, never a constant. */
+  tenancy: TenantResolver;
+  /** `env:NAME` reference gate (spec §4.9 G12). */
+  envRefs: EnvRefGate;
+  /** Server-level LLM key policy (spec §8.8). */
+  modelKeys: ModelKeyPolicy;
+  /** Console feature flags from extensions (`/api/auth/config`). */
+  features: () => Promise<Record<string, unknown>>;
   version: string;
   settings: SettingsService;
   audit: AuditRecorder;
