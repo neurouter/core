@@ -52,7 +52,7 @@ jobs:
       - run: docker build -t neurouter-core:ci .
       - run: docker image ls neurouter-core:ci
       - name: migrate entry (separate deploy step) needs only the database settings
-        run: docker run --rm -e NODE_ENV=production -e DATABASE_URL=sqlite:/tmp/m.db neurouter-core:ci migrate | grep -q '"main"'
+        run: docker run --rm -e NODE_ENV=production -e DATABASE_URL=sqlite:/tmp/m.db neurouter-core:ci migrate > migrate.txt; grep -q '"main"' migrate.txt
       - name: readyz (executor + embedder) + MCP tool call, run_script and search_tools against the baked demo config
         run: |
           set -euo pipefail
@@ -64,10 +64,10 @@ jobs:
           grep -q '"embedder":{"ok":true,"detail":"ready"}' ready.json || { docker logs nr | tail -50; exit 1; }
           TOKEN=$(docker exec -e LOG_LEVEL=warn nr node packages/cli/dist/main.js keys create --server petstore --env dev --scopes tools:read,code:run | tail -1)
           mcp() { curl -sf localhost:3000/mcp/petstore/dev -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-11-25' "$@"; }
-          mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pet_by_id","arguments":{"pet_id":1}}}' | grep -q '"id":1'
+          mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pet_by_id","arguments":{"pet_id":1}}}' > call.txt; grep -q '"id":1' call.txt || { cat call.txt; exit 1; }
           mcp -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_script","arguments":{"code":"return 6 * 7"}}}' | tee run.txt | grep -q '"result":42' || { cat run.txt; exit 1; }
-          mcp -H 'x-neurouter-exposure: code' -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_tools","arguments":{"query":"find a pet by its id","format":"json"}}}' | grep -q get_pet_by_id
-          docker logs nr 2>&1 | grep -q 'embedding model ready'
+          mcp -H 'x-neurouter-exposure: code' -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_tools","arguments":{"query":"find a pet by its id","format":"json"}}}' > search.txt; grep -q get_pet_by_id search.txt || { cat search.txt; exit 1; }
+          docker logs nr > nr.log 2>&1; grep -q 'embedding model ready' nr.log
 
   helm:
     runs-on: ubuntu-latest
