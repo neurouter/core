@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateSuite, normalizeAssertion } from './generate.js';
+import { generateSuite, normalizeAssertion, validateGenerated } from './generate.js';
 import { ScriptedLlmClient, llmResponse } from './llm/fake.js';
 import { LlmKeyError } from './llm/types.js';
 import type { GenTool } from './types.js';
@@ -69,5 +69,17 @@ describe('normalizeAssertion', () => {
     expect(normalizeAssertion({ bogus: 1 })).toEqual({ bogus: 1 });
     expect(normalizeAssertion({ called: { tool: 'issues_get', argsMatch: { owner: 'octocat', issue_number: 1 }, minTimes: 1 } })).toEqual({ type: 'called', tool: 'issues_get', args: { owner: 'octocat', issue_number: 1 }, minTimes: 1 });
     expect(normalizeAssertion({ type: 'called', tool: 'x', args: { a: 1 }, argsMatch: 'exact' })).toEqual({ type: 'called', tool: 'x', args: { a: 1 }, argsMatch: 'exact' });
+  });
+});
+
+describe('validateGenerated', () => {
+  it('maps code-mode names (<namespace>.<function>) back to tool names', async () => {
+    const g = { key: 'k', category: 'multi', prompt: 'List pets, then get pet 1', rubric: 'r', assertions: [{ type: 'called', tool: 'api.list_pets' }, { type: 'framing' }], reference_calls: [{ tool: 'api.list_pets', arguments: {} }, { tool: 'get_pet_by_id', arguments: { petId: 1 } }] };
+    const v = await validateGenerated(g as never, 'multi', { tools, executeReference: async (calls) => calls.map(() => ({ ok: true })) }, new Set());
+    expect(v.ok).toBe(true);
+    if (v.ok) {
+      expect(v.task.assertions[0]).toEqual({ type: 'called', tool: 'list_pets' });
+      expect(v.task.referenceCalls?.map((r) => r.tool)).toEqual(['list_pets', 'get_pet_by_id']);
+    }
   });
 });

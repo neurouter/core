@@ -201,8 +201,16 @@ export async function validateGenerated(
     if (p.success) assertions.push(p.data);
     else errors.push(`invalid assertion ${JSON.stringify(a).slice(0, 120)}`);
   }
-  const refs: ReferenceCall[] = Array.isArray(g.reference_calls) ? g.reference_calls.filter((r) => r && typeof r.tool === 'string').map((r) => ({ tool: r.tool, arguments: r.arguments && typeof r.arguments === 'object' ? r.arguments : {} })) : [];
   const visible = new Set(opts.tools.map((t) => t.name));
+  // models sometimes use the code-mode name (`<namespace>.<function>`); map it back to the tool name
+  const byPy = new Map(opts.tools.map((t) => [t.pyName, t.name]));
+  const canon = (t: string): string => {
+    if (visible.has(t) || !t.includes('.')) return t;
+    const tail = t.slice(t.lastIndexOf('.') + 1);
+    return byPy.get(t) ?? (visible.has(tail) ? tail : t);
+  };
+  for (const a of assertions) if (a.type === 'called' || a.type === 'not_called') a.tool = canon(a.tool);
+  const refs: ReferenceCall[] = Array.isArray(g.reference_calls) ? g.reference_calls.filter((r) => r && typeof r.tool === 'string').map((r) => ({ tool: canon(r.tool), arguments: r.arguments && typeof r.arguments === 'object' ? r.arguments : {} })) : [];
   const isKnown = (t: string) => visible.has(t) || t.startsWith('neurouter_') || t === 'search_tools' || t === 'call_tool' || t === 'run_script';
   for (const a of assertions) if ((a.type === 'called' || a.type === 'not_called') && !isKnown(a.tool)) errors.push(`unknown tool ${a.tool}`);
   for (const r of refs) if (!visible.has(r.tool)) errors.push(`unknown reference tool ${r.tool}`);
