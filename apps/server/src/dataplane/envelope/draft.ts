@@ -28,6 +28,8 @@ export interface ErrorSpec {
   tool?: ToolDef | null;
   name?: string;
   args?: Record<string, unknown>;
+  /** contract-2 arguments of the call (`cursor`, `fields`): kept in next calls that repeat or correct the call */
+  extraArgs?: Record<string, unknown>;
   /** upstream status + body (moved into the marked `upstream` field, never into the message) */
   upstream?: { status: number; body: unknown };
   issues?: ArgIssue[];

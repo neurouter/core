@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { ArgValidator } from '../pipeline/arg-validate.js';
 import { buildError, correctedArgs, fitError, mapCode, upstreamDetail } from './errors.js';
 import { isListTool, listView, widenHint } from './page.js';
+import type { CursorPayload } from '../paging/cursor.js';
+import { nextSignals, pagingPlan } from '../paging/plan.js';
 import { closestNames, nounOf, parentListCall, readCall } from './relations.js';
 import { ADVERTISED_ENVELOPE_SCHEMA, envelopeErrors, typedEnvelopeSchema, typedErrors } from './schema.js';
 import { StateTracker, taskHandle } from './state.js';
@@ -139,19 +141,30 @@ describe('list pages (contract-v2 §2.1)', () => {
     expect(isListTool(getOrder, {})).toBe(false);
   });
 
-  it('has_more is explicit: the upstream total decides, else a next-page signal; empty pages are final', () => {
-    expect(listView(listOrders, { limit: 2 }, { total_count: 20, items: [1, 2], nextCursor: 'c' }, undefined, null, {}).page).toEqual({ count: 2, total: 20, has_more: true, next_cursor: null });
-    expect(listView(listOrders, { limit: 50 }, { total_count: 2, items: [1, 2], nextCursor: 'eos' }, undefined, null, {}).page.has_more).toBe(false);
-    expect(listView(listOrders, {}, [1, 2], undefined, null, { link: '<https://x?page=2>; rel="next"' }).page).toMatchObject({ total: null, has_more: true });
-    const empty = listView(listOrders, { status: 'refunded', customer_id: 'c' }, { items: [] }, undefined, null, {});
-    expect(empty.page).toEqual({ count: 0, total: null, has_more: false, next_cursor: null, scope: { status: 'refunded', customer_id: 'c', limit: 20 } });
+  const enc = (p: CursorPayload) => `c_${JSON.stringify(p)}`;
+  const view = (args: Record<string, unknown>, value: unknown, headers: Record<string, string> = {}, cut?: Parameters<typeof listView>[3], handle: string | null = null) =>
+    listView(listOrders, args, value, cut, { encode: enc, signals: nextSignals(pagingPlan(listOrders), args, value, headers, 'https://api.acme.test', 20), handle, own: ['cursor', 'fields'] });
+
+  it('has_more is explicit: the upstream signals decide; next_cursor carries the upstream token; empty pages are final', () => {
+    expect(view({ limit: 2 }, { total_count: 20, items: [1, 2], nextCursor: 'c' }).page).toEqual({ count: 2, total: 20, has_more: true, next_cursor: enc({ k: 'u', v: 'c' }) });
+    expect(view({ limit: 50 }, { total_count: 2, items: [1, 2], nextCursor: null }).page).toEqual({ count: 2, total: 2, has_more: false, next_cursor: null });
+    expect(view({}, [1, 2], { link: '<https://api.acme.test/orders?page=2>; rel="next"' }).page).toMatchObject({ total: null, has_more: true, next_cursor: enc({ k: 'l', q: { page: '2' } }) });
+    // a Link to another origin is not followed (has_more stays honest, no cursor)
+    expect(view({}, [1, 2], { link: '<https://evil.test/orders?page=2>; rel="next"' }).page).toMatchObject({ has_more: true, next_cursor: null });
+    const empty = view({ status: 'refunded', customer_id: 'c' }, { items: [] });
+    expect(empty.page).toEqual({ count: 0, total: 0, has_more: false, next_cursor: null, scope: { status: 'refunded', customer_id: 'c', limit: 20 } });
     expect(empty.hint).toBe('0 matches for these filters (page.scope). Widen: list_orders({"status":"refunded"})');
   });
 
-  it("Neurouter's cuts: has_more, scope, and truncated.next = the stored result page", () => {
-    const v = listView(listOrders, {}, { items: [1, 2, 3] }, { totalItems: 20, returnedItems: 3, totalBytes: 2000, returnedBytes: 300 }, 'rh_x', {});
-    expect(v.page).toEqual({ count: 3, total: 20, has_more: true, next_cursor: null, scope: { limit: 20 } });
-    expect(v.truncated).toEqual({ items_omitted: 17, omitted_bytes: 1700, next: { tool: 'neurouter_read_result', args: { handle: 'rh_x', offset: 3 } } });
+  it("Neurouter's cuts are pages: has_more, scope, and a cursor into the stored result, then the upstream's next page", () => {
+    const v = view({}, { items: [1, 2, 3] }, {}, { totalItems: 20, returnedItems: 3, totalBytes: 2000, returnedBytes: 300 }, 'rh_x');
+    expect(v.page).toEqual({ count: 3, total: 20, has_more: true, next_cursor: enc({ k: 'r', h: 'rh_x', n: 3, t: 20, then: null }), scope: { limit: 20 } });
+    expect(v.truncated).toBeNull();
+    const up = view({}, { items: [1, 2, 3], nextCursor: '30' }, {}, { totalItems: 30, returnedItems: 3, totalBytes: 2000, returnedBytes: 300 }, 'rh_x');
+    expect(up.page).toMatchObject({ total: null, has_more: true, next_cursor: enc({ k: 'r', h: 'rh_x', n: 3, t: null, then: { k: 'u', v: '30' } }) });
+    // the stored result's last part hands over to the upstream's next page
+    const last = listView(listOrders, {}, { items: [4, 5] }, undefined, { encode: enc, signals: null, handle: 'rh_x', stored: { offset: 3, length: 5, total: null, then: { k: 'u', v: '30' } }, own: [] });
+    expect(last.page).toMatchObject({ count: 2, has_more: true, next_cursor: enc({ k: 'u', v: '30' }) });
     expect(widenHint(listOrders, { limit: 5 })).toBe('0 items.');
   });
 });

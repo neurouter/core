@@ -1,4 +1,4 @@
-import { GRAPHQL_ACCEPT, shapeResponse, wrapStructured } from '@neurouter/compiler';
+import { GRAPHQL_ACCEPT, MOCK_PAGING_HEADER, shapeResponse, wrapStructured } from '@neurouter/compiler';
 import {
   META_CALL_ID,
   META_DRY_RUN,
@@ -30,7 +30,10 @@ import type { RateLimiter } from '../rate-limit/limiter.js';
 import type { ResultPages } from '../shaping/result-pages.js';
 import { looksLikeInjection, scanUntrusted, UNTRUSTED_PREFIX } from '../shaping/sanitize.js';
 import { errorDraft, okDraft, type Draft, type ErrorSpec } from '../envelope/draft.js';
-import { clippedView, isListTool, listView, untrustedPaths } from '../envelope/page.js';
+import { clippedView, isListTool, listView, untrustedPaths, type ListPaging } from '../envelope/page.js';
+import { CursorError, isNeurouterCursor, type CursorBinding, type CursorCodec, type CursorPayload } from '../paging/cursor.js';
+import { projectFields } from '../paging/fields.js';
+import { applyPosition, itemsOf, nextSignals, pagingPlan, splitArgs, type NextSignals, type PagingPlan } from '../paging/plan.js';
 import { nounOf, pathId } from '../envelope/relations.js';
 import { NO_RESULT, v1Result } from '../envelope/v1.js';
 import type { TaskTracker } from '../tasks/tracker.js';
@@ -71,6 +74,8 @@ export interface InvokeOptions {
   signal?: AbortSignal;
   /** Collect planned writes (dry-run scripts). */
   planned?: PlannedChange[];
+  /** contract 2, scripts (`ops.pages`): start at this upstream page position */
+  position?: Exclude<CursorPayload, { k: 'r' }>;
 }
 
 export interface ToolOutcome {
@@ -89,6 +94,8 @@ export interface ToolOutcome {
   tool?: ToolDef;
   /** The same outcome in contract-neutral form (rendered as the contract-2 envelope). */
   draft: Draft;
+  /** contract 2, list tools: where the upstream's next page starts (scripts page with it) */
+  paging?: { more: boolean; next: Exclude<CursorPayload, { k: 'r' }> | null };
 }
 
 export interface PipelineDeps {
@@ -105,6 +112,8 @@ export interface PipelineDeps {
   now: () => number;
   publicUrl: string;
   version: string;
+  /** contract 2: signs and checks `page.next_cursor` (absent: no cursors) */
+  cursors?: CursorCodec;
   /** Records usage + traffic examples after a successful call (post-commit; never fails the call). */
   onSuccess?: (ctx: RunContext, tool: ToolDef, args: Record<string, unknown>) => void;
   log: { warn: (o: object, m: string) => void };
@@ -291,12 +300,43 @@ export class Pipeline {
     }
     step('read_only', tool.risk.write ? 'pass' : 'skip');
 
-    // 5 arguments: overlay defaults, ajv against the input schema (compiled per defHash)
-    args = applyArgTransforms(tool, rawArgs);
+    // 5 arguments. Contract 2 first takes out its own (cursor, limit, fields; contract-v2 §2.1, D6) and checks them;
+    // then overlay defaults and ajv against the upstream input schema (compiled per defHash)
+    const plan: PagingPlan | null = ctx.contract === 2 && tool.kind !== 'composite' ? pagingPlan(tool) : null;
+    const own = plan && ctx.via !== 'script' ? splitArgs(plan, rawArgs) : null;
+    const extraArgs: Record<string, unknown> = {};
+    if (own?.cursor !== undefined && plan?.names.cursor) extraArgs[plan.names.cursor] = own.cursor;
+    if (own?.fields && plan) extraArgs[plan.names.fields] = own.fields;
+    const agentArgs = own ? own.upstream : rawArgs;
+    if (own?.issues.length) {
+      step('arguments', 'fail', own.issues.map((i) => i.path).join(', '));
+      const bad = new Set(own.issues.map((i) => i.path.slice(1)));
+      return fail('allowed', 'invalid_args', 'invalid_args', `Invalid arguments for ${tool.name}: ${own.issues.map((i) => `${i.path.slice(1)} ${i.message}`).join('; ')}`, { errors: own.issues.map((i) => i.message).join('; ') }, { spec: { issues: own.issues, next: [{ tool: tool.name, args: Object.fromEntries(Object.entries(rawArgs).filter(([k]) => !bad.has(k))) }] } });
+    }
+    let position: CursorPayload | null = opts.position ?? null;
+    if (own?.cursor !== undefined && plan) {
+      const cursorArg = plan.names.cursor!;
+      const first = Object.fromEntries(Object.entries(rawArgs).filter(([k]) => k !== cursorArg));
+      if (isNeurouterCursor(own.cursor) && this.d.cursors) {
+        try {
+          position = this.d.cursors.decode(own.cursor, this.cursorBinding(ctx, tool, rawArgs, cursorArg));
+        } catch (err) {
+          const problem = err instanceof CursorError ? err.problem : 'malformed';
+          step('arguments', 'fail', `cursor ${problem}`);
+          const why = problem === 'expired' ? 'expired (cursors last 1 hour)' : problem === 'mismatch' ? 'belongs to another tool, other arguments or another credential, or was altered' : 'is not a page.next_cursor';
+          return fail('allowed', 'invalid_args', 'invalid_args', `The cursor ${why}; ${tool.name} was not called.`, { errors: `cursor ${problem}` }, { spec: { text: `The cursor ${why}; nothing was called. Repeat the first call, or pass the same other arguments.`, issues: [{ path: `/${cursorArg}`, keyword: 'cursor', params: {}, message: why }], next: [{ tool: tool.name, args: first }] } });
+        }
+      } else if (plan.cursor) agentArgs[plan.cursor.arg] = own.cursor; // an upstream cursor value (from data): passed through
+      else {
+        step('arguments', 'fail', 'cursor');
+        return fail('allowed', 'invalid_args', 'invalid_args', `${tool.name} has no upstream cursor; pass page.next_cursor as ${cursorArg}.`, { errors: 'cursor' }, { spec: { issues: [{ path: `/${cursorArg}`, keyword: 'cursor', params: {}, message: 'is not a page.next_cursor' }], next: [{ tool: tool.name, args: first }] } });
+      }
+    }
+    args = applyArgTransforms(tool, agentArgs);
     const check = this.d.args.check(tool.defHash, tool.inputSchema, args);
     if (!check.ok) {
       step('arguments', 'fail', check.errors.slice(0, 3).join('; '));
-      return fail('allowed', 'invalid_args', 'invalid_args', `Invalid arguments for ${tool.name}:\n- ${check.errors.join('\n- ')}`, { errors: check.errors.join('; '), schema: JSON.stringify(tool.inputSchema).slice(0, 1500) }, { spec: { issues: check.issues } });
+      return fail('allowed', 'invalid_args', 'invalid_args', `Invalid arguments for ${tool.name}:\n- ${check.errors.join('\n- ')}`, { errors: check.errors.join('; '), schema: JSON.stringify(tool.inputSchema).slice(0, 1500) }, { spec: { issues: check.issues, ...(own ? { args: agentArgs, extraArgs } : {}) } });
     }
     step('arguments', 'pass');
 
@@ -378,6 +418,9 @@ export class Pipeline {
       }
     } else step('confirm', 'skip');
 
+    // contract 2: the rest of a list Neurouter cut is served from the stored result (no upstream call)
+    if (position?.k === 'r') return this.storedPage(ctx, tool, rawArgs, agentArgs, position, plan!, own?.fields, { record, fail, metaBase, step, decision });
+
     // 10–11 routing, credentials, request build, invoke
     if (tool.kind === 'composite') {
       step('routing', 'fail', 'composite');
@@ -386,11 +429,14 @@ export class Pipeline {
     let upstream: UpstreamResponse;
     const env = ctx.bundle.environment;
     const specArgs = toSpecArgs(tool, args);
+    // contract 2: the page a cursor points at (upstream cursor, page, offset or Link query)
+    let extraQuery: Record<string, string | string[]> = {};
+    if (position && plan) extraQuery = applyPosition(tool, plan, specArgs, position).extraQuery;
     let urlTemplate = '';
     try {
       if (env.isMock) {
         step('routing', 'pass', 'mock');
-        upstream = await this.callMock(ctx, tool, specArgs);
+        upstream = await this.callMock(ctx, tool, specArgs, extraQuery);
       } else {
         const cred = await this.d.credentials.resolve(env.auth, {
           tenantId: ctx.tenantId,
@@ -414,7 +460,7 @@ export class Pipeline {
           const body = JSON.stringify({ query: tool.binding.document, variables });
           upstream = await this.traced(ctx, tool.name, (trace) => this.d.http.invoke(env.id, { method: 'POST', url, urlTemplate, headers: { accept: GRAPHQL_ACCEPT, 'content-type': 'application/json', 'user-agent': `neurouter/${this.d.version}`, ...lower(env.headers), ...cred.headers, ...trace }, body }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) }));
         } else {
-          const req = buildHttpRequest(tool, specArgs, { baseUrl: env.baseUrl, headers: env.headers, allowedHosts: env.allowedHosts, credentials: cred }, this.d.version);
+          const req = buildHttpRequest(tool, specArgs, { baseUrl: env.baseUrl, headers: env.headers, allowedHosts: env.allowedHosts, credentials: cred, extraQuery }, this.d.version);
           urlTemplate = req.urlTemplate;
           upstream = await this.traced(ctx, tool.name, (trace) => this.d.http.invoke(env.id, { ...req, headers: { ...req.headers, ...trace } }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) }));
         }
@@ -466,10 +512,14 @@ export class Pipeline {
     let value: unknown = body;
     let text: string;
     let shaped: ReturnType<typeof shapeResponse> | undefined;
+    // contract 2: where the upstream's next page starts (read from the raw body, before shaping drops keys)
+    const signals = plan?.list ? nextSignals(plan, specArgs, body, upstream.headers, env.isMock ? MOCK_BASE : env.baseUrl, sizeDefault(tool, plan)) : null;
     try {
       // scripts get whole (shaped) values: no maxItems/maxBytes on inner calls; the script reduces the data
       // and run_script's result-size limit bounds what it returns. Tool-mode results keep both limits.
-      shaped = shapeResponse(body, tool.shaping, ctx.via === 'script' ? { limits: false } : { maxBytes: 64 * 1024 });
+      // Contract 2 `fields` replaces the overlay `include` (the default set) and is applied after shaping, on the
+      // agent-visible names; a projection gets the whole 64 KB tool-mode budget.
+      shaped = own?.fields ? this.shapeFields(body, tool, own.fields, plan!.list) : shapeResponse(body, tool.shaping, ctx.via === 'script' ? { limits: false } : { maxBytes: 64 * 1024 });
       value = shaped.value;
       if (shaped.truncated) {
         const handle = await this.d.pages.store(ctx.tenantId, ctx.credentialKey, shaped.full);
@@ -505,19 +555,85 @@ export class Pipeline {
       this.d.log.warn({ err }, 'post-call hook failed');
     }
     void urlTemplate;
-    const draft = this.successDraft(tool, rawArgs, value, shaped?.truncated, (meta[META_RESULT_HANDLE] as string | undefined) ?? null, upstream.headers, decision, metaBase());
-    return { ok: true, unknown: false, decision, status: 'ok', value, result: v1Result(text, wrapStructured(value), meta), auditId, tool, draft };
+    const handle = (meta[META_RESULT_HANDLE] as string | undefined) ?? null;
+    const draft = this.successDraft(ctx, tool, rawArgs, value, shaped?.truncated, { signals, handle, plan }, upstream.headers, decision, metaBase());
+    return { ok: true, unknown: false, decision, status: 'ok', value, result: v1Result(text, wrapStructured(value), meta), auditId, tool, draft, ...(signals ? { paging: { more: signals.more, next: signals.next } } : {}) };
   }
 
-  /** Contract-neutral success: `page` on list tools, `truncated` for Neurouter's cuts, flags for instruction-like text, `wrote` after writes. */
-  private successDraft(tool: ToolDef, args: Record<string, unknown>, value: unknown, cut: Parameters<typeof listView>[3], handle: string | null, headers: Record<string, string>, decision: AuditDecision, meta: Record<string, unknown>): Draft {
+  /** What a contract-2 cursor of this call is bound to (the agent's arguments except the cursor). */
+  private cursorBinding(ctx: RunContext, tool: ToolDef, rawArgs: Record<string, unknown>, cursorArg: string): CursorBinding {
+    return { tenantId: ctx.tenantId, credentialKey: ctx.credentialKey, tool: tool.name, args: Object.fromEntries(Object.entries(rawArgs).filter(([k]) => k !== cursorArg && rawArgs[k] !== undefined)), contract: 2 };
+  }
+
+  /** The encoder for `page.next_cursor` of this call (null without a codec or outside contract 2). */
+  private cursorEncoder(ctx: RunContext, tool: ToolDef, rawArgs: Record<string, unknown>, plan: PagingPlan | null): (p: CursorPayload) => string | null {
+    const codec = this.d.cursors;
+    if (!codec || !plan?.names.cursor || ctx.contract !== 2) return () => null;
+    const binding = this.cursorBinding(ctx, tool, rawArgs, plan.names.cursor);
+    return (p) => codec.encode(p, binding);
+  }
+
+  /** Shaping with a `fields` projection: shaped without `include` or limits, projected, then cut to the limits. */
+  private shapeFields(body: unknown, tool: ToolDef, fields: string[], list: boolean): ReturnType<typeof shapeResponse> {
+    const { include: _i, maxItems, maxBytes, ...rest } = tool.shaping ?? {};
+    const base = shapeResponse(body, rest, { limits: false });
+    const projected = projectFields(base.value, fields, list);
+    return shapeResponse(projected, { ...(maxItems !== undefined ? { maxItems } : {}), maxBytes: Math.max(maxBytes ?? 0, 64 * 1024) }, { maxBytes: 64 * 1024 });
+  }
+
+  /**
+   * Contract 2: the next part of a list Neurouter cut, from the stored result (`r` cursor). Same policy steps as an
+   * upstream call up to here (ACL, policies, rate limit); the items are cut to the tool's limits again, and the
+   * page after the stored ones is the upstream's next page.
+   */
+  private async storedPage(
+    ctx: RunContext,
+    tool: ToolDef,
+    rawArgs: Record<string, unknown>,
+    agentArgs: Record<string, unknown>,
+    pos: Extract<CursorPayload, { k: 'r' }>,
+    plan: PagingPlan,
+    fields: string[] | undefined,
+    h: { record: (d: AuditDecision, s: AuditStatus, extra?: Partial<AuditEventInput>) => void; fail: (decision: AuditDecision, status: AuditStatus, code: ErrorCode, message: string, detail: Record<string, unknown>, extra?: { spec?: Partial<ErrorSpec> }) => Promise<ToolOutcome>; metaBase: () => Record<string, unknown>; step: (s: PolicyStepName, r: PolicyStepResult, detail?: string) => void; decision: AuditDecision },
+  ): Promise<ToolOutcome> {
+    const full = await this.d.pages.load(ctx.tenantId, ctx.credentialKey, pos.h);
+    const list = itemsOf(full);
+    if (full === null || !list) {
+      h.step('routing', 'fail', 'result page expired');
+      const first = Object.fromEntries(Object.entries(rawArgs).filter(([k]) => k !== plan.names.cursor));
+      return h.fail(h.decision, 'invalid_args', 'invalid_args', `The cursor's stored page expired; ${tool.name} was not called.`, { errors: 'result page expired' }, { spec: { text: 'The stored pages behind this cursor expired (1 hour); nothing was called. Repeat the first call.', next: [{ tool: tool.name, args: first }] } });
+    }
+    h.step('routing', 'pass', 'result page');
+    const rest = list.slice(pos.n);
+    const remainder = Array.isArray(full) ? rest : Object.fromEntries(Object.entries(full as Record<string, unknown>).map(([k, v]) => [k, v === list ? rest : v]));
+    const { maxItems, maxBytes } = tool.shaping ?? {};
+    const shaped = shapeResponse(remainder, { ...(maxItems !== undefined ? { maxItems } : {}), ...(maxBytes !== undefined ? { maxBytes: fields ? Math.max(maxBytes, 64 * 1024) : maxBytes } : {}) }, { maxBytes: 64 * 1024 });
+    h.step('response', 'pass', 'result page');
+    h.record(h.decision, 'ok', { output: shaped.value, decisionReason: 'result_page' });
+    const meta = h.metaBase();
+    const paging: ListPaging = {
+      encode: this.cursorEncoder(ctx, tool, rawArgs, plan),
+      signals: null,
+      handle: pos.h,
+      stored: { offset: pos.n, length: list.length, total: pos.t ?? null, then: pos.then ?? null },
+      own: [plan.names.cursor, plan.names.fields].filter((x): x is string => Boolean(x)),
+    };
+    const v = listView(tool, agentArgs, shaped.value, shaped.truncated, paging);
+    const draft = okDraft(shaped.value, { page: v.page, truncated: v.truncated, ...(v.hint ? { hint: v.hint } : {}), meta });
+    return { ok: true, unknown: false, decision: h.decision, status: 'ok', value: shaped.value, result: v1Result(compactJson(shaped.value), wrapStructured(shaped.value), meta), auditId: String(meta[META_CALL_ID]), tool, draft };
+  }
+
+  /** Contract-neutral success: `page` on list tools, `truncated` for clipped objects, flags for instruction-like text, `wrote` after writes. */
+  private successDraft(ctx: RunContext, tool: ToolDef, args: Record<string, unknown>, value: unknown, cut: Parameters<typeof listView>[3], p: { signals: NextSignals | null; handle: string | null; plan: PagingPlan | null }, headers: Record<string, string>, decision: AuditDecision, meta: Record<string, unknown>): Draft {
+    void headers;
     const extra: Omit<Draft, 'ok' | 'data'> = { meta };
+    const own = p.plan ? [p.plan.names.cursor, p.plan.names.fields].filter((x): x is string => Boolean(x)) : [];
     if (isListTool(tool, value)) {
-      const v = listView(tool, args, value, cut, handle, headers);
+      const v = listView(tool, args, value, cut, { encode: this.cursorEncoder(ctx, tool, args, p.plan), signals: p.signals, handle: p.handle, own });
       extra.page = v.page;
       extra.truncated = v.truncated;
       if (v.hint) extra.hint = v.hint;
-    } else if (cut) extra.truncated = clippedView(cut, handle);
+    } else if (cut) extra.truncated = clippedView(cut, tool, args, p.plan?.names.fields ?? 'fields', p.handle);
     const flagged = untrustedPaths(value, looksLikeInjection);
     if (flagged.length) {
       extra.flags = ['instruction_like_text'];
@@ -556,7 +672,7 @@ export class Pipeline {
     return `Allow ${ctx.client.name ?? 'this agent'} to ${tool.title || tool.name} in ${envLabel(ctx)}?\n${p.method} ${p.path}\n${summary}`;
   }
 
-  private async callMock(ctx: RunContext, tool: ToolDef, specArgs: Record<string, unknown>): Promise<UpstreamResponse> {
+  private async callMock(ctx: RunContext, tool: ToolDef, specArgs: Record<string, unknown>, extraQuery: Record<string, string | string[]> = {}): Promise<UpstreamResponse> {
     // bound to the authenticated request: its tenant, its environment, `env` unless an eval namespace was accepted (G13)
     const ns = { tenantId: ctx.tenantId, environmentId: ctx.environment.id, name: ctx.mockNamespace ?? 'env' };
     const started = this.d.now();
@@ -566,7 +682,7 @@ export class Pipeline {
     let body: unknown;
     const headers: Record<string, string> = {};
     if (tool.binding.type === 'http') {
-      const req = buildHttpRequest(tool, specArgs, { baseUrl: 'http://mock.invalid', headers: {}, allowedHosts: ['mock.invalid'], credentials: { headers: {}, query: {} } }, this.d.version);
+      const req = buildHttpRequest(tool, specArgs, { baseUrl: MOCK_BASE, headers: {}, allowedHosts: ['mock.invalid'], credentials: { headers: {}, query: {} }, extraQuery }, this.d.version);
       method = req.method;
       path = req.url.pathname;
       query = {};
@@ -576,6 +692,8 @@ export class Pipeline {
       }
       body = req.body !== undefined ? JSON.parse(req.body) : undefined;
       Object.assign(headers, req.headers);
+      // contract 2 follows the mock's next-page tokens, so they must be real ones
+      if (ctx.contract === 2) headers[MOCK_PAGING_HEADER] = 'tokens';
     } else if (tool.binding.type === 'graphql') {
       path = tool.binding.endpointPath ?? '/graphql';
       body = { query: tool.binding.document, variables: Object.fromEntries(tool.binding.variables.map((v) => [v.name, specArgs[v.arg]]).filter(([, v]) => v !== undefined)) };
@@ -584,6 +702,16 @@ export class Pipeline {
     const json = res.body === undefined ? '' : JSON.stringify(res.body);
     return { status: res.status, body: res.body ?? null, bytes: Buffer.byteLength(json ?? ''), headers: Object.fromEntries(Object.entries(res.headers ?? {}).filter(([k]) => /^(link|retry-after|x-ratelimit-.*)$/i.test(k)).map(([k, v]) => [k.toLowerCase(), v])), latencyMs: this.d.now() - started };
   }
+}
+
+/** The base URL the in-process mock is addressed with (Link URLs from the mock resolve against it). */
+const MOCK_BASE = 'http://mock.invalid';
+
+/** The default page size of a tool's upstream page-size argument (page/offset arithmetic). */
+function sizeDefault(tool: ToolDef, plan: PagingPlan): number | undefined {
+  if (!plan.size) return undefined;
+  const p = (tool.inputSchema.properties as Record<string, { default?: unknown }> | undefined)?.[plan.size.arg];
+  return typeof p?.default === 'number' ? p.default : undefined;
 }
 
 /** `PROD` for production environments (the confirmation prompts say so loudly), else the environment slug. */

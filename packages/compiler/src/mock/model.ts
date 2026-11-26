@@ -29,7 +29,7 @@ export interface MockOperation {
   /** PUT/PATCH on a collection path updating the item named by the body id (Petstore `PUT /pet`) */
   bodyId?: boolean;
   /** pagination params understood by the list */
-  paging: { limit?: string; page?: string; offset?: string; cursor?: string };
+  paging: { limit?: string; page?: string; offset?: string; cursor?: string; startingAfter?: string };
   example?: unknown;
 }
 
@@ -257,7 +257,8 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
         if (['limit', 'per_page', 'page_size', 'pagesize'].includes(n)) base.paging.limit = p.name;
         else if (n === 'page') base.paging.page = p.name;
         else if (n === 'offset') base.paging.offset = p.name;
-        else if (['cursor', 'page_token', 'after'].includes(n)) base.paging.cursor = p.name;
+        else if (['cursor', 'page_token', 'pagetoken', 'after'].includes(n)) base.paging.cursor = p.name;
+        else if (n === 'starting_after') base.paging.startingAfter = p.name;
         else if (fields.has(p.name)) base.filters[p.name] = p.name;
         else {
           const match = [...fields].find((f) => f.toLowerCase() === n);

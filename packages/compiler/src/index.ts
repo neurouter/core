@@ -40,7 +40,7 @@ export {
   type MockScope,
   type MockStateStore,
 } from './mock/store.js';
-export { handleMockRequest, type MockRequest, type MockResponse } from './mock/handler.js';
+export { handleMockRequest, MOCK_PAGING_HEADER, type MockRequest, type MockResponse } from './mock/handler.js';
 export { handleGraphqlMock } from './mock/graphql.js';
 export { generateValue, seededFaker, hashSeed, stringFits, exampleFits } from './mock/generate.js';
 export { sha256Hex, jcsHash } from './util.js';
