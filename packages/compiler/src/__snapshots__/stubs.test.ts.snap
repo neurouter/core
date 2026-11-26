@@ -3,7 +3,7 @@
 exports[`python stubs > matches the Petstore snapshot 1`] = `
 "# petstore.pyi  (generated; Neurouter compiler 0.1.0; build 1ff2025816a6)
 # Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type, iter, next, repr, chr, ord, hex, print (type takes one argument). No map/filter (use comprehensions), no getattr/hasattr (results are dicts).
-# Inside run_script, tool results are whole values (no byte truncation; an overlay maxItems still caps lists).
+# Inside run_script, tool results are whole values (no maxItems/maxBytes truncation); keep what you return small.
 from typing import Any, Literal, NotRequired, TypedDict
 
 class Category(TypedDict):
@@ -48,40 +48,77 @@ class User(TypedDict):
 def update_pet(*, name: str, photoUrls: list[str], id: int | None = None, category: Category | None = None, tags: list[Tag] | None = None, status: Literal["available", "pending", "sold"] | None = None) -> dict[str, Any]:
     """Update an existing pet.
 
+    Args:
+        name (required)
+        photoUrls (required)
+        id
+        category
+        tags
+        status: pet status in the store
+
     WRITE: in dry_run mode returns a planned change instead of calling the API."""
 
 def add_pet(*, name: str, photoUrls: list[str], id: int | None = None, category: Category | None = None, tags: list[Tag] | None = None, status: Literal["available", "pending", "sold"] | None = None) -> dict[str, Any]:
     """Add a new pet to the store.
+
+    Args:
+        name (required)
+        photoUrls (required)
+        id
+        category
+        tags
+        status: pet status in the store
 
     WRITE: in dry_run mode returns a planned change instead of calling the API."""
 
 def find_pets_by_status(*, status: Literal["available", "pending", "sold"]) -> list[Pet]:
     """Finds Pets by status.
 
+    Args:
+        status (required): Status values that need to be considered for filter
+
     Read-only."""
 
 def find_pets_by_tags(*, tags: list[str]) -> list[Pet]:
     """Finds Pets by tags.
+
+    Args:
+        tags (required): Tags to filter by
 
     Read-only."""
 
 def get_pet_by_id(*, pet_id: int) -> Pet:
     """Find pet by ID.
 
+    Args:
+        pet_id (required): ID of pet to return
+
     Read-only."""
 
 def update_pet_with_form(*, pet_id: int, name: str | None = None, status: str | None = None) -> dict[str, Any]:
     """Updates a pet in the store with form data.
+
+    Args:
+        pet_id (required): ID of pet that needs to be updated
+        name: Name of pet that needs to be updated
+        status: Status of pet that needs to be updated
 
     WRITE: in dry_run mode returns a planned change instead of calling the API."""
 
 def delete_pet(*, pet_id: int) -> dict[str, Any]:
     """Deletes a pet.
 
-    WRITE: in dry_run mode returns a planned change instead of calling the API."""
+    Args:
+        pet_id (required): Pet id to delete
+
+    WRITE (destructive): in dry_run mode returns a planned change instead of calling the API."""
 
 def upload_file(*, pet_id: int, additional_metadata: str | None = None) -> dict[str, Any]:
     """Uploads an image.
+
+    Args:
+        pet_id (required): ID of pet to update
+        additional_metadata: Additional Metadata
 
     WRITE: in dry_run mode returns a planned change instead of calling the API."""
 
@@ -93,30 +130,61 @@ def get_inventory() -> dict[str, int]:
 def place_order(*, id: int | None = None, petId: int | None = None, quantity: int | None = None, shipDate: str | None = None, status: Literal["placed", "approved", "delivered"] | None = None, complete: bool | None = None) -> dict[str, Any]:
     """Place an order for a pet.
 
+    Args:
+        id
+        petId
+        quantity
+        shipDate
+        status: Order Status
+        complete
+
     WRITE: in dry_run mode returns a planned change instead of calling the API."""
 
 def get_order_by_id(*, order_id: int) -> Order:
     """Find purchase order by ID.
+
+    Args:
+        order_id (required): ID of order that needs to be fetched
 
     Read-only."""
 
 def delete_order(*, order_id: int) -> dict[str, Any]:
     """Delete purchase order by identifier.
 
-    WRITE: in dry_run mode returns a planned change instead of calling the API."""
+    Args:
+        order_id (required): ID of the order that needs to be deleted
+
+    WRITE (destructive): in dry_run mode returns a planned change instead of calling the API."""
 
 def create_user(*, id: int | None = None, username: str | None = None, firstName: str | None = None, lastName: str | None = None, email: str | None = None, password: str | None = None, phone: str | None = None, userStatus: int | None = None) -> dict[str, Any]:
     """Create user.
+
+    Args:
+        id
+        username
+        firstName
+        lastName
+        email
+        password
+        phone
+        userStatus: User Status
 
     WRITE: in dry_run mode returns a planned change instead of calling the API."""
 
 def create_users_with_list_input(*, body: list[User] | None = None) -> dict[str, Any]:
     """Creates list of users with given input array.
 
+    Args:
+        body
+
     WRITE: in dry_run mode returns a planned change instead of calling the API."""
 
 def login_user(*, username: str | None = None, password: str | None = None) -> str:
     """Logs user into the system.
+
+    Args:
+        username: The user name for login
+        password: The password for login in clear text
 
     Read-only."""
 
@@ -128,16 +196,26 @@ def logout_user() -> Any:
 def get_user_by_name(*, username: str) -> User:
     """Get user by user name.
 
+    Args:
+        username (required): The name that needs to be fetched. Use user1 for testing
+
     Read-only."""
 
 def update_user(*, username: str, body: User | None = None) -> dict[str, Any]:
     """Update user resource.
+
+    Args:
+        username (required): name that need to be deleted
+        body: Update an existent user in the store
 
     WRITE: in dry_run mode returns a planned change instead of calling the API."""
 
 def delete_user(*, username: str) -> dict[str, Any]:
     """Delete user resource.
 
-    WRITE: in dry_run mode returns a planned change instead of calling the API."""
+    Args:
+        username (required): The name that needs to be deleted
+
+    WRITE (destructive): in dry_run mode returns a planned change instead of calling the API."""
 "
 `;

@@ -16,7 +16,7 @@ describe('python stubs', () => {
     expect(pyi).toMatch(/^# notes\.pyi {2}\(generated; Neurouter compiler 0\.1\.0; build [0-9a-f]{12}\)\n# Built-ins: len, range, .*isinstance, type, iter, next.*\n# Inside run_script, tool results are whole values .*\nfrom typing import Any, Literal, NotRequired, TypedDict\n/);
     expect(pyi).toContain('class Note(TypedDict):\n    id: int\n    title: str\n    body: NotRequired[str]\n    state: NotRequired[Literal["open", "closed"]]');
     expect(pyi).toContain('def list_notes(*, project: str, state: Literal["open", "closed"] | None = None, per_page: int = 30, page: int = 1) -> list[Note]:');
-    expect(pyi).toContain('Read-only. Returns at most 5 items; more are summarised in the result.');
+    expect(pyi).toContain('    """List notes in a project\n\n    Args:\n        project (required): Project key\n        state: Filter by state\n        per_page: Page size\n        page: Page number\n\n    Read-only."""');
     expect(pyi).toContain('def create_note(*, project: str, title: str, body: str | None = None, state: Literal["open", "closed"] | None = None) -> dict[str, Any]:');
     expect(pyi).toContain('WRITE: in dry_run mode returns a planned change instead of calling the API.');
   });

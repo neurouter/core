@@ -42,6 +42,8 @@ export interface McpRouteDeps {
   /** Pinned-by-usage tools per environment (top-N by 7-day calls, §9.4). */
   usagePinned?: (environmentId: string) => string[];
   nativeSearchClients?: () => string[];
+  /** Per-tool outputSchema in tools/list (default none). */
+  outputSchema?: 'none' | 'typed';
   externalIssuer?: string | null;
   keepAliveMs?: number;
   now: () => number;
@@ -196,7 +198,7 @@ export function buildServerFactory(d: McpRouteDeps) {
       requestId: newId(),
       ...(rc.exposureOverride ? { exposureOverride: rc.exposureOverride } : {}),
     };
-    const surfaceOpts = { executorHealthy: d.executorHealthy(), usagePinned: d.usagePinned?.(b.environment.id) ?? [], nativeSearchClients: d.nativeSearchClients?.() ?? [] };
+    const surfaceOpts = { executorHealthy: d.executorHealthy(), usagePinned: d.usagePinned?.(b.environment.id) ?? [], nativeSearchClients: d.nativeSearchClients?.() ?? [], outputSchema: d.outputSchema ?? 'none' };
     const provisionalSurface = buildSurface(provisional, surfaceOpts);
     const server = new Server(
       { name: `neurouter-${b.server.slug}`, title: `${b.server.name} via Neurouter`, version: d.version },

@@ -2,7 +2,7 @@
  * OpenAPI 3.x → tool model (backend spec §8.2). Input: an OAS 3.1 document (already upgraded).
  */
 import type { Diagnostic, HttpBinding, HttpParam, JsonSchema, ToolDef, ToolExample } from '@neurouter/shared';
-import { nameFromMethodPath, snakeCase, toToolName, uniquify } from '../naming.js';
+import { destructiveVerb, nameFromMethodPath, snakeCase, toToolName, uniquify } from '../naming.js';
 import { escapePointer, isObj, type Obj } from '../util.js';
 import { OUTPUT_SCHEMA_LIMITS, SchemaResolver } from './schema.js';
 
@@ -253,7 +253,9 @@ export function compileOpenApi(doc: Obj, opts: { maxTools: number }): OpenApiCom
 
       // ---- risk
       const readOnly = METHOD === 'GET' || METHOD === 'HEAD';
-      const risk = { readOnly, destructive: METHOD === 'DELETE', idempotent: ['GET', 'HEAD', 'PUT', 'DELETE'].includes(METHOD), openWorld: true, write: !readOnly };
+      // destructive: DELETE, or a write whose name/summary names an irreversible effect (cancel, refund, revoke, …);
+      // overlays (`risk`) and `x-neurouter-risk` override it
+      const risk = { readOnly, destructive: METHOD === 'DELETE' || (!readOnly && destructiveVerb(operationId, baseName, typeof op.summary === 'string' ? op.summary : null) !== null), idempotent: ['GET', 'HEAD', 'PUT', 'DELETE'].includes(METHOD), openWorld: true, write: !readOnly };
       const xr = op['x-neurouter-risk'];
       if (isObj(xr)) for (const k of Object.keys(risk) as Array<keyof typeof risk>) if (typeof xr[k] === 'boolean') risk[k] = xr[k] as boolean;
       if (isObj(xr) && typeof xr.readOnly === 'boolean' && typeof xr.write !== 'boolean') risk.write = !risk.readOnly;

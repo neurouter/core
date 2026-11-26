@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { LocalExecutor, type RunRequest } from '@neurouter/executor';
-import { wrapScript } from './wrap.js';
+import { iterGeneratorsInNext, wrapScript } from './wrap.js';
 
 describe('wrapScript', () => {
   it('wraps the body in a function and keeps explicit returns', () => {
@@ -76,5 +76,14 @@ describe('wrapScript + real Monty (LocalExecutor)', () => {
     expect(r.status).toBe('script_error');
     expect(r.error).toMatchObject({ type: 'KeyError', line: 3 });
     expect(r.error?.traceback).toMatch(/script\.py", line 3/);
+  });
+});
+
+describe('next() on generator expressions (Monty evaluates them to lists)', () => {
+  it('wraps the first argument of next(genexpr) in iter(), and nothing else', () => {
+    expect(iterGeneratorsInNext('a = next(x for x in xs if x > 1)')).toBe('a = next(iter(x for x in xs if x > 1))');
+    expect(iterGeneratorsInNext('a = next((x for x in xs), None)')).toBe('a = next(iter((x for x in xs)), None)');
+    expect(iterGeneratorsInNext('a = next(it)\nb = next(it, 0)\nc = obj.next(x for x in y)\nd = next([x for x in y])')).toBe('a = next(it)\nb = next(it, 0)\nc = obj.next(x for x in y)\nd = next([x for x in y])');
+    expect(iterGeneratorsInNext('s = "next(x for x in y)"')).toBe('s = "next(x for x in y)"');
   });
 });

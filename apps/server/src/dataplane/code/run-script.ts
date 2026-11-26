@@ -26,7 +26,7 @@ export const RUN_SCRIPT_DEFINITION = {
   name: 'run_script',
   title: 'Run a Python script against the API',
   description:
-    'Run a short Python script that calls API tools as functions (e.g. github.list_issues(owner=..., repo=...)) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins (len, sorted, isinstance, type, iter/next, …; no map/filter/getattr) and ops.* helpers. Tool results are dicts/lists, and inside scripts they are never cut to a byte size (an overlay maxItems still caps lists; the script result limit applies to what you return). Use mode="dry_run" to see planned writes without executing them. Get function signatures from search_tools.',
+    'Run a short Python script that calls API tools as functions (e.g. <namespace>.<function>(arg=...)) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins (len, sorted, isinstance, type, iter/next, …; no map/filter/getattr) and ops.* helpers. Tool results are whole dicts/lists inside scripts (no maxItems/maxBytes cuts); the script result limit applies to what you return. Use mode="dry_run" to see planned writes without executing them. Get function signatures from search_tools.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -37,8 +37,8 @@ export const RUN_SCRIPT_DEFINITION = {
     required: ['code'],
     additionalProperties: false,
   },
-  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-} as const;
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+};
 
 export interface RunScriptDeps {
   db: Kysely<MainDB>;
@@ -73,6 +73,34 @@ export function allowedTools(ctx: RunContext): ToolDef[] {
     if (t.risk.write && (!ctx.principal.scopes.includes('tools:write') || !writeEnabled(ctx, t))) return false;
     return true;
   });
+}
+
+/** A call of a real tool of this server for the run_script example: spec/overlay example args, else placeholders. */
+export function exampleCall(tools: ToolDef[]): string | null {
+  const t = tools.find((x) => !x.risk.write && x.examples.length) ?? tools.find((x) => !x.risk.write) ?? tools[0];
+  if (!t) return null;
+  const props = (t.inputSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const req = Array.isArray(t.inputSchema.required) ? (t.inputSchema.required as string[]) : [];
+  const ex = t.examples[0]?.arguments ?? {};
+  const py = (v: unknown): string => (v === null ? 'None' : v === true ? 'True' : v === false ? 'False' : typeof v === 'string' ? JSON.stringify(v) : typeof v === 'number' ? String(v) : '...');
+  const placeholder = (p: Record<string, unknown> | undefined): string => (Array.isArray(p?.enum) && p.enum.length ? py(p.enum[0]) : p?.type === 'integer' || p?.type === 'number' ? '1' : p?.type === 'boolean' ? 'True' : '"..."');
+  const map = pyArgMap(t);
+  const inv = Object.fromEntries(Object.entries(map).map(([k, v]) => [v, k]));
+  const args = req.slice(0, 4).map((a) => `${inv[a] ?? a}=${a in ex ? py(ex[a]) : placeholder(props[a])}`);
+  return `${t.pyName}(${args.join(', ')})`;
+}
+
+/**
+ * The run_script entry for this principal: the example names a real function of the server, and the
+ * annotations say what a script can do here (writes possible → not read-only; destructive when any
+ * callable tool is destructive).
+ */
+export function runScriptEntry(ctx: RunContext): typeof RUN_SCRIPT_DEFINITION & { annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean } } {
+  const tools = allowedTools(ctx);
+  const call = exampleCall(tools);
+  const writes = tools.some((t) => t.risk.write);
+  const description = call ? RUN_SCRIPT_DEFINITION.description.replace('(e.g. <namespace>.<function>(arg=...))', `(e.g. ${call})`) : RUN_SCRIPT_DEFINITION.description;
+  return { ...RUN_SCRIPT_DEFINITION, description, annotations: { readOnlyHint: !writes, destructiveHint: tools.some((t) => t.risk.write && t.risk.destructive), idempotentHint: false, openWorldHint: true } };
 }
 
 /** Whether `run_script` is available to this principal (§9.3). */

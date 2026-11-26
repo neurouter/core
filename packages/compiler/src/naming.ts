@@ -94,3 +94,21 @@ export function isVerb(word: string): boolean {
   if (w.endsWith('ing') && VERBS.has(w.slice(0, -3) + 'e')) return true;
   return false;
 }
+
+/** Effect verbs that make a write destructive (irreversible or hard to undo). */
+export const DESTRUCTIVE_VERBS = ['cancel', 'delete', 'remove', 'close', 'merge', 'refund', 'revoke', 'archive', 'void', 'reset', 'overwrite', 'purge', 'destroy', 'terminate', 'wipe', 'erase', 'disable', 'deactivate', 'suspend', 'reject', 'decline', 'expire', 'unpublish', 'uninstall', 'unlink', 'detach'] as const;
+
+/**
+ * The destructive effect verb in a write's name or summary (`cancel_order`, "Refund a charge"), or
+ * null. Words are matched whole (snake_case/camelCase split), so "disclosure" is not "close".
+ */
+export function destructiveVerb(...texts: Array<string | null | undefined>): string | null {
+  const words = new Set(
+    texts
+      .filter((t): t is string => typeof t === 'string')
+      .flatMap((t) => t.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/))
+      .filter(Boolean),
+  );
+  for (const v of DESTRUCTIVE_VERBS) if (words.has(v) || words.has(`${v}s`) || words.has(`${v}d`) || words.has(`${v}ed`)) return v;
+  return null;
+}

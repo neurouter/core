@@ -23,7 +23,7 @@ import {
   type GraphQLSchema,
 } from 'graphql';
 import type { Diagnostic, GraphqlBinding, JsonSchema, ToolDef } from '@neurouter/shared';
-import { toToolName, uniquify } from '../naming.js';
+import { toToolName, uniquify, destructiveVerb } from '../naming.js';
 import { isObj } from '../util.js';
 
 export interface GraphqlCompileOutput {
@@ -213,7 +213,7 @@ export function compileGraphql(schema: GraphQLSchema, opts: { selectionDepth: nu
         inputSchema: { type: 'object', properties: props, ...(required.length ? { required } : {}), additionalProperties: false },
         outputSchema: outSchema,
         binding,
-        risk: { readOnly: !write, destructive: write && /^(delete|remove|destroy)/i.test(field.name), idempotent: !write, openWorld: true, write },
+        risk: { readOnly: !write, destructive: write && destructiveVerb(field.name) !== null, idempotent: !write, openWorld: true, write },
         tags: [],
         hidden: false,
         pinned: false,

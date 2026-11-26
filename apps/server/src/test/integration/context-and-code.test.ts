@@ -328,12 +328,17 @@ return {"checked": len(issues), "labelled": [i["number"] for i in stale[:3]]}`;
     await c.close();
   }, 60_000);
 
-  it('run_script reads whole tool results where tool mode gets the maxBytes preview; unsupported built-ins get a hint', async () => {
+  it('maxBytes clips fields in tool mode (no {$truncated} object), scripts read whole values; built-ins and next(genexpr) work', async () => {
     const c = await mcpClient(s, 'petsmall', 'dev', await keyFor(s, 'petsmall', 'dev', ['tools:read', 'code:run']));
-    // tool mode: the overlay 256-byte cap gives the documented preview object
+    // tool mode: over the overlay's 256-byte cap the pet keeps its shape; clipped paths are reported
     const tool = await c.callTool({ name: 'get_pet_by_id', arguments: { pet_id: 1 } });
-    expect(tool.structuredContent).toMatchObject({ $truncated: true });
-    // in a script the same call is the whole value (fields readable, no {$truncated, preview})
+    expect(tool.isError, text(tool)).toBeFalsy();
+    expect(tool.structuredContent).not.toHaveProperty('$truncated');
+    expect(tool.structuredContent).toMatchObject({ id: 1 });
+    const meta = tool._meta as Record<string, unknown>;
+    expect((meta['dev.neurouter/truncated'] as { fields: string[] }).fields.length).toBeGreaterThan(0);
+    expect(text(tool)).toMatch(/Clipped to fit: .*Call neurouter_read_result/);
+    // in a script the same call is the whole value
     const r = await c.callTool({ name: 'run_script', arguments: { code: 'p = petsmall.get_pet_by_id(pet_id=1)\nreturn {"id": p["id"], "has_name": "name" in p, "kind": str(type(p)), "truncated": "$truncated" in p}' } });
     expect(r.structuredContent, text(r)).toMatchObject({ status: 'ok', result: { id: 1, has_name: true, kind: "<class 'dict'>", truncated: false } });
     const m = await c.callTool({ name: 'run_script', arguments: { code: 'return list(map(str, [1, 2]))' } });
@@ -341,9 +346,37 @@ return {"checked": len(issues), "labelled": [i["number"] for i in stale[:3]]}`;
     expect(err.status).toBe('type_error');
     expect(err.error.hint).toContain('map is not available in scripts: use a list comprehension');
     expect(err.error.hint).toContain('iter, next');
-    const it = await c.callTool({ name: 'run_script', arguments: { code: 'xs = iter([3, 4])\nreturn [next(xs), next(xs, None), next(xs, "end")]' } });
-    expect(it.structuredContent).toMatchObject({ status: 'ok', result: [3, 4, 'end'] });
+    const it = await c.callTool({ name: 'run_script', arguments: { code: 'xs = iter([3, 4])\nfirst = next(x for x in [1, 2, 3] if x > 1)\nnone = next((x for x in [1] if x > 5), None)\nreturn [next(xs), next(xs, None), next(xs, "end"), first, none]' } });
+    expect(it.structuredContent, text(it)).toMatchObject({ status: 'ok', result: [3, 4, 'end', 2, null] });
     await c.close();
+  }, 60_000);
+
+  it('tools/list: no per-tool outputSchema, explicit annotations everywhere, run_script example names a real function', async () => {
+    const c = await mcpClient(s, 'petstore', 'dev', await keyFor(s, 'petstore', 'dev', ['tools:read', 'tools:write', 'code:run']));
+    const tools = (await c.listTools()).tools;
+    expect(tools.length).toBeGreaterThan(3);
+    for (const t of tools) {
+      expect(t, t.name).not.toHaveProperty('outputSchema');
+      for (const k of ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']) expect(typeof (t.annotations as Record<string, unknown> | undefined)?.[k], `${t.name}.${k}`).toBe('boolean');
+    }
+    const rs = tools.find((t) => t.name === 'run_script');
+    if (rs) {
+      expect(rs.description).toMatch(/e\.g\. petstore\.\w+\(/);
+      expect(rs.description).not.toContain('github.');
+      expect(rs.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    }
+    expect(tools.find((t) => t.name === 'delete_pet')?.annotations).toMatchObject({ destructiveHint: true });
+    // search: read_result is findable, and the text lists each hit's arguments
+    const sr = text(await c.callTool({ name: 'search_tools', arguments: { query: 'read more of a truncated result', format: 'json' } }));
+    expect(sr).toContain('neurouter_read_result(handle*: string');
+    const found = text(await c.callTool({ name: 'search_tools', arguments: { query: 'find pet by id', format: 'json' } }));
+    expect(found).toMatch(/get_pet_by_id\(pet_id\*: integer\) — /);
+    await c.close();
+    // read-only principal: run_script cannot write
+    const ro = await mcpClient(s, 'petstore', 'dev', await keyFor(s, 'petstore', 'dev', ['tools:read', 'code:run']));
+    const rs2 = (await ro.listTools()).tools.find((t) => t.name === 'run_script');
+    if (rs2) expect(rs2.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    await ro.close();
   }, 60_000);
 
   it('ops: begin → call → script → unmet need → end produces one task with all items', async () => {

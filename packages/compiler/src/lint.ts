@@ -3,7 +3,7 @@
  * weighted share of passed checks (each rule scores 0..1).
  */
 import type { LintFinding, LintReport, LintRule, LintRuleResult, ToolDef } from '@neurouter/shared';
-import { isVerb } from './naming.js';
+import { destructiveVerb, isVerb } from './naming.js';
 import { countFields, schemaDepth } from './openapi/schema.js';
 import { isObj } from './util.js';
 
@@ -165,6 +165,15 @@ export function lint(tools: ToolDef[], opts: LintOptions = {}): LintReport {
     },
     'writes and destructive tools are marked',
   );
+  // destructive classified from the name/summary (not DELETE): listed for curation, not scored
+  let classified = 0;
+  for (const t of visible) {
+    const b = t.binding;
+    if (!t.risk.write || !t.risk.destructive || (b.type === 'http' && b.method === 'DELETE') || t.overlayApplied.length) continue;
+    const verb = destructiveVerb(t.name, t.title, t.description.split('\n')[0]);
+    if (verb && classified++ < MAX_FINDINGS_PER_RULE)
+      findings.push({ rule: 'writes_marked', severity: 'info', tool: t.name, message: `marked destructive because it ${verb}s (name/summary); set risk.destructive in the overlay if that is wrong` });
+  }
   perTool('schema_depth', (t) => (schemaDepth(t.inputSchema) > 4 ? `input schema nests ${schemaDepth(t.inputSchema)} levels (> 4)` : null), 'input schemas nest ≤ 4 levels');
 
   const total = rules.reduce((s, r) => s + r.weight, 0);
