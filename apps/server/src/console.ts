@@ -99,8 +99,9 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
       const status = out.error?.code === 'upstream_auth' ? 'rejected' : credential;
       return { ok: out.ok, latencyMs: s.clock.now() - t0, credential: status, ...(out.ok ? { result: out.value } : { detail: out.error?.message ?? out.status }) };
     },
-    resetMock(_tenantId, environmentId, seed) {
-      s.mock.reset(`env:${environmentId}`, seed);
+    async resetMock(tenantId, environmentId, seed) {
+      // the environment's shared namespace, in the store every instance reads (multi-tenancy spec §7.4)
+      await s.mockStore.reset({ tenantId, environmentId, name: 'env' }, seed);
     },
     async mockSample(tenantId, environmentId, tool) {
       const bundle = await bundleOf(tenantId, environmentId);

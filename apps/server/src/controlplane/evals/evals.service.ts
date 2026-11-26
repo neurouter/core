@@ -1,6 +1,6 @@
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { Kysely, Selectable } from 'kysely';
-import { applyOverlayPatch } from '@neurouter/compiler';
+import { applyOverlayPatch, type MockNs } from '@neurouter/compiler';
 import {
   createMcpHttpClient,
   generateSuite,
@@ -49,10 +49,11 @@ export interface EvalPorts {
   /** Loopback base URL the runner's MCP client uses (`http://127.0.0.1:<port>`). */
   baseUrl(): string;
   /** Up to `n` seeded sample entities per mock resource (generator input). */
-  mockSamples(tenantId: string, environmentId: string, namespace: string, n: number): Promise<Record<string, Array<Record<string, unknown>>>>;
-  /** State reader over one mock namespace (`state` assertions). */
-  mockState(tenantId: string, environmentId: string, namespace: string): StateReader;
-  resetMock(namespace: string): void;
+  mockSamples(ns: MockNs, n: number): Promise<Record<string, Array<Record<string, unknown>>>>;
+  /** State reader over one mock namespace (`state` assertions), through the same store the data plane uses. */
+  mockState(ns: MockNs): StateReader;
+  /** Drops a mock namespace (every instance sees it). */
+  resetMock(ns: MockNs): Promise<void>;
 }
 
 export interface EvalDeps {
@@ -187,8 +188,9 @@ export class EvalsService {
     const { gen } = await this.genTools(buildId);
     const model = opts.model ?? (await this.d.settings.get('generatorModel', tenantId)) ?? (await this.model(tenantId));
     const llm = await this.llm(tenantId, [model]);
-    const ns = `eval:gen-${newId()}`;
-    const samples = await this.d.ports.mockSamples(tenantId, env.id, ns, 3);
+    const mockNs = (name: string): MockNs => ({ tenantId: env.tenant_id, environmentId: env.id, name });
+    const ns = mockNs(`gen:samples-${newId()}`);
+    const samples = await this.d.ports.mockSamples(ns, 3);
     const key = await this.evalKey(tenantId, serverId, env.id, ['tools:read', 'tools:write'], 'eval generator');
     try {
       const out = await generateSuite({
@@ -201,7 +203,8 @@ export class EvalsService {
         ...(opts.instructions ? { instructions: opts.instructions } : {}),
         seed: opts.seed ?? 42,
         executeReference: async (calls) => {
-          const refNs = `eval:ref-${newId()}`;
+          // `gen:<keyId>:…` is honoured only for the key that sends it (G13)
+          const refNs = `gen:${key.id}:ref-${newId()}`;
           const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers: { [HEADER_MOCK_STATE]: refNs, [HEADER_EXPOSURE]: 'tools' } });
           try {
             const res = [];
@@ -212,7 +215,7 @@ export class EvalsService {
             return res;
           } finally {
             await mcp.close().catch(() => {});
-            this.d.ports.resetMock(refNs);
+            await this.d.ports.resetMock(mockNs(refNs)).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
           }
         },
       });
@@ -220,7 +223,7 @@ export class EvalsService {
       return await this.saveSuite(tenantId, serverId, buildId, out.tasks, out.generator as unknown as Record<string, unknown>, opts.createdBy);
     } finally {
       await this.d.keys.revoke(tenantId, key.id, null);
-      this.d.ports.resetMock(ns);
+      await this.d.ports.resetMock(ns).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
     }
   }
 
@@ -384,20 +387,21 @@ export class EvalsService {
         signal: ac.signal,
         hasResult: (k) => existing.has(k),
         openSession: async (ctx) => {
-          const ns = `eval:${runId}:${ctx.key.replace(/[^A-Za-z0-9:_-]/g, '_').slice(0, 150)}`;
-          this.d.ports.resetMock(ns);
+          const name = `eval:${runId}:${ctx.key.replace(/[^A-Za-z0-9:_-]/g, '_').slice(0, 150)}`;
+          const ns: MockNs = { tenantId, environmentId: env.id, name };
+          await this.d.ports.resetMock(ns);
           const key = await this.evalKey(tenantId, run.server_id, env.id, ctx.mode === 'code' ? ['tools:read', 'tools:write', 'code:run'] : ['tools:read', 'tools:write'], `eval ${runId.slice(-6)}`);
-          const headers: Record<string, string> = { [HEADER_MOCK_STATE]: ns, [HEADER_EXPOSURE]: ctx.mode === 'code' ? 'code' : 'tools' };
+          const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: ctx.mode === 'code' ? 'code' : 'tools' };
           if (isTemp || (pinned && pinned !== run.build_id)) headers[HEADER_BUILD] = run.build_id;
           const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
           return {
             mcp,
-            stateReader: this.d.ports.mockState(tenantId, env.id, ns),
+            stateReader: this.d.ports.mockState(ns),
             collectCalls: async () => this.observedCalls(tenantId, key.id),
             close: async () => {
               await mcp.close().catch(() => {});
               await this.d.keys.revoke(tenantId, key.id, null);
-              this.d.ports.resetMock(ns);
+              await this.d.ports.resetMock(ns).catch((err: unknown) => this.d.log.warn({ err }, 'mock reset failed'));
             },
           };
         },

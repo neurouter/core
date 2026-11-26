@@ -41,7 +41,7 @@ export interface RunContext {
   trace?: CallTrace;
   ip: string | null;
   userAgent: string | null;
-  /** Eval-only: mock state namespace (`X-Neurouter-Mock-State`). */
+  /** Mock state namespace name (`MockNs.name`) when not `env`: an accepted eval/gen `X-Neurouter-Mock-State` (G13), or a console preview. */
   mockNamespace?: string;
   /** Exposure override (`X-Neurouter-Exposure: tools|code`), any credential; code falls back to tools when unavailable. */
   exposureOverride?: 'tools' | 'code';

@@ -45,6 +45,7 @@ export function routePlugins(s: Services, extra: Array<(app: FastifyInstance) =>
         onAuthFailure: (reason, method) => s.metrics.authFailure(method, reason),
         tenancy: s.tenancy,
         maintenance: () => s.config.env.NEUROUTER_MAINTENANCE,
+        mockNamespaces: s.mockNamespaces,
       });
     },
     async (app) => {

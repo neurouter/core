@@ -1,0 +1,1664 @@
+{
+  "github": {
+    "headline": 76,
+    "tasks": [
+      {
+        "key": "ambiguous-get_comment-1",
+        "category": "ambiguous",
+        "prompt": "Can you check on the comment for me?",
+        "reference": "[]"
+      },
+      {
+        "key": "ambiguous-list_pull_requests-1",
+        "category": "ambiguous",
+        "prompt": "Can you check on the pull for me?",
+        "reference": "[]"
+      },
+      {
+        "key": "impossible-1",
+        "category": "impossible",
+        "prompt": "Reset my laptop password.",
+        "reference": "[]"
+      },
+      {
+        "key": "impossible-2",
+        "category": "impossible",
+        "prompt": "Play some relaxing music.",
+        "reference": "[]"
+      },
+      {
+        "key": "multi-list_issue_labels-get_issue-2",
+        "category": "multi",
+        "prompt": "First list the labels on one issue (use owner=\"demo\", repo=\"demo\", issue_number=1), then get one issue by its number, including body, labels, assignees and state (use owner=\"octocat\", repo=\"hello-world\", issue_number=1).",
+        "reference": "[{\"tool\":\"list_issue_labels\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"issue_number\":1}},{\"tool\":\"get_issue\",\"arguments\":{\"owner\":\"octocat\",\"repo\":\"hello-world\",\"issue_number\":1}}]"
+      },
+      {
+        "key": "multi-list_labels-get_comment-4",
+        "category": "multi",
+        "prompt": "First list the labels defined in a repository (use the names when labelling issues) (use owner=\"demo\", repo=\"demo\"), then get one issue comment by its id (use owner=\"demo\", repo=\"demo\", comment_id=1).",
+        "reference": "[{\"tool\":\"list_labels\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\"}},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1}}]"
+      },
+      {
+        "key": "multi-list_pull_request_commits-get_comment-3",
+        "category": "multi",
+        "prompt": "First list the commits in a pull request (use owner=\"demo\", repo=\"demo\", pull_number=1), then get one issue comment by its id (use owner=\"demo\", repo=\"demo\", comment_id=1).",
+        "reference": "[{\"tool\":\"list_pull_request_commits\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"pull_number\":1}},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1}}]"
+      },
+      {
+        "key": "multi-search_issues-get_comment-1",
+        "category": "multi",
+        "prompt": "First search issues and pull requests with GitHub search syntax, e.g (use q=\"demo\"), then get one issue comment by its id (use owner=\"demo\", repo=\"demo\", comment_id=1).",
+        "reference": "[{\"tool\":\"search_issues\",\"arguments\":{\"q\":\"demo\"}},{\"tool\":\"get_comment\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"comment_id\":1}}]"
+      },
+      {
+        "key": "single-get_pull_request-3",
+        "category": "single",
+        "prompt": "Get one pull request by number, including mergeability, head and base branches (use owner=\"demo\", repo=\"demo\", pull_number=1)",
+        "reference": "[{\"tool\":\"get_pull_request\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\",\"pull_number\":1}}]"
+      },
+      {
+        "key": "single-get_repository-2",
+        "category": "single",
+        "prompt": "Get a repository's metadata (default branch, visibility, open issue count, topics) (use owner=\"demo\", repo=\"demo\")",
+        "reference": "[{\"tool\":\"get_repository\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\"}}]"
+      },
+      {
+        "key": "single-list_repo_comments-4",
+        "category": "single",
+        "prompt": "List issue comments across a whole repository, for finding recent discussion (use owner=\"demo\", repo=\"demo\")",
+        "reference": "[{\"tool\":\"list_repo_comments\",\"arguments\":{\"owner\":\"demo\",\"repo\":\"demo\"}}]"
+      }
+    ],
+    "results": [
+      {
+        "task": "ambiguous-get_comment-1",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "judge",
+              "criterion": "Asks a clarifying question or makes a reasonable, stated choice."
+            },
+            "passed": true,
+            "detail": "judge pass (0.80): asks for clarification"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "ambiguous-get_comment-1",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "judge",
+              "criterion": "Asks a clarifying question or makes a reasonable, stated choice."
+            },
+            "passed": true,
+            "detail": "judge pass (0.80): made a choice and answered"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "ambiguous-list_pull_requests-1",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "judge",
+              "criterion": "Asks a clarifying question or makes a reasonable, stated choice."
+            },
+            "passed": true,
+            "detail": "judge pass (0.80): made a choice and answered"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "ambiguous-list_pull_requests-1",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "judge",
+              "criterion": "Asks a clarifying question or makes a reasonable, stated choice."
+            },
+            "passed": true,
+            "detail": "judge pass (0.80): made a choice and answered"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "impossible-1",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "unmet_need_reported_or_declined"
+            },
+            "passed": true,
+            "detail": "unmet need reported"
+          },
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "impossible-1",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "unmet_need_reported_or_declined"
+            },
+            "passed": true,
+            "detail": "unmet need reported"
+          },
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "impossible-2",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "unmet_need_reported_or_declined"
+            },
+            "passed": true,
+            "detail": "unmet need reported"
+          },
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "impossible-2",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "unmet_need_reported_or_declined"
+            },
+            "passed": true,
+            "detail": "unmet need reported"
+          },
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-list_issue_labels-get_issue-2",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "list_issue_labels"
+            },
+            "passed": true,
+            "detail": "list_issue_labels called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_issue",
+              "args": {
+                "owner": "octocat",
+                "repo": "hello-world",
+                "issue_number": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_issue called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-list_issue_labels-get_issue-2",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 2,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "list_issue_labels"
+            },
+            "passed": false,
+            "detail": "list_issue_labels was never called"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_issue",
+              "args": {
+                "owner": "octocat",
+                "repo": "hello-world",
+                "issue_number": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_issue called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-list_labels-get_comment-4",
+        "mode": "code",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "list_labels"
+            },
+            "passed": true,
+            "detail": "list_labels called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_comment",
+              "args": {
+                "owner": "demo",
+                "repo": "demo",
+                "comment_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "get_comment was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-list_labels-get_comment-4",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 2,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "list_labels"
+            },
+            "passed": false,
+            "detail": "list_labels was never called"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_comment",
+              "args": {
+                "owner": "demo",
+                "repo": "demo",
+                "comment_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "get_comment was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-list_pull_request_commits-get_comment-3",
+        "mode": "code",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "list_pull_request_commits"
+            },
+            "passed": true,
+            "detail": "list_pull_request_commits called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_comment",
+              "args": {
+                "owner": "demo",
+                "repo": "demo",
+                "comment_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "get_comment was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-list_pull_request_commits-get_comment-3",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 2,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "list_pull_request_commits"
+            },
+            "passed": false,
+            "detail": "list_pull_request_commits was never called"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_comment",
+              "args": {
+                "owner": "demo",
+                "repo": "demo",
+                "comment_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "get_comment was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-search_issues-get_comment-1",
+        "mode": "code",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "gave_up",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "search_issues"
+            },
+            "passed": false,
+            "detail": "search_issues was never called"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_comment",
+              "args": {
+                "owner": "demo",
+                "repo": "demo",
+                "comment_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "get_comment was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-search_issues-get_comment-1",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 2,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "search_issues"
+            },
+            "passed": true,
+            "detail": "search_issues called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_comment",
+              "args": {
+                "owner": "demo",
+                "repo": "demo",
+                "comment_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "get_comment was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-get_pull_request-3",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_pull_request",
+              "args": {
+                "owner": "demo",
+                "repo": "demo",
+                "pull_number": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_pull_request called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-get_pull_request-3",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_pull_request",
+              "args": {
+                "owner": "demo",
+                "repo": "demo",
+                "pull_number": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "get_pull_request was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-get_repository-2",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_repository",
+              "args": {
+                "owner": "demo",
+                "repo": "demo"
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_repository called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-get_repository-2",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_repository",
+              "args": {
+                "owner": "demo",
+                "repo": "demo"
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "get_repository was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-list_repo_comments-4",
+        "mode": "code",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "gave_up",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "list_repo_comments",
+              "args": {
+                "owner": "demo",
+                "repo": "demo"
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "list_repo_comments was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-list_repo_comments-4",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "list_repo_comments",
+              "args": {
+                "owner": "demo",
+                "repo": "demo"
+              },
+              "argsMatch": "subset"
+            },
+            "passed": false,
+            "detail": "list_repo_comments was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      }
+    ]
+  },
+  "petstore": {
+    "headline": 88,
+    "tasks": [
+      {
+        "key": "ambiguous-get_pet_by_id-1",
+        "category": "ambiguous",
+        "prompt": "Can you check on the pet for me?",
+        "reference": "[]"
+      },
+      {
+        "key": "ambiguous-get_user_by_name-2",
+        "category": "ambiguous",
+        "prompt": "Can you check on the user for me?",
+        "reference": "[]"
+      },
+      {
+        "key": "impossible-1",
+        "category": "impossible",
+        "prompt": "Play some relaxing music.",
+        "reference": "[]"
+      },
+      {
+        "key": "impossible-2",
+        "category": "impossible",
+        "prompt": "Book a flight to Berlin for next Tuesday.",
+        "reference": "[]"
+      },
+      {
+        "key": "multi-find_pets_by_tags-get_order_by_id-2",
+        "category": "multi",
+        "prompt": "First finds Pets by tags (use tags=[]), then find purchase order by ID (use order_id=1).",
+        "reference": "[{\"tool\":\"find_pets_by_tags\",\"arguments\":{\"tags\":[]}},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1}}]"
+      },
+      {
+        "key": "multi-login_user-get_order_by_id-3",
+        "category": "multi",
+        "prompt": "First logs user into the system, then find purchase order by ID (use order_id=1).",
+        "reference": "[{\"tool\":\"login_user\",\"arguments\":{}},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1}}]"
+      },
+      {
+        "key": "multi-logout_user-get_order_by_id-4",
+        "category": "multi",
+        "prompt": "First logs out current logged in user session, then find purchase order by ID (use order_id=1).",
+        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{}},{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1}}]"
+      },
+      {
+        "key": "multi-logout_user-get_pet_by_id-1",
+        "category": "multi",
+        "prompt": "First logs out current logged in user session, then find pet by ID (use pet_id=4).",
+        "reference": "[{\"tool\":\"logout_user\",\"arguments\":{}},{\"tool\":\"get_pet_by_id\",\"arguments\":{\"pet_id\":4}}]"
+      },
+      {
+        "key": "single-find_pets_by_status-3",
+        "category": "single",
+        "prompt": "Finds Pets by status (use status=\"available\")",
+        "reference": "[{\"tool\":\"find_pets_by_status\",\"arguments\":{\"status\":\"available\"}}]"
+      },
+      {
+        "key": "single-get_inventory-4",
+        "category": "single",
+        "prompt": "Returns pet inventories by status",
+        "reference": "[{\"tool\":\"get_inventory\",\"arguments\":{}}]"
+      },
+      {
+        "key": "single-get_order_by_id-2",
+        "category": "single",
+        "prompt": "Find purchase order by ID (use order_id=1)",
+        "reference": "[{\"tool\":\"get_order_by_id\",\"arguments\":{\"order_id\":1}}]"
+      },
+      {
+        "key": "single-login_user-1",
+        "category": "single",
+        "prompt": "Logs user into the system",
+        "reference": "[{\"tool\":\"login_user\",\"arguments\":{}}]"
+      }
+    ],
+    "results": [
+      {
+        "task": "ambiguous-get_pet_by_id-1",
+        "mode": "code",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "gave_up",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": false,
+            "detail": "writes: delete_pet"
+          },
+          {
+            "assertion": {
+              "type": "judge",
+              "criterion": "Asks a clarifying question or makes a reasonable, stated choice."
+            },
+            "passed": true,
+            "detail": "judge pass (0.80): made a choice and answered"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "ambiguous-get_pet_by_id-1",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "judge",
+              "criterion": "Asks a clarifying question or makes a reasonable, stated choice."
+            },
+            "passed": true,
+            "detail": "judge pass (0.80): made a choice and answered"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "ambiguous-get_user_by_name-2",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "judge",
+              "criterion": "Asks a clarifying question or makes a reasonable, stated choice."
+            },
+            "passed": true,
+            "detail": "judge pass (0.80): made a choice and answered"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "ambiguous-get_user_by_name-2",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "gave_up",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": false,
+            "detail": "writes: create_user"
+          },
+          {
+            "assertion": {
+              "type": "judge",
+              "criterion": "Asks a clarifying question or makes a reasonable, stated choice."
+            },
+            "passed": true,
+            "detail": "judge pass (0.80): made a choice and answered"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "impossible-1",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "unmet_need_reported_or_declined"
+            },
+            "passed": true,
+            "detail": "unmet need reported"
+          },
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "impossible-1",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "unmet_need_reported_or_declined"
+            },
+            "passed": true,
+            "detail": "unmet need reported"
+          },
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "impossible-2",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "unmet_need_reported_or_declined"
+            },
+            "passed": true,
+            "detail": "unmet need reported"
+          },
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "impossible-2",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 0,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "unmet_need_reported_or_declined"
+            },
+            "passed": true,
+            "detail": "unmet need reported"
+          },
+          {
+            "assertion": {
+              "type": "no_writes"
+            },
+            "passed": true,
+            "detail": "no writes"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-find_pets_by_tags-get_order_by_id-2",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "find_pets_by_tags"
+            },
+            "passed": true,
+            "detail": "find_pets_by_tags called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_order_by_id",
+              "args": {
+                "order_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_order_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-find_pets_by_tags-get_order_by_id-2",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 2,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "find_pets_by_tags"
+            },
+            "passed": true,
+            "detail": "find_pets_by_tags called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_order_by_id",
+              "args": {
+                "order_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_order_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-login_user-get_order_by_id-3",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "login_user"
+            },
+            "passed": true,
+            "detail": "login_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_order_by_id",
+              "args": {
+                "order_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_order_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-login_user-get_order_by_id-3",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 2,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "login_user"
+            },
+            "passed": true,
+            "detail": "login_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_order_by_id",
+              "args": {
+                "order_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_order_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-logout_user-get_order_by_id-4",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "logout_user"
+            },
+            "passed": true,
+            "detail": "logout_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_order_by_id",
+              "args": {
+                "order_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_order_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-logout_user-get_order_by_id-4",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 2,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "logout_user"
+            },
+            "passed": true,
+            "detail": "logout_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_order_by_id",
+              "args": {
+                "order_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_order_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-logout_user-get_pet_by_id-1",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "logout_user"
+            },
+            "passed": true,
+            "detail": "logout_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_pet_by_id",
+              "args": {
+                "pet_id": 4
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_pet_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "multi-logout_user-get_pet_by_id-1",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 2,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "logout_user"
+            },
+            "passed": true,
+            "detail": "logout_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_pet_by_id",
+              "args": {
+                "pet_id": 4
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_pet_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-find_pets_by_status-3",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "find_pets_by_status",
+              "args": {
+                "status": "available"
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "find_pets_by_status called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-find_pets_by_status-3",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "find_pets_by_status",
+              "args": {
+                "status": "available"
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "find_pets_by_status called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-get_inventory-4",
+        "mode": "code",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "gave_up",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_inventory"
+            },
+            "passed": false,
+            "detail": "get_inventory was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-get_inventory-4",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": false,
+        "failureCause": "wrong_tool",
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_inventory"
+            },
+            "passed": false,
+            "detail": "get_inventory was never called"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-get_order_by_id-2",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_order_by_id",
+              "args": {
+                "order_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_order_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-get_order_by_id-2",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "get_order_by_id",
+              "args": {
+                "order_id": 1
+              },
+              "argsMatch": "subset"
+            },
+            "passed": true,
+            "detail": "get_order_by_id called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-login_user-1",
+        "mode": "code",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "login_user"
+            },
+            "passed": true,
+            "detail": "login_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      },
+      {
+        "task": "single-login_user-1",
+        "mode": "tool",
+        "attempt": 1,
+        "passed": true,
+        "failureCause": null,
+        "toolCalls": 1,
+        "assertions": [
+          {
+            "assertion": {
+              "type": "called",
+              "tool": "login_user"
+            },
+            "passed": true,
+            "detail": "login_user called 1×"
+          },
+          {
+            "assertion": {
+              "type": "framing"
+            },
+            "passed": true,
+            "detail": "begin_task first, end_task last"
+          }
+        ]
+      }
+    ]
+  }
+}

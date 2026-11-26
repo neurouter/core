@@ -1,3 +1,4 @@
+import type { MockNs } from '@neurouter/compiler';
 import type { FetchLike } from '../../kernel/lib/net/safe-fetch.js';
 import { CircuitBreaker } from './circuit-breaker.js';
 import type { BuiltRequest } from './request-builder.js';
@@ -23,7 +24,8 @@ export class InvokeError extends Error {
 
 /** In-process mock upstream (§16): same request shape as HTTP, no network. */
 export interface MockUpstream {
-  handle(req: { environmentId: string; namespace: string; method: string; path: string; query: Record<string, string | string[]>; headers: Record<string, string>; body: unknown; mockModel: unknown }): Promise<{ status: number; headers?: Record<string, string>; body: unknown }>;
+  /** `ns`: the state namespace, bound to the request's tenant and environment (multi-tenancy spec §7.4). */
+  handle(req: { ns: MockNs; method: string; path: string; query: Record<string, string | string[]>; headers: Record<string, string>; body: unknown; mockModel: unknown }): Promise<{ status: number; headers?: Record<string, string>; body: unknown }>;
 }
 
 const KEEP_HEADERS = /^(link|retry-after|x-ratelimit-.*)$/i;

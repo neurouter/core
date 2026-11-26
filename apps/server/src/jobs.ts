@@ -1,5 +1,6 @@
 import type { Services } from './deps.js';
 import type { JobScheduler } from './kernel/jobs/scheduler.js';
+import { DbMockStateStore } from './dataplane/mock/db-store.js';
 import { environmentRuntime } from './kernel/runtime-config.js';
 
 const DAY = 86_400_000;
@@ -101,5 +102,16 @@ export function registerJobs(scheduler: JobScheduler, s: Services, extra: Array<
       }
     },
   });
+  // mock state GC (multi-tenancy spec §7.4): expired eval/gen namespaces, env namespaces idle > 30 days
+  const mockStore = s.mockStore;
+  if (mockStore instanceof DbMockStateStore)
+    scheduler.register({
+      name: 'mock.gc',
+      schedule: '30 * * * * *',
+      run: async () => {
+        // batches of ≤ 5,000 rows; at most 10 per minute so a backlog drains without one long run
+        for (let i = 0; i < 10; i++) if (!(await mockStore.gc(5000)).more) break;
+      },
+    });
   for (const e of [...extra, ...(s.extensions.jobs ?? [])]) e(scheduler, s);
 }

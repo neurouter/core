@@ -32,7 +32,9 @@ import { McpAuthenticator } from './dataplane/auth/authenticate.js';
 import { ExternalJwtVerifier } from './dataplane/auth/external-jwt.js';
 import { ClientCredentialsCache, CredentialResolver } from './dataplane/http/credentials.js';
 import { HttpInvoker } from './dataplane/http/invoker.js';
+import { DbMockStateStore } from './dataplane/mock/db-store.js';
 import { InProcessMock } from './dataplane/mock/mock-upstream.js';
+import { MockNamespaceBinder } from './dataplane/mock/namespace.js';
 import { ArgValidator } from './dataplane/pipeline/arg-validate.js';
 import { ErrorEvents } from './dataplane/pipeline/errors.js';
 import { Pipeline } from './dataplane/pipeline/pipeline.js';
@@ -58,7 +60,7 @@ import { ApiKeysService } from './controlplane/keys/api-keys.service.js';
 import { UsersService } from './controlplane/users/users.service.js';
 import { ExecutorHealth } from './dataplane/code/executor-health.js';
 import { EvalsService } from './controlplane/evals/evals.service.js';
-import { sampleEntities, type GraphqlMockModel, type OpenApiMockModel } from '@neurouter/compiler';
+import { MemoryMockStateStore, sampleEntities, type GraphqlMockModel, type MockStateStore, type OpenApiMockModel } from '@neurouter/compiler';
 import { AuthorizationService } from './controlplane/oauth/authorize.js';
 import { CimdResolver } from './controlplane/oauth/cimd.js';
 import { OAuthClientsService } from './controlplane/oauth/clients.service.js';
@@ -235,7 +237,10 @@ export function createServices(input: ServiceInputs) {
   const tracker = new TaskTracker(db, now, (taskId, tenantId) => void coord.publish('events.task', { taskId, tenantId }).catch(() => {}));
   const errors = new ErrorEvents(db, now);
   const pages = new ResultPages(db, now);
-  const mock = new InProcessMock({ now });
+  // mock state (multi-tenancy spec §7): in the database by default, so every instance shares it
+  const mockStore: MockStateStore = config.env.NEUROUTER_MOCK_STORE === 'memory' ? new MemoryMockStateStore({ now }) : new DbMockStateStore(db, now);
+  const mock = new InProcessMock({ store: mockStore });
+  const mockNamespaces = new MockNamespaceBinder(db, now);
   // constructed early: the data plane's CredentialResolver reads delegated upstream tokens through it
   const isMember = async (tenantId: string, userId: string): Promise<boolean> => (await tenancy.roleOf(tenantId, userId)) !== null;
   const upstreamOAuth = new UpstreamOAuthService({ db, clock, envelope, coord, audit, secrets: namedSecrets.resolver(envRefs), fetch: (allowHttp) => upstreamFetchFor(allowHttp), publicUrl: config.publicUrl, pepper: config.hashPepper, isMember, log: logger });
@@ -338,8 +343,8 @@ export function createServices(input: ServiceInputs) {
 
   /* ---------------------------------------------------------------- evals (§15) */
   const localUrl = { value: config.publicUrl };
-  const mockModelFor = async (tenantId: string, environmentId: string): Promise<OpenApiMockModel | null> => {
-    const b = await runtime.getByEnvironmentId(tenantId, environmentId);
+  const mockModelFor = async (tenant: string, environmentId: string): Promise<OpenApiMockModel | null> => {
+    const b = await runtime.getByEnvironmentId(tenant, environmentId);
     const m = b?.build.mockModel() as OpenApiMockModel | GraphqlMockModel | null | undefined;
     return m && m.kind === 'openapi' ? m : null;
   };
@@ -362,18 +367,18 @@ export function createServices(input: ServiceInputs) {
     onProgress: (tenantId, runId, done, total) => void coord.publish('events.eval', { tenantId, runId, done, total }).catch(() => {}),
     ports: {
       baseUrl: () => localUrl.value,
-      resetMock: (ns) => mock.reset(ns),
-      mockSamples: async (tenantId, environmentId, ns, n) => {
-        const m = await mockModelFor(tenantId, environmentId);
+      resetMock: (ns) => mockStore.reset(ns),
+      mockSamples: async (ns, n) => {
+        const m = await mockModelFor(ns.tenantId, ns.environmentId);
         if (!m) return {};
-        return Object.fromEntries(sampleEntities(m, mock.store, ns, n).map((e) => [e.resource, e.items]));
+        return Object.fromEntries((await sampleEntities(m, mockStore, ns, n)).map((e) => [e.resource, e.items]));
       },
-      mockState: (tenantId, environmentId, ns) => async (resource, scope, where) => {
-        const m = await mockModelFor(tenantId, environmentId);
+      mockState: (ns) => async (resource, scope, where) => {
+        const m = await mockModelFor(ns.tenantId, ns.environmentId);
         const r = m ? (m.resources[resource] ?? Object.values(m.resources).find((x) => x.name === resource)) : undefined;
         if (!m || !r) return [];
         const sc = { ...Object.fromEntries(r.scopeParams.map((p) => [p, r.defaultScope[p] ?? 'demo'])), ...(scope ?? {}) };
-        return mock.store.collection(ns, r, sc).items.filter((it) => Object.entries(where).every(([k, v]) => JSON.stringify((it as Record<string, unknown>)[k]) === JSON.stringify(v)));
+        return (await mockStore.list(ns, r, sc)).filter((it) => Object.entries(where).every(([k, v]) => JSON.stringify((it as Record<string, unknown>)[k]) === JSON.stringify(v)));
       },
     },
   });
@@ -401,7 +406,7 @@ export function createServices(input: ServiceInputs) {
     extensions: ext, tenancy, quotas, usage, secretRefs, modelKeys, envRefs,
     settings, keyring, metrics, auditStore, audit, sinkDispatcher, redactionRules: redactionRules!, envelope, secretProvider, namedSecrets, jobs, postCommit,
     outboundFetch, upstreamFetchFor, embedder, vectorIndex, indexer: indexer!, search,
-    runtime, bus, limiter, authenticator, tracker, errors, pages, mock, credentials, http, pipeline, ops, scripts, dispatcher,
+    runtime, bus, limiter, authenticator, tracker, errors, pages, mock, mockStore, mockNamespaces, credentials, http, pipeline, ops, scripts, dispatcher,
     executor: () => executor, executorHealth, startExecutor,
     builds, servers, fetchSpec, introspectGraphql, configSync, apiKeys, users,
     oauthClients, oauthTokens, authorization, consoleSessions, upstreamOAuth,
