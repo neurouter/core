@@ -85,6 +85,7 @@ export class BuildsService {
   async build(serverId: string, specRevisionId: string, overlayRevisionId: string | null, opts: { temporary?: boolean; overlayYaml?: string | null; pin?: boolean } = {}): Promise<BuildOutcome> {
     const yaml = opts.overlayYaml !== undefined ? opts.overlayYaml : await this.overlayYaml(overlayRevisionId);
     const result = await this.compileWith(serverId, yaml, specRevisionId);
+    // tenant-scope: tenant-from-row (the server id comes from a tenant-scoped caller; its tenant scopes the build rows)
     const s = await this.db.selectFrom('servers').select(['tenant_id']).where('id', '=', serverId).executeTakeFirstOrThrow();
     const existing = await this.db.selectFrom('builds').selectAll().where('tenant_id', '=', s.tenant_id).where('server_id', '=', serverId).where('hash', '=', result.hash).executeTakeFirst();
     if (existing) {

@@ -27,6 +27,8 @@ import { GLOBAL_TABLES, TENANT_ID_OPTIONAL_TABLES } from '../kernel/db/tenant-sc
 const SRC = resolve(import.meta.dirname, '..');
 export const TENANT_SCOPE_REASONS = ['child-of-scoped', 'by-secret-hash', 'system-job', 'global-table', 'tenant-from-row'] as const;
 const STARTS = new Set(['selectFrom', 'updateTable', 'deleteFrom', 'insertInto']);
+/** Calls whose arguments can scope a chain by tenant (filters, joins, inserted/updated values). */
+const PREDICATE_CALLS = new Set(['where', 'whereRef', 'orWhere', 'having', 'on', 'onRef', 'innerJoin', 'leftJoin', 'values', 'set']);
 const GLOBAL = new Set<string>(GLOBAL_TABLES);
 
 export interface ChainFinding {
@@ -76,11 +78,18 @@ export function inventory(root = SRC): ChainFinding[] {
         const fromScoped = /^(scoped\(.*\)|\w*[sS]coped\w*|sc)$/s.test(receiver);
         let top: ts.Node = node;
         while (top.parent && (ts.isPropertyAccessExpression(top.parent) || (ts.isCallExpression(top.parent) && top.parent.expression === top) || ts.isNonNullExpression(top.parent))) top = top.parent;
-        const chain = top.getText(sf);
+        // scoped = a tenant_id predicate (or value), not merely `tenant_id` in the select list
+        let predicate = false;
+        const scan = (n: ts.Node): void => {
+          if (predicate) return;
+          if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && PREDICATE_CALLS.has(n.expression.name.text) && n.arguments.some((x) => /tenant_id/.test(x.getText(sf)))) predicate = true;
+          ts.forEachChild(n, scan);
+        };
+        scan(top);
         const arg0 = node.arguments[0];
         const table = arg0 && ts.isStringLiteralLike(arg0) ? arg0.text.split(/\s+as\s+/)[0]!.trim() : arg0 ? `<${arg0.getText(sf).slice(0, 40)}>` : '?';
         const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-        rows.push({ file: relative(resolve(root, '../../..'), f), line, op: node.expression.name.text, table, scoped: fromScoped || /tenant_id/.test(chain), annotation: annotationFor(lines, line) });
+        rows.push({ file: relative(resolve(root, '../../..'), f), line, op: node.expression.name.text, table, scoped: fromScoped || predicate, annotation: annotationFor(lines, line) });
       }
       ts.forEachChild(node, visit);
     };

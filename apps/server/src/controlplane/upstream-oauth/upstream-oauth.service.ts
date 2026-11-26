@@ -62,6 +62,7 @@ export class UpstreamOAuthService {
   }
 
   private async environment(environmentId: string) {
+    // tenant-scope: tenant-from-row (by environment id; every caller then checks the session user's membership in that tenant)
     const e = await this.d.db.selectFrom('environments').select(['id', 'tenant_id', 'slug', 'auth', 'allow_http', 'status']).where('id', '=', environmentId).executeTakeFirst();
     if (!e) throw AppError.notFound('Environment');
     const auth = (parseJsonColumn<UpstreamAuthDescriptor>(e.auth) ?? { type: 'none' }) as UpstreamAuthDescriptor;
@@ -76,7 +77,7 @@ export class UpstreamOAuthService {
   /** Starts a connection: single-use state bound to the user (10 min) + PKCE S256. Returns the upstream authorize URL. */
   async authorizeUrl(environmentId: string, viewer: { id: string }, returnTo: string | undefined): Promise<string> {
     const env = await this.environment(environmentId);
-    // tenant-scope: by-id lookup above; membership of the environment's tenant is checked here (spec §3.5)
+    // membership of the environment's tenant is checked here (spec §3.5)
     if (!(await this.d.isMember(env.tenant_id, viewer.id))) throw AppError.notFound('Environment');
     if (env.status !== 'active') throw AppError.conflict('This environment is disabled');
     const state = randomToken(32);

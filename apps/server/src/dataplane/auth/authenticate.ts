@@ -87,6 +87,7 @@ export class McpAuthenticator {
   private async apiKey(token: string, t: AuthTarget, now: number): Promise<AuthOutcome> {
     const parsed = parseApiKey(token);
     if (!parsed) return { ok: false, error: 'invalid_token', reason: 'malformed api key' };
+    // tenant-scope: by-secret-hash (API key by key id + secret hash; the key's tenant must equal the endpoint's tenant)
     const k = await this.db
       .selectFrom('api_keys as k')
       .innerJoin('users as u', 'u.id', 'k.owner_user_id')
@@ -108,6 +109,7 @@ export class McpAuthenticator {
   }
 
   private async oauthToken(token: string, t: AuthTarget, now: number): Promise<AuthOutcome> {
+    // tenant-scope: by-secret-hash (token by hash; the token's tenant must equal the endpoint's tenant)
     const row = await this.db
       .selectFrom('oauth_tokens as t')
       .innerJoin('users as u', 'u.id', 't.user_id')
