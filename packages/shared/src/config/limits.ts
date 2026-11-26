@@ -63,3 +63,22 @@ export function mergeLimits(input: LimitsInput | null | undefined, base: Limits 
     code: { ...base.code, ...(input?.code ?? {}) },
   };
 }
+
+/** Instance cap on per-environment code limits (settings `codeLimitsCap`; console Settings → Code mode). */
+export const DEFAULT_CODE_LIMITS_CAP: CodeLimits = { maxToolCalls: 1000, wallTimeSec: 120, cpuTimeSec: 60, maxMemoryMb: 512, maxConcurrentCalls: 32, maxResultBytes: 4 * 1024 * 1024 };
+
+/**
+ * Clamps code limits to the instance cap, field by field. `over` lists the fields that exceeded it
+ * (with the requested value) so callers can report a diagnostic.
+ */
+export function clampCodeLimits(limits: CodeLimits, cap: CodeLimits): { limits: CodeLimits; over: Array<{ field: keyof CodeLimits; value: number; cap: number }> } {
+  const out = { ...limits };
+  const over: Array<{ field: keyof CodeLimits; value: number; cap: number }> = [];
+  for (const k of Object.keys(cap) as Array<keyof CodeLimits>) {
+    if (typeof out[k] === 'number' && out[k] > cap[k]) {
+      over.push({ field: k, value: out[k], cap: cap[k] });
+      out[k] = cap[k];
+    }
+  }
+  return { limits: out, over };
+}

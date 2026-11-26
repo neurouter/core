@@ -1,5 +1,5 @@
 import type { Kysely, Selectable } from 'kysely';
-import type { EnvironmentCreate, EnvironmentPatch, UpstreamAuthIn, WritesConfig } from '@neurouter/shared';
+import { clampCodeLimits, type CodeLimits, type EnvironmentCreate, type EnvironmentPatch, type UpstreamAuthIn, type WritesConfig } from '@neurouter/shared';
 import type { CoordinationStore } from '../../kernel/coordination/types.js';
 import type { Config } from '../../kernel/config/load.js';
 import type { EnvironmentsTable, MainDB } from '../../kernel/db/schema.js';
@@ -190,4 +190,15 @@ export class EnvironmentsService {
   headersOf(e: EnvRow): Record<string, string> {
     return parseJsonColumn<Record<string, string>>(e.headers) ?? {};
   }
+}
+
+/** 422 when per-environment code limits exceed the instance cap (settings `codeLimitsCap`, §10.5). */
+export function assertWithinCodeCap(limits: { code?: Partial<CodeLimits> } | undefined, cap: CodeLimits): void {
+  if (!limits?.code) return;
+  const { over } = clampCodeLimits({ ...cap, ...limits.code } as CodeLimits, cap);
+  if (!over.length) return;
+  throw AppError.validation(
+    `Code limits exceed the instance cap: ${over.map((o) => `${o.field} ${o.value} > ${o.cap}`).join(', ')}`,
+    over.map((o) => ({ path: ['limits', 'code', o.field], message: `at most ${o.cap} (instance cap)`, code: 'over_cap' })),
+  );
 }

@@ -10,7 +10,7 @@ import { decodeCursor, clampLimit, toPage } from '../../../kernel/lib/pagination
 import { unindexBuildTools } from '../../../kernel/db/tools-fts.js';
 import { CONFIG_CHANGED, environmentRuntime, parseExposure, parseOpsTools } from '../../../kernel/runtime-config.js';
 import { requireUser } from '../../auth/guards.js';
-import { assertConsoleManaged, EnvironmentsService } from '../../environments/environments.service.js';
+import { assertConsoleManaged, assertWithinCodeCap, EnvironmentsService } from '../../environments/environments.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
 
@@ -187,6 +187,8 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   route(app, 'servers.create', api.servers.create, async (req, reply) => {
     const u = requireUser(req);
     const body = req.body;
+    const cap = await c.settings.get('codeLimitsCap');
+    for (const e of body.environments ?? []) assertWithinCodeCap(e.limits, cap);
     if ('previewId' in body) {
       const p = await db.selectFrom('spec_previews').selectAll().where('id', '=', body.previewId).executeTakeFirst();
       if (!p || p.expires_at <= c.clock.now() || !p.content) throw AppError.notFound('Spec preview');

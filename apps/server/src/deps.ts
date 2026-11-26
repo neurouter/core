@@ -176,7 +176,7 @@ export function createServices(input: ServiceInputs) {
   const search = new ToolSearchService(db, new KeywordIndex(db, dbs.main.dialect), vectorIndex, embedder, logger);
 
   /* ---------------------------------------------------------------- data plane */
-  const runtime = new DbRuntimeConfigSource(db, clock, coord, { codeModeEnabled: () => settings.get('codeModeEnabled') });
+  const runtime = new DbRuntimeConfigSource(db, clock, coord, { codeModeEnabled: () => settings.get('codeModeEnabled'), codeLimitsCap: () => settings.get('codeLimitsCap') });
   const bus = new CoordinationEventBus(coord);
   runtime.subscribe(() => bus.publish({ kind: 'tools_list_changed' } as never));
   const rateLimitStore = coord.backend === 'postgres' && dbs.main.dialect === 'postgres' ? new LeaseRateLimitStore(new PgBucketExecutor(db), clock) : (coord.rateLimit ?? new MemoryRateLimitStore(clock));

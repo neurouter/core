@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import type { Kysely } from 'kysely';
 import { LineCounter, parseDocument, isMap, isSeq, type Node } from 'yaml';
-import { effectiveConfirm, NeurouterYaml, type Diagnostic, type YamlEnvironment, type YamlServer, type YamlUpstreamAuth } from '@neurouter/shared';
+import { clampCodeLimits, effectiveConfirm, NeurouterYaml, type Diagnostic, type YamlEnvironment, type YamlServer, type YamlUpstreamAuth } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import type { CoordinationStore } from '../../kernel/coordination/types.js';
 import type { MainDB } from '../../kernel/db/schema.js';
@@ -146,6 +146,15 @@ export class ConfigSync {
       out.ok = false;
       if (!opts.dryRun) await this.saveState(path, parsed.hash, 'error', out.diagnostics);
       return out;
+    }
+    // per-environment code limits above the instance cap are clamped at runtime: say so
+    const cap = await this.d.settings.get('codeLimitsCap');
+    for (const [si, s] of cfg.servers.entries()) {
+      for (const [ei, e] of (s.environments ?? []).entries()) {
+        if (!e.limits?.code) continue;
+        const { over } = clampCodeLimits({ ...cap, ...e.limits.code }, cap);
+        for (const o of over) out.diagnostics.push({ severity: 'warning', code: 'limits_capped', message: `servers.${si}.environments.${ei}.limits.code.${o.field}: ${o.value} is above the instance cap ${o.cap}; ${o.cap} applies`, line: parsed.lines.get(`servers.${si}.environments.${ei}.limits.code.${o.field}`) ?? parsed.lines.get(`servers.${si}.environments.${ei}`) ?? 1, col: 1, pointer: path });
+      }
     }
     if (opts.dryRun) return out;
 

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { stringify } from 'yaml';
 import { createLlmClient } from '@neurouter/evals';
-import { api, DEFAULT_CODE_LIMITS, parseSecretRef, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
+import { api, clampCodeLimits, DEFAULT_CODE_LIMITS, parseSecretRef, LLM_PROVIDER_KINDS, parseModelRef, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, providerForModel, SUPPORTED_PROTOCOL_VERSIONS, type KeyStatus, type LlmProviderKind, type ModelProvider, type Settings } from '@neurouter/shared';
 import type { CommittedAuditRow } from '../../../kernel/audit/writer.js';
 import { pingDatabase } from '../../../kernel/db/index.js';
 import { toIso, toIsoOrNull } from '../../../kernel/lib/clock.js';
@@ -76,7 +76,7 @@ async function settingsView(c: ApiContext): Promise<Settings> {
       effort: await s.get('evalEffort'),
       fallbacks: await s.get('evalFallbacks'),
     },
-    codeMode: { enabled: await s.get('codeModeEnabled'), executor: c.ports.executorStatus(), defaults: DEFAULT_CODE_LIMITS },
+    codeMode: { enabled: await s.get('codeModeEnabled'), executor: c.ports.executorStatus(), defaults: clampCodeLimits(DEFAULT_CODE_LIMITS, await s.get('codeLimitsCap')).limits, cap: await s.get('codeLimitsCap') },
     retention: { auditDays: await s.get('auditRetentionDays'), taskDays: (await s.get('retentionDays')) ?? c.config.env.NEUROUTER_RETENTION_DAYS },
     telemetry: { otelEnabled: !c.config.env.OTEL_SDK_DISABLED, metricsEnabled: c.config.env.METRICS_ENABLED, otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null },
     discovery: { nativeSearchClients: await s.get('nativeSearchClients') },
@@ -173,7 +173,12 @@ export async function settingsRoutes(app: FastifyInstance, c: ApiContext): Promi
       c.runtime.invalidate();
       await c.coord.publish(KILL_CHANGED, {});
     }
-    if (b.codeMode?.defaults) await s.set('codeLimitsCap', { ...(await s.get('codeLimitsCap')), ...b.codeMode.defaults }, u.id);
+    if (b.codeMode?.defaults) {
+      // `codeMode.defaults` sets the instance cap on per-environment code limits (enforced at runtime)
+      await s.set('codeLimitsCap', { ...(await s.get('codeLimitsCap')), ...b.codeMode.defaults }, u.id);
+      c.runtime.invalidate();
+      await c.coord.publish(KILL_CHANGED, {});
+    }
     if (b.retention?.auditDays !== undefined) await s.set('auditRetentionDays', b.retention.auditDays, u.id);
     if (b.retention?.taskDays !== undefined) await s.set('retentionDays', b.retention.taskDays, u.id);
     if (b.discovery?.nativeSearchClients) await s.set('nativeSearchClients', b.discovery.nativeSearchClients, u.id);

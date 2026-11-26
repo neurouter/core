@@ -328,6 +328,11 @@ function CodeMode() {
       <p className="text-[13.5px]">
         Default limits per script: {d.maxToolCalls} tool calls · {d.wallTimeSec} s wall · {d.cpuTimeSec} s CPU · {d.maxMemoryMb} MB · {d.maxConcurrentCalls} concurrent calls · {formatBytes(d.maxResultBytes)} result. Environments can lower them.
       </p>
+      {s.codeMode.cap ? (
+        <p className="text-[13px] text-muted-foreground">
+          Instance cap (environments cannot go above it): {s.codeMode.cap.maxToolCalls} tool calls · {s.codeMode.cap.wallTimeSec} s wall · {s.codeMode.cap.cpuTimeSec} s CPU · {s.codeMode.cap.maxMemoryMb} MB · {s.codeMode.cap.maxConcurrentCalls} concurrent calls · {formatBytes(s.codeMode.cap.maxResultBytes)} result.
+        </p>
+      ) : null}
       <p className="text-[13.5px]">
         Executor: <Pill tone={ex.ok ? 'ok' : 'err'}>{ex.ok ? 'healthy' : 'unavailable'}</Pill> {ex.mode} · Monty {ex.montyVersion ?? '—'} · {ex.busy} of {ex.poolMax} workers busy
       </p>

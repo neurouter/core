@@ -1,6 +1,7 @@
 import { gunzipSync } from 'node:zlib';
 import type { Kysely, Selectable } from 'kysely';
 import {
+  clampCodeLimits,
   DEFAULT_OPS_TOGGLES,
   type ConfirmMode,
   type DiscoveryMode,
@@ -241,7 +242,7 @@ export class DbRuntimeConfigSource implements RuntimeConfigSource {
     private readonly db: Kysely<MainDB>,
     private readonly clock: Clock,
     private readonly coord: CoordinationStore,
-    private readonly opts: { ttlMs?: number; codeModeEnabled: () => Promise<boolean> },
+    private readonly opts: { ttlMs?: number; codeModeEnabled: () => Promise<boolean>; codeLimitsCap?: () => Promise<CodeLimits> },
   ) {
     coord.subscribe(CONFIG_CHANGED, (payload) => {
       this.cache.clear();
@@ -300,6 +301,8 @@ export class DbRuntimeConfigSource implements RuntimeConfigSource {
     const ks = await this.db.selectFrom('kill_switches').selectAll().where('tenant_id', '=', tenantId).execute();
     const killSwitches: KillSwitch[] = ks.map((k) => ({ scope: k.scope, target: k.target, kind: k.kind, reason: k.reason }));
     const environment = environmentRuntime(e);
+    // the instance cap wins over per-environment code limits (§10.5)
+    if (this.opts.codeLimitsCap) environment.limits = { ...environment.limits, code: clampCodeLimits(environment.limits.code, await this.opts.codeLimitsCap()).limits };
     const server = { id: s.id, slug: s.slug, name: s.name, description: s.description, kind: s.kind, opsTools: parseOpsTools(s.ops_tools), exposure: parseExposure(s.exposure), status: s.status };
     const codeModeEnabled = await this.opts.codeModeEnabled();
     const bundleHash = hashCanonical({ server, environment, build: build.hash, killSwitches, codeModeEnabled });

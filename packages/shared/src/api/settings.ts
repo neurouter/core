@@ -38,7 +38,8 @@ export const Settings = z.object({
     effort: EvalEffort,
     fallbacks: z.enum(['default', 'off']),
   }),
-  codeMode: z.object({ enabled: z.boolean(), executor: ExecutorStatus, defaults: CodeLimits }),
+  /** `defaults`: per-script defaults (within the cap); `cap`: the instance cap per-environment limits are clamped to. */
+  codeMode: z.object({ enabled: z.boolean(), executor: ExecutorStatus, defaults: CodeLimits, cap: CodeLimits }),
   retention: z.object({ auditDays: z.number().int(), taskDays: z.number().int() }),
   telemetry: z.object({ otelEnabled: z.boolean(), metricsEnabled: z.boolean(), otlpEndpoint: z.string().nullable() }),
   discovery: z.object({ nativeSearchClients: z.array(z.string()) }),
@@ -67,6 +68,7 @@ export const SettingsPatch = z.object({
     })
     .partial()
     .optional(),
+  /** `defaults` sets the instance cap on per-environment code limits (the name is kept for compatibility). */
   codeMode: z.object({ enabled: z.boolean(), defaults: CodeLimits.partial() }).partial().optional(),
   retention: z.object({ auditDays: z.number().int().min(1).max(3650), taskDays: z.number().int().min(1).max(3650) }).partial().optional(),
   discovery: z.object({ nativeSearchClients: z.array(z.string().max(200)).max(50) }).partial().optional(),

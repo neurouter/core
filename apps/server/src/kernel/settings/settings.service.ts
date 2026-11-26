@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+import { DEFAULT_CODE_LIMITS_CAP } from '@neurouter/shared';
 import type { CoordinationStore } from '../coordination/types.js';
 import type { MainDB } from '../db/schema.js';
 import type { Clock } from '../lib/clock.js';
@@ -70,7 +71,7 @@ export const SETTING_DEFAULTS: SettingValues = {
   metricsToolLabel: true,
   orgName: null,
   codeModeEnabled: true,
-  codeLimitsCap: { maxToolCalls: 1000, wallTimeSec: 120, cpuTimeSec: 60, maxMemoryMb: 512, maxConcurrentCalls: 32, maxResultBytes: 4 * 1024 * 1024 },
+  codeLimitsCap: DEFAULT_CODE_LIMITS_CAP,
   evalModel: null,
   judgeModel: null,
   generatorModel: null,

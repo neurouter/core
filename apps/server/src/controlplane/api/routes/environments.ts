@@ -4,7 +4,7 @@ import { toIso } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
 import { environmentRuntime } from '../../../kernel/runtime-config.js';
 import { requireUser } from '../../auth/guards.js';
-import { assertConsoleManaged, EnvironmentsService, type EnvRow } from '../../environments/environments.service.js';
+import { assertConsoleManaged, assertWithinCodeCap, EnvironmentsService, type EnvRow } from '../../environments/environments.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
 import { serverOr404 } from './servers.js';
@@ -30,12 +30,16 @@ export async function environmentRoutes(app: FastifyInstance, c: ApiContext): Pr
   });
   route(app, 'environments.create', api.environments.create, async (req, reply) => {
     const s = await serverOr404(c, req.params.id);
+    assertWithinCodeCap(req.body.limits, await c.settings.get('codeLimitsCap'));
     const e = await envs.create(s.id, req.body);
     reply.status(201);
     return detail(req, e);
   });
   route(app, 'environments.get', api.environments.get, async (req) => detail(req, await envs.get(req.params.id)));
-  route(app, 'environments.update', api.environments.update, async (req) => detail(req, await envs.update(req.params.id, req.body)));
+  route(app, 'environments.update', api.environments.update, async (req) => {
+    assertWithinCodeCap(req.body.limits, await c.settings.get('codeLimitsCap'));
+    return detail(req, await envs.update(req.params.id, req.body));
+  });
   route(app, 'environments.delete', api.environments.delete, async (req) => {
     await envs.delete(req.params.id, req.query.confirm);
   });

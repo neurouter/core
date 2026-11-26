@@ -270,7 +270,7 @@ function settingsView(db: MockDb) {
   return {
     general: { orgName: st.orgName, publicUrl: 'https://mcp.acme.test', retentionDays: st.taskDays },
     models: { anthropicKey: st.keys.anthropic, keys: st.keys, evalModel: st.evalModel, judgeModel: st.judgeModel, generatorModel: st.generatorModel, effort: st.effort, fallbacks: st.fallbacks },
-    codeMode: { enabled: st.codeModeEnabled, executor: { mode: 'embedded' as const, ok: true, montyVersion: '0.4.2', poolMax: 8, busy: 1, detail: null }, defaults: { maxToolCalls: 200, wallTimeSec: 30, cpuTimeSec: 10, maxMemoryMb: 64, maxConcurrentCalls: 8, maxResultBytes: 1_048_576 } },
+    codeMode: { enabled: st.codeModeEnabled, executor: { mode: 'embedded' as const, ok: true, montyVersion: '0.4.2', poolMax: 8, busy: 1, detail: null }, defaults: { maxToolCalls: 200, wallTimeSec: 30, cpuTimeSec: 10, maxMemoryMb: 64, maxConcurrentCalls: 8, maxResultBytes: 1_048_576 }, cap: { maxToolCalls: 1000, wallTimeSec: 120, cpuTimeSec: 60, maxMemoryMb: 512, maxConcurrentCalls: 32, maxResultBytes: 4_194_304 } },
     retention: { auditDays: st.auditDays, taskDays: st.taskDays },
     telemetry: { otelEnabled: true, metricsEnabled: true, otlpEndpoint: 'http://otel-collector:4318' },
     discovery: { nativeSearchClients: ['claude-code'] },
