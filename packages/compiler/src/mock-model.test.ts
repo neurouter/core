@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handleMockRequest } from './mock/handler.js';
 import type { OpenApiMockModel } from './mock/model.js';
+import { generateValue, seededFaker } from './mock/generate.js';
 import { MockStore, sampleEntities } from './mock/store.js';
 import { compileFile, compileText, COUNTRIES, GITHUB_SUBSET, NOTES_SPEC, PETSTORE } from './test/fixtures.js';
 
@@ -144,5 +145,13 @@ describe('mock handler', () => {
     expect(b.body).toEqual(a.body);
     const bad = await handleMockRequest(r.mockModel!, new MockStore(), 'ns', { method: 'POST', path: '/graphql', body: { query: '{ nope }' } });
     expect((bad.body as { errors: unknown[] }).errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('mock string generation', () => {
+  it('honours a minLength above the 24-character cap (GitHub commit SHAs: minLength 40, maxLength 64)', () => {
+    const ctx = { faker: seededFaker(1), defs: {}, depth: 0, index: 2 };
+    const v = generateValue({ type: 'string', minLength: 40, maxLength: 64, pattern: '^([0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?)$' }, 'commit_sha', ctx) as string;
+    expect(v.length).toBeGreaterThanOrEqual(40);
   });
 });
