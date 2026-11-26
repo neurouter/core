@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { generateSuite, normalizeAssertion, validateGenerated } from './generate.js';
+import { estimateTokens, selectGeneratorInput } from './select.js';
+import { readMarkerInput, GENERATOR_MARKER } from './prompts.js';
+import type { GeneratorCategoryInput } from './types.js';
 import { ScriptedLlmClient, llmResponse } from './llm/fake.js';
 import { LlmKeyError } from './llm/types.js';
 import type { GenTool } from './types.js';
@@ -25,7 +28,7 @@ describe('generateSuite', () => {
     expect(s.tasks.map((t) => t.key)).toEqual(['a', 'imp']);
     expect(s.tasks[0]!.assertions.at(-1)).toEqual({ type: 'framing' });
     expect(String(llm.requests[1]!.messages[0]!.content)).toContain('duplicate prompt');
-    expect(s.generator).toMatchObject({ seed: 3, promptVersion: 'gen-1' });
+    expect(s.generator).toMatchObject({ seed: 3, promptVersion: 'gen-2' });
   });
 
   it('regenerates once with the errors appended, then drops with a diagnostic', async () => {
@@ -81,5 +84,61 @@ describe('validateGenerated', () => {
       expect(v.task.assertions[0]).toEqual({ type: 'called', tool: 'list_pets' });
       expect(v.task.referenceCalls?.map((r) => r.tool)).toEqual(['list_pets', 'get_pet_by_id']);
     }
+  });
+});
+
+describe('generator scope and budget (large APIs)', () => {
+  // 1,200 tools × ~1.6k tokens of schema each ≈ 2M tokens if sent whole (GitHub: 1281 tools, ~516k tokens)
+  const big: GenTool[] = Array.from({ length: 1200 }, (_, i) => {
+    const group = ['issues', 'pulls', 'repos', 'actions', 'billing', 'teams'][i % 6]!;
+    return {
+      name: `${group}_op_${i}`,
+      title: `Operation ${i}`,
+      description: `Does ${group} thing ${i}. ${'Long description. '.repeat(20)}`,
+      inputSchema: { type: 'object', properties: Object.fromEntries(Array.from({ length: 12 }, (_, k) => [`arg_${k}`, { type: 'string', description: 'x'.repeat(300) }])) },
+      write: i % 3 === 0,
+      key: `operationId:${group}/op-${i}`,
+      group,
+      path: `/repos/{owner}/{repo}/${group}/${i}`,
+    };
+  });
+  const promptOf = (req: { messages: Array<{ content: unknown }> }) => readMarkerInput(String(req.messages[0]!.content), GENERATOR_MARKER) as GeneratorCategoryInput;
+
+  it('sends a budgeted subset with schemas plus a names-only catalog, and reports usage', async () => {
+    const ok = (t: GenTool) => ({ key: `k-${t.name}`, category: 'single', prompt: `Run ${t.name}`, rubric: '', assertions: [{ type: 'called', tool: t.name }], reference_calls: [{ tool: t.name, arguments: {} }] });
+    const llm = new ScriptedLlmClient([], (req) => {
+      const input = promptOf(req);
+      return llmResponse([{ type: 'text', text: JSON.stringify({ tasks: input.tools.slice(0, input.count).map(ok) }) }], { input: estimateTokens(req.messages), output: 500 });
+    });
+    const s = await generateSuite({ llm, model: 'm', server: { name: 'Big', slug: 'big' }, tools: big, samples: {}, counts: { single: 3, multi: 0, ambiguous: 0, impossible: 0 }, maxGeneratorTokens: 200_000, instructions: 'focus on issues' });
+    expect(estimateTokens(big)).toBeGreaterThan(1_000_000);
+    expect(llm.requests).toHaveLength(1);
+    const input = promptOf(llm.requests[0]!);
+    expect(input.tools.length).toBeGreaterThan(5);
+    expect(input.tools.length).toBeLessThan(big.length);
+    expect(input.otherTools!.length + input.tools.length).toBeLessThanOrEqual(big.length);
+    expect(input.otherTools!.length).toBeGreaterThan(100);
+    expect(input.tools.filter((t) => t.group === 'issues').length).toBeGreaterThan(input.tools.length / 3); // instructions focus
+    expect(estimateTokens(llm.requests[0]!.messages)).toBeLessThanOrEqual(60_000 + 2_000);
+    expect(s.tasks).toHaveLength(3);
+    expect(s.tasks[0]!.assertions[0]).toMatchObject({ toolKey: expect.stringMatching(/^operationId:/) });
+    expect(s.generator.usage).toMatchObject({ calls: 1, outputTokens: 500, budgetTokens: 200_000, visibleTools: 1200 });
+    expect(s.generator.usage.totalTokens).toBe(s.generator.usage.inputTokens + 500);
+  });
+
+  it('stops with a diagnostic when the budget is used up', async () => {
+    const llm = new ScriptedLlmClient([], () => llmResponse([{ type: 'text', text: JSON.stringify({ tasks: [] }) }], { input: 40_000, output: 1_000 }));
+    const s = await generateSuite({ llm, model: 'm', server: { name: 'Big', slug: 'big' }, tools: big, samples: {}, counts: { single: 2, multi: 2, ambiguous: 0, impossible: 0 }, maxGeneratorTokens: 60_000 });
+    expect(s.tasks).toEqual([]);
+    expect(s.generator.usage.totalTokens).toBeLessThanOrEqual(60_000 + 41_000);
+    expect(s.diagnostics.map((d) => d.message).join('\n')).toMatch(/budget exhausted|returned no tasks/);
+    expect(s.diagnostics.some((d) => /budget exhausted/.test(d.message))).toBe(true);
+  });
+
+  it('sends small APIs whole (no catalog)', () => {
+    const sel = selectGeneratorInput(tools, { category: 'single', budgetTokens: 20_000, seed: 1, samples: { '/pet': [{ id: 1 }] } });
+    expect(sel.tools).toEqual(tools);
+    expect(sel.otherTools).toEqual([]);
+    expect(sel.samples).toEqual({ '/pet': [{ id: 1 }] });
   });
 });

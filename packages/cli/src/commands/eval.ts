@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { buildReport, renderMarkdown, renderTable, type EvalTask, type SuiteFile } from '@neurouter/evals';
+import { buildReport, renderMarkdown, renderTable, type EvalReport, type EvalTask, type SuiteFile } from '@neurouter/evals';
 import { startServer, type RunningServer } from '@neurouter/server';
 import { providerForModel } from '@neurouter/shared';
 import { readSpec, serverEnv } from './common.js';
@@ -13,6 +13,7 @@ interface EvalOpts {
   generate?: boolean;
   counts: string;
   saveSuite?: string;
+  maxGeneratorTokens?: string;
   models?: string;
   modes: string;
   repeats: string;
@@ -64,15 +65,31 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     if (!envRow) throw new Error(`unknown environment ${o.env}`);
     // suite: load, or generate
     let suiteId: string;
+    let generated: EvalReport['generator'] | undefined;
     if (o.suite && !o.generate) {
       const file = JSON.parse(readFileSync(o.suite, 'utf8')) as SuiteFile;
       const suite = await s.evals.saveSuite(tenant, serverId, null, file.tasks, { importedFrom: o.suite }, null, true);
       suiteId = suite.id;
     } else {
       const [single, multi, ambiguous, impossible] = o.counts.split(',').map((x) => Number(x));
+      const maxGeneratorTokens = o.maxGeneratorTokens !== undefined ? Number(o.maxGeneratorTokens) : undefined;
+      if (maxGeneratorTokens !== undefined && !(maxGeneratorTokens >= 4000)) throw new Error('--max-generator-tokens must be a number ≥ 4000');
       console.error('generating eval suite…');
-      const suite = await s.evals.generateSuite(tenant, serverId, { counts: { single: single ?? 8, multi: multi ?? 8, ambiguous: ambiguous ?? 4, impossible: impossible ?? 4 }, createdBy: null });
+      const suite = await s.evals.generateSuite(tenant, serverId, { counts: { single: single ?? 8, multi: multi ?? 8, ambiguous: ambiguous ?? 4, impossible: impossible ?? 4 }, ...(maxGeneratorTokens ? { maxGeneratorTokens } : {}), createdBy: null });
       suiteId = suite.id;
+      const gen = JSON.parse(suite.generator ?? '{}') as { model?: string; usage?: NonNullable<EvalReport['generator']>['usage']; diagnostics?: Array<{ category: string; key: string | null; message: string }> };
+      const diags = gen.diagnostics ?? [];
+      for (const d of diags) console.error(`generator: ${d.category}${d.key ? ` ${d.key}` : ''}: ${d.message}`);
+      const u = gen.usage;
+      if (u) console.error(`generator usage: ${u.calls} call(s), ${u.totalTokens} tokens (input ${u.inputTokens}, cached ${u.cacheReadTokens}, output ${u.outputTokens}) of a ${u.budgetTokens}-token budget`);
+      generated = { model: gen.model ?? '', usage: u ?? { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, budgetTokens: 0 }, tasks: suite.task_count, diagnostics: diags.length };
+      // an empty suite would "run" and score nothing: stop here, with the reasons above
+      if (suite.task_count === 0) {
+        console.error('the generator produced no valid tasks; nothing was saved or run (see the generator diagnostics above)');
+        process.exitCode = 2;
+        return;
+      }
+      console.error(`suite generated: ${suite.task_count} tasks`);
     }
     const tasks = (await s.evals.suiteTasks(tenant, suiteId)).map((r) => ({ key: r.key, category: r.category, prompt: r.prompt })) as unknown as EvalTask[];
     if (o.saveSuite) {
@@ -100,8 +117,10 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
       suggestions: suggestions.map((x) => ({ cause: x.cause as never, kind: x.kind, tools: JSON.parse(x.tools) as string[], affectedTaskKeys: JSON.parse(x.affected_task_ids) as string[], overlayPatch: (JSON.parse(x.overlay_patch) as { yaml: string }).yaml, overlayOps: [], specPatch: x.spec_patch, rationale: x.rationale, predictedDelta: x.predicted_delta })),
       results,
       prompts,
+      ...(generated ? { generator: generated } : {}),
     });
     console.log(renderTable(report));
+    if (generated) console.log(`Suite generation: ${generated.usage.totalTokens} tokens over ${generated.usage.calls} call(s) (budget ${generated.usage.budgetTokens})`);
     if (o.suggest) for (const x of report.suggestions) console.log(`\nSuggestion (${x.kind}, +${x.predictedDelta} predicted): ${x.rationale}\n${x.overlayPatch}`);
     if (o.out) writeFileSync(o.out, JSON.stringify(report, null, 2));
     if (o.md) writeFileSync(o.md, renderMarkdown(report));

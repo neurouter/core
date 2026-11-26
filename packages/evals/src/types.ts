@@ -207,13 +207,20 @@ export interface GenTool {
   exampleArguments?: Record<string, unknown> | null;
   /** Stable tool identity (`ToolDef.key`), stamped on generated assertions so renames don't break the suite. */
   key?: string;
+  /** Group for sampling large APIs (first tag). */
+  group?: string;
+  /** HTTP path template (links the tool to mock sample resources). */
+  path?: string;
 }
 
 export interface GeneratorCategoryInput {
   category: EvalTask['category'];
   count: number;
   server: { name: string; slug: string; description?: string | null };
+  /** Tools with full schemas (all of them for small APIs; a budgeted, relevant subset for large ones). */
   tools: GenTool[];
+  /** The other visible tools, names only (large APIs): they exist, but the tasks should use `tools`. */
+  otherTools?: Array<{ name: string; title?: string; write?: boolean }>;
   /** Mock resources → up to 3 sample entities each (seeded, so prompts can reference existing ids). */
   samples: Record<string, Array<Record<string, unknown>>>;
   instructions?: string | null;

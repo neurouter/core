@@ -29,9 +29,9 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
     const tasks = await db.selectFrom('eval_tasks').where('tenant_id', '=', s.tenant_id).select(['category']).where('suite_id', '=', s.id).execute();
     const by = { single: 0, multi: 0, ambiguous: 0, impossible: 0 };
     for (const t of tasks) by[t.category]++;
-    const gen = parseJsonColumn<{ model?: string; promptVersion?: string; seed?: number }>(s.generator) ?? {};
+    const gen = parseJsonColumn<{ model?: string; promptVersion?: string; seed?: number; usage?: { calls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; totalTokens: number; budgetTokens: number }; diagnostics?: Array<{ category: never; key: string | null; message: string }> }>(s.generator) ?? {};
     const b = s.generated_from_build_id ? await db.selectFrom('builds').where('tenant_id', '=', s.tenant_id).select(['id', 'hash']).where('id', '=', s.generated_from_build_id).executeTakeFirst() : undefined;
-    return { id: s.id, serverId: s.server_id, version: s.version, status: s.status, taskCount: tasks.length, byCategory: by, generatedFromBuild: b ? { id: b.id, hash: b.hash } : null, generator: gen.model ? { model: gen.model, promptVersion: gen.promptVersion ?? '', seed: gen.seed ?? null } : null, createdAt: toIso(s.created_at), frozenAt: toIsoOrNull(s.frozen_at) };
+    return { id: s.id, serverId: s.server_id, version: s.version, status: s.status, taskCount: tasks.length, byCategory: by, generatedFromBuild: b ? { id: b.id, hash: b.hash } : null, generator: gen.model ? { model: gen.model, promptVersion: gen.promptVersion ?? '', seed: gen.seed ?? null, ...(gen.usage ? { usage: { calls: gen.usage.calls, inputTokens: gen.usage.inputTokens, outputTokens: gen.usage.outputTokens, cacheReadTokens: gen.usage.cacheReadTokens, totalTokens: gen.usage.totalTokens, budgetTokens: gen.usage.budgetTokens } } : {}), ...(gen.diagnostics ? { diagnostics: gen.diagnostics.slice(0, 50) } : {}) } : null, createdAt: toIso(s.created_at), frozenAt: toIsoOrNull(s.frozen_at) };
   };
   const taskRow = (t: EvalTaskRowDb): EvalTaskRow => ({ id: t.id, key: t.key, category: t.category, prompt: t.prompt, rubric: t.rubric, assertions: parseJsonColumn(t.assertions) ?? [], referenceCalls: parseJsonColumn(t.reference_calls) ?? [], seedState: parseJsonColumn(t.seed_state), tags: parseJsonColumn(t.tags) ?? [], enabled: t.enabled === 1, source: t.source });
   const runRow = async (r: EvalRunRowDb): Promise<EvalRunRow> => {
@@ -126,7 +126,7 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
   route(app, 'evals.generateSuite', api.evals.generateSuite, async (req, reply) => {
     await ev.llm(tenantOf(req));
     const b = req.body ?? {};
-    const jobId = await c.jobs.start(tenantOf(req), 'eval_generate', { serverId: req.params.id }, userOf(req), async () => suiteRow(await ev.generateSuite(tenantOf(req), req.params.id, { ...(b.counts ? { counts: b.counts } : {}), ...(b.model ? { model: b.model } : {}), ...(b.seed !== undefined ? { seed: b.seed } : {}), instructions: b.instructions ?? null, createdBy: userOf(req) })));
+    const jobId = await c.jobs.start(tenantOf(req), 'eval_generate', { serverId: req.params.id }, userOf(req), async () => suiteRow(await ev.generateSuite(tenantOf(req), req.params.id, { ...(b.counts ? { counts: b.counts } : {}), ...(b.model ? { model: b.model } : {}), ...(b.seed !== undefined ? { seed: b.seed } : {}), instructions: b.instructions ?? null, ...(b.maxGeneratorTokens ? { maxGeneratorTokens: b.maxGeneratorTokens } : {}), createdBy: userOf(req) })));
     return reply.status(202).send({ jobId, status: 'running' } as never);
   });
 

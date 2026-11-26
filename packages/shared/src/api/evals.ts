@@ -24,7 +24,17 @@ export const EvalSuiteRow = z.object({
   taskCount: z.number().int(),
   byCategory: CategoryCounts,
   generatedFromBuild: z.object({ id: Id, hash: z.string() }).nullable(),
-  generator: z.object({ model: z.string(), promptVersion: z.string(), seed: z.number().int().nullable() }).nullable(),
+  generator: z
+    .object({
+      model: z.string(),
+      promptVersion: z.string(),
+      seed: z.number().int().nullable(),
+      /** Generator LLM usage (0.2.1+): calls and tokens (input = uncached, cached read, output) against the budget. */
+      usage: z.object({ calls: z.number().int(), inputTokens: z.number().int(), outputTokens: z.number().int(), cacheReadTokens: z.number().int(), totalTokens: z.number().int(), budgetTokens: z.number().int() }).optional(),
+      /** Why generated tasks were rejected or categories came out short (0.2.1+). */
+      diagnostics: z.array(z.object({ category: EvalCategory, key: z.string().nullable(), message: z.string() })).optional(),
+    })
+    .nullable(),
   createdAt: IsoDateTime,
   frozenAt: IsoDateTime.nullable(),
 });
@@ -53,6 +63,8 @@ export const SuiteGenerate = z.object({
   model: z.string().min(1).optional(),
   seed: z.number().int().optional(),
   instructions: z.string().max(2000).optional(),
+  /** Token budget for the whole generation (default 400,000). */
+  maxGeneratorTokens: z.number().int().min(4000).max(10_000_000).optional(),
 });
 export type SuiteGenerate = z.infer<typeof SuiteGenerate>;
 
