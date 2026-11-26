@@ -70,6 +70,14 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...prodEnv(), ...patch })).toThrow(message);
   });
 
+  it('allows a production read-only demo without any sign-in method (no OIDC, no local link)', () => {
+    const noOidc = { ...prodEnv(), OIDC_ISSUER: '', OIDC_CLIENT_ID: '', OIDC_CLIENT_SECRET: '', NEUROUTER_LOCAL_LINK: 'false' };
+    expect(() => loadConfig(noOidc)).toThrow(/required in production/);
+    const c = loadConfig({ ...noOidc, NEUROUTER_DEMO_READ_ONLY: 'true' });
+    expect(c.localLink).toBe(false);
+    expect(c.env.NEUROUTER_DEMO_READ_ONLY).toBe(true);
+  });
+
   it('lists every problem in ConfigError', () => {
     try {
       loadConfig({ NODE_ENV: 'production' });

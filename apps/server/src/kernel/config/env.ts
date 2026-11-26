@@ -147,9 +147,10 @@ export const Env = z
     const oidcSet = [e.OIDC_ISSUER, e.OIDC_CLIENT_ID, e.OIDC_CLIENT_SECRET].filter(Boolean).length;
     if (oidcSet > 0 && oidcSet < 3)
       ctx.addIssue({ code: 'custom', path: ['OIDC_ISSUER'], message: 'OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET must be set together' });
-    // production needs a sign-in method other than the local link (§6.1)
-    if (prod && oidcSet < 3 && e.NEUROUTER_LOCAL_LINK !== true)
-      ctx.addIssue({ code: 'custom', path: ['OIDC_ISSUER'], message: 'OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET are required in production (or set NEUROUTER_LOCAL_LINK=true explicitly)' });
+    // production needs a sign-in method other than the local link (§6.1). A read-only public demo
+    // may run with none: visitors get the anonymous viewer session, admins use the CLI against the DB.
+    if (prod && oidcSet < 3 && e.NEUROUTER_LOCAL_LINK !== true && !e.NEUROUTER_DEMO_READ_ONLY)
+      ctx.addIssue({ code: 'custom', path: ['OIDC_ISSUER'], message: 'OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET are required in production (or set NEUROUTER_LOCAL_LINK=true explicitly, or NEUROUTER_DEMO_READ_ONLY=true for a sign-in-free read-only demo)' });
     if (prod) {
       for (const k of ['NEUROUTER_MASTER_KEYS', 'NEUROUTER_ACTIVE_KEY_ID', 'HASH_PEPPER'] as const)
         if (!e[k]) ctx.addIssue({ code: 'custom', path: [k], message: `${k} is required in production` });
