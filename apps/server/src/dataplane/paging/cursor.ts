@@ -68,7 +68,8 @@ export class CursorCodec {
 
   encode(payload: CursorPayload, b: CursorBinding): string {
     const exp = Math.ceil((this.now() + this.ttlMs) / 1000);
-    const body = Buffer.from(JSON.stringify([exp, payload])).toString('base64url');
+    // nulls are left out (short cursors); a missing `then`/`t` reads as none
+    const body = Buffer.from(JSON.stringify([exp, payload], (_k, v: unknown) => (v === null ? undefined : v))).toString('base64url');
     return `${PREFIX}${body}.${this.mac(body, b).toString('base64url')}`;
   }
 
