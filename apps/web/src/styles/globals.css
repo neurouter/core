@@ -1,0 +1,228 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-success-muted: var(--success-muted);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-warning-muted: var(--warning-muted);
+    --color-info: var(--info);
+    --color-info-foreground: var(--info-foreground);
+    --color-info-muted: var(--info-muted);
+    --color-destructive-muted: var(--destructive-muted);
+    --color-brand-muted: var(--brand-muted);
+    --color-brand-border: var(--brand-border);
+    --color-brand-strong: var(--brand-strong);
+    --color-mode-tool: var(--mode-tool);
+    --color-mode-code: var(--mode-code);
+    --color-mode-code-muted: var(--mode-code-muted);
+    --color-mode-code-border: var(--mode-code-border);
+    --color-env-dev: var(--env-dev);
+    --color-env-dev-muted: var(--env-dev-muted);
+    --color-env-qa: var(--env-qa);
+    --color-env-qa-muted: var(--env-qa-muted);
+    --color-env-prod: var(--env-prod);
+    --color-env-prod-muted: var(--env-prod-muted);
+    --color-score-low: var(--destructive);
+    --color-score-mid: var(--warning);
+    --color-score-high: var(--success);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * Hub's neutral console tokens + the Neurouter brand layer (frontend spec §6, prototype in
+ * .agent/reports/neurouter/prototype): indigo primary, brand-muted surfaces, score bands mapped
+ * onto destructive / warning / success, tool mode = chart-1 blue, code mode = chart-2 teal,
+ * environment badge colours (always paired with text).
+ */
+:root {
+    --background: #ffffff;
+    --foreground: #0a0a0a;
+    --card: #ffffff;
+    --card-foreground: #0a0a0a;
+    --popover: #ffffff;
+    --popover-foreground: #0a0a0a;
+    --primary: #4338ca;
+    --primary-foreground: #ffffff;
+    --secondary: #f5f5f5;
+    --secondary-foreground: #171717;
+    --muted: #f5f5f5;
+    --muted-foreground: #636363;
+    --accent: #ececec;
+    --accent-foreground: #171717;
+    --destructive: #b91c1c;
+    --destructive-muted: #fef2f2;
+    --success: #15803d;
+    --success-foreground: #ffffff;
+    --success-muted: #f0fdf4;
+    --warning: #a16207;
+    --warning-foreground: #ffffff;
+    --warning-muted: #fefce8;
+    --info: #1d4ed8;
+    --info-foreground: #ffffff;
+    --info-muted: #eff6ff;
+    --border: #e5e5e5;
+    --input: #e0e0e0;
+    --ring: #6366f1;
+    --chart-1: #2563eb;
+    --chart-2: #0d9488;
+    --chart-3: #d97706;
+    --chart-4: #7c3aed;
+    --chart-5: #db2777;
+    --radius: 0.5rem;
+    --sidebar: #fafafa;
+    --sidebar-foreground: #0a0a0a;
+    --sidebar-primary: #4338ca;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #eef0ff;
+    --sidebar-accent-foreground: #3730a3;
+    --sidebar-border: #e5e5e5;
+    --sidebar-ring: #a3a3a3;
+    --brand-muted: #eef0ff;
+    --brand-border: #c7d2fe;
+    --brand-strong: #3730a3;
+    --mode-tool: #2563eb;
+    --mode-code: #0d9488;
+    --mode-code-muted: #f0fdfa;
+    --mode-code-border: #99f6e4;
+    --env-dev: #3f3f46;
+    --env-dev-muted: #f4f4f5;
+    --env-qa: #1d4ed8;
+    --env-qa-muted: #eff6ff;
+    --env-prod: #b45309;
+    --env-prod-muted: #fffbeb;
+}
+
+.dark {
+    --background: #0a0a0a;
+    --foreground: #fafafa;
+    --card: #141414;
+    --card-foreground: #fafafa;
+    --popover: #141414;
+    --popover-foreground: #fafafa;
+    --primary: #a5b4fc;
+    --primary-foreground: #1e1b4b;
+    --secondary: #232323;
+    --secondary-foreground: #fafafa;
+    --muted: #232323;
+    --muted-foreground: #a3a3a3;
+    --accent: #262626;
+    --accent-foreground: #fafafa;
+    --destructive: #f87171;
+    --destructive-muted: rgb(248 113 113 / 0.1);
+    --success: #4ade80;
+    --success-foreground: #0a0a0a;
+    --success-muted: rgb(74 222 128 / 0.09);
+    --warning: #facc15;
+    --warning-foreground: #0a0a0a;
+    --warning-muted: rgb(250 204 21 / 0.09);
+    --info: #60a5fa;
+    --info-foreground: #0a0a0a;
+    --info-muted: rgb(96 165 250 / 0.1);
+    --border: #2a2a2a;
+    --input: #363636;
+    --ring: #818cf8;
+    --chart-1: #60a5fa;
+    --chart-2: #2dd4bf;
+    --chart-3: #fbbf24;
+    --chart-4: #a78bfa;
+    --chart-5: #f472b6;
+    --sidebar: #111111;
+    --sidebar-foreground: #fafafa;
+    --sidebar-primary: #a5b4fc;
+    --sidebar-primary-foreground: #1e1b4b;
+    --sidebar-accent: rgb(165 180 252 / 0.12);
+    --sidebar-accent-foreground: #c7d2fe;
+    --sidebar-border: #2a2a2a;
+    --sidebar-ring: #737373;
+    --brand-muted: rgb(165 180 252 / 0.12);
+    --brand-border: rgb(165 180 252 / 0.35);
+    --brand-strong: #c7d2fe;
+    --mode-tool: #60a5fa;
+    --mode-code: #2dd4bf;
+    --mode-code-muted: rgb(45 212 191 / 0.08);
+    --mode-code-border: rgb(45 212 191 / 0.3);
+    --env-dev: #d4d4d4;
+    --env-dev-muted: #262626;
+    --env-qa: #93c5fd;
+    --env-qa-muted: rgb(96 165 250 / 0.14);
+    --env-prod: #fbbf24;
+    --env-prod-muted: rgb(251 191 36 / 0.14);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  a:not([class]) {
+    @apply text-primary underline-offset-4 hover:underline;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .score-arc {
+    transition: none !important;
+  }
+}
+
+/* shiki dual themes: tokens carry the light colour and --shiki-dark (components/code/code-view.tsx) */
+.dark .shiki-token {
+  color: var(--shiki-dark) !important;
+}
