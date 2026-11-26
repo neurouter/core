@@ -4,6 +4,7 @@ import {
   META_DRY_RUN,
   META_GRAPHQL_ERRORS,
   META_NEXT_TOOLS,
+  META_PLANNED_CHANGES,
   META_RESULT_HANDLE,
   META_RETRY_AFTER_MS,
   META_TASK_ID,
@@ -229,7 +230,7 @@ export class Pipeline {
       if (tool) this.d.tracker.remember(ctx.taskId, { tool: tool.name, tags: tool.tags, ok: status === 'ok' && !blocked });
     };
 
-    const fail = async (decision: AuditDecision, status: AuditStatus, code: ErrorCode, message: string, detail: Record<string, unknown>, extra: { retryAfterMs?: number; nextTools?: string[]; audit?: Partial<AuditEventInput>; unknown?: boolean } = {}): Promise<ToolOutcome> => {
+    const fail = async (decision: AuditDecision, status: AuditStatus, code: ErrorCode, message: string, detail: Record<string, unknown>, extra: { retryAfterMs?: number; nextTools?: string[]; audit?: Partial<AuditEventInput>; unknown?: boolean; meta?: Record<string, unknown> } = {}): Promise<ToolOutcome> => {
       let errorId: string | null = null;
       try {
         errorId = await this.d.errors.record({ tenantId: ctx.tenantId, taskId: ctx.taskId, auditId, toolName: tool?.name ?? name, code, detail: { tool: tool?.name ?? name, environment: ctx.environment.slug, ...detail } });
@@ -237,7 +238,7 @@ export class Pipeline {
         this.d.log.warn({ err }, 'error event not recorded');
       }
       record(decision, status, { errorCode: code, errorMessage: message.slice(0, 1000), errorId, decisionReason: code, ...(extra.audit ?? {}) });
-      const r = errorResult(message, errorId, code, { ...(extra.retryAfterMs !== undefined ? { retryAfterMs: extra.retryAfterMs } : {}), ...(extra.nextTools ? { nextTools: extra.nextTools } : {}), meta: metaBase() });
+      const r = errorResult(message, errorId, code, { ...(extra.retryAfterMs !== undefined ? { retryAfterMs: extra.retryAfterMs } : {}), ...(extra.nextTools ? { nextTools: extra.nextTools } : {}), meta: { ...metaBase(), ...(extra.meta ?? {}) } });
       return { ok: false, unknown: extra.unknown ?? false, decision, status, result: r, error: { code, message, errorId }, auditId, ...(tool ? { tool } : {}) };
     };
 
@@ -314,9 +315,9 @@ export class Pipeline {
     step('rate_limit', 'pass');
 
     const argsHash = argsHashOf(tool.name, args);
-    const isProdWrite = tool.risk.write && ctx.environment.kind === 'prod';
+    // confirmation applies wherever the environment asks for it (prod: always; `none` is invalid there)
     const confirmMode = ctx.bundle.environment.writes.confirm;
-    const wouldConfirm = isProdWrite && confirmMode !== 'none';
+    const wouldConfirm = tool.risk.write && confirmMode !== 'none';
 
     // 8 dry-run short-circuit
     if (ctx.dryRun && tool.risk.write) {
@@ -348,11 +349,18 @@ export class Pipeline {
         }
         if (out.status === 'unsupported') {
           step('confirm', 'fail', 'unsupported');
-          return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', 'This client cannot ask the user to confirm production writes.', {});
+          const where = envLabel(ctx);
+          if (confirmMode === 'elicit') {
+            // elicit: hand back the planned change (not executed) so the user can review and run it elsewhere
+            const planned = this.plannedChange(tool, args, true, argsHash);
+            const change = { tool: planned.tool, method: planned.method, path: planned.path, arguments: planned.arguments };
+            return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `Not executed: this client cannot ask the user to confirm writes in ${where}. Planned change (nothing was changed): ${planned.method} ${planned.path} ${compactJson(planned.arguments).slice(0, 2000)}. Show it to the user; they can approve it from a client with MCP elicitation support.`, {}, { meta: { [META_PLANNED_CHANGES]: [change] }, audit: { output: { planned: [change] } } });
+          }
+          return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `This client cannot ask the user to confirm writes in ${where}; ${tool.name} was not called.`, {});
         }
         if (out.status === 'declined') {
           step('confirm', 'fail', 'declined');
-          return fail('denied_confirmation', 'blocked', 'confirmation_declined', `The user declined ${tool.title || tool.name} in PROD.`, {});
+          return fail('denied_confirmation', 'blocked', 'confirmation_declined', `The user declined ${tool.title || tool.name} in ${envLabel(ctx)}.`, {});
         }
         decision = 'confirmed';
         step('confirm', 'pass', 'elicited');
@@ -496,7 +504,7 @@ export class Pipeline {
       .slice(0, 8)
       .map(([k, v]) => `${k}=${typeof v === 'string' ? v.slice(0, 60) : JSON.stringify(v)?.slice(0, 60)}`)
       .join(', ');
-    return `Allow ${ctx.client.name ?? 'this agent'} to ${tool.title || tool.name} in PROD?\n${p.method} ${p.path}\n${summary}`;
+    return `Allow ${ctx.client.name ?? 'this agent'} to ${tool.title || tool.name} in ${envLabel(ctx)}?\n${p.method} ${p.path}\n${summary}`;
   }
 
   private async callMock(ctx: RunContext, tool: ToolDef, specArgs: Record<string, unknown>): Promise<UpstreamResponse> {
@@ -526,6 +534,11 @@ export class Pipeline {
     const json = res.body === undefined ? '' : JSON.stringify(res.body);
     return { status: res.status, body: res.body ?? null, bytes: Buffer.byteLength(json ?? ''), headers: Object.fromEntries(Object.entries(res.headers ?? {}).filter(([k]) => /^(link|retry-after|x-ratelimit-.*)$/i.test(k)).map(([k, v]) => [k.toLowerCase(), v])), latencyMs: this.d.now() - started };
   }
+}
+
+/** `PROD` for production environments (the confirmation prompts say so loudly), else the environment slug. */
+export function envLabel(ctx: Pick<RunContext, 'environment'>): string {
+  return ctx.environment.kind === 'prod' ? 'PROD' : `the ${ctx.environment.slug} environment`;
 }
 
 function lower(h: Record<string, string>): Record<string, string> {

@@ -137,8 +137,10 @@ function makeConfirmer(d: McpRouteDeps, ctx: RunContext, c: ServerContext): Conf
   return {
     confirm: async ({ tool, argsHash, message }): Promise<ConfirmOutcome> => {
       // Deviation (§9.7 legacy path): a stateless server cannot receive the client's answer to a
-      // server-initiated elicitInput (it arrives as a separate POST with no session), so 2025-era
-      // clients are treated as not elicitation-capable (deny_without_elicitation).
+      // server-initiated elicitInput (it arrives as a separate POST with no session; the SDK's
+      // per-request legacy serving cannot receive server-to-client requests), so 2025-era clients are
+      // treated as not elicitation-capable: `elicit` returns the planned change unexecuted,
+      // `deny_without_elicitation` refuses.
       if (ctx.client.era === 'legacy') return { status: 'unsupported' };
       const raw = mcpReq.requestState?.<unknown>();
       if (typeof raw === 'string') {

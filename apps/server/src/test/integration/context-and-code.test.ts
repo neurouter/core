@@ -73,6 +73,16 @@ servers:
         baseUrl: "mock:"
         writes: { enabled: true, confirm: elicit }
         codeMode: true
+      - slug: strict
+        kind: prod
+        baseUrl: "mock:"
+        writes: { enabled: true, confirm: deny_without_elicitation }
+        codeMode: true
+      - slug: qa
+        kind: qa
+        baseUrl: "mock:"
+        writes: { enabled: true, confirm: elicit }
+        codeMode: true
   - slug: items
     name: Items
     spec: { path: ${join(dir, 'items.yaml')} }
@@ -159,10 +169,12 @@ servers:
     const r2 = await yes.callTool({ name: 'create_issue', arguments: { owner: 'octocat', repo: 'hello-world', title: 'Prod bug' } });
     expect(r2.isError, text(r2)).toBeFalsy();
     await yes.close();
-    // a client without elicitation cannot write on prod
+    // a client without elicitation cannot write on prod; `elicit` hands back the planned change, unexecuted
     const plain = await mcpClient(s, 'github', 'prod', key, { era });
     const r3 = await plain.callTool({ name: 'create_issue', arguments: { owner: 'octocat', repo: 'hello-world', title: 'x' } });
-    expect(text(r3)).toContain('cannot ask the user to confirm production writes');
+    expect(r3.isError).toBe(true);
+    expect(text(r3)).toContain('Not executed: this client cannot ask the user to confirm writes in PROD');
+    expect((r3._meta as Record<string, unknown>)['dev.neurouter/planned-changes']).toEqual([expect.objectContaining({ tool: 'create_issue', method: 'POST', arguments: expect.objectContaining({ title: 'x' }) })]);
     await plain.close();
     await s.services.auditStore.flush();
     const rows = await s.services.dbs.audit.db.selectFrom('audit_log').select(['decision', 'confirm']).where('tool_name', '=', 'create_issue').execute();
@@ -173,7 +185,53 @@ servers:
     const key = await keyFor(s, 'github', 'prod', ['tools:read', 'tools:write']);
     const c = await mcpClient(s, 'github', 'prod', key, { era: 'legacy', elicitation: true });
     const r = await c.callTool({ name: 'create_issue', arguments: { owner: 'octocat', repo: 'hello-world', title: 'x' } });
-    expect(text(r)).toContain('cannot ask the user to confirm production writes');
+    expect(text(r)).toContain('cannot ask the user to confirm writes in PROD');
+    await c.close();
+  });
+
+  it('deny_without_elicitation refuses outright (no planned change); both modes prompt eliciting clients', async () => {
+    const key = await keyFor(s, 'github', 'strict', ['tools:read', 'tools:write']);
+    const plain = await mcpClient(s, 'github', 'strict', key, { era: 'modern' });
+    const r = await plain.callTool({ name: 'create_issue', arguments: { owner: 'octocat', repo: 'hello-world', title: 'x' } });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/^This client cannot ask the user to confirm writes in PROD; create_issue was not called/);
+    expect(r._meta ?? {}).not.toHaveProperty(['dev.neurouter/planned-changes']);
+    await plain.close();
+    let asked = '';
+    const eliciting = await mcpClient(s, 'github', 'strict', key, { era: 'modern', elicitation: true, onElicit: (m) => ((asked = m), { approve: true }) });
+    const ok = await eliciting.callTool({ name: 'create_issue', arguments: { owner: 'octocat', repo: 'hello-world', title: 'y' } });
+    expect(ok.isError, text(ok)).toBeFalsy();
+    expect(asked).toContain('in PROD?');
+    await eliciting.close();
+  });
+
+  it('run_script on prod from a client that cannot elicit: elicit returns the dry-run plan unexecuted, deny refuses', async () => {
+    const code = `github.add_labels(owner="octocat", repo="hello-world", issue_number=1, body={"labels": ["prod-x"]})\nreturn "done"`;
+    const c = await mcpClient(s, 'github', 'prod', await keyFor(s, 'github', 'prod', ['tools:read', 'tools:write', 'code:run']), { era: 'modern' });
+    const r = await c.callTool({ name: 'run_script', arguments: { code } });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toContain('Not executed');
+    expect((r._meta as Record<string, unknown>)['dev.neurouter/planned-changes']).toEqual([expect.objectContaining({ tool: 'add_labels' })]);
+    const labels = await c.callTool({ name: 'call_tool', arguments: { name: 'list_issue_labels', arguments: { owner: 'octocat', repo: 'hello-world', issue_number: 1 } } });
+    expect(text(labels)).not.toContain('prod-x');
+    await c.close();
+    const d = await mcpClient(s, 'github', 'strict', await keyFor(s, 'github', 'strict', ['tools:read', 'tools:write', 'code:run']), { era: 'modern' });
+    const r2 = await d.callTool({ name: 'run_script', arguments: { code } });
+    expect(text(r2)).toContain('the script was not run');
+    expect(r2._meta ?? {}).not.toHaveProperty(['dev.neurouter/planned-changes']);
+    await d.close();
+  });
+
+  it('confirm set on a non-prod environment is honoured, listed in tools/list and reported by whoami', async () => {
+    const key = await keyFor(s, 'github', 'qa', ['tools:read', 'tools:write']);
+    const c = await mcpClient(s, 'github', 'qa', key, { era: 'modern' });
+    const tools = (await c.listTools()).tools;
+    const create = tools.find((t) => t.name === 'create_issue');
+    if (create) expect(create._meta?.['dev.neurouter/confirm']).toBe('elicit');
+    const who = await c.callTool({ name: 'neurouter_whoami', arguments: {} });
+    expect((who.structuredContent as { writes: { confirm: string; client_can_confirm: boolean } }).writes).toMatchObject({ confirm: 'elicit', client_can_confirm: false });
+    const r = await c.callTool({ name: 'call_tool', arguments: { name: 'create_issue', arguments: { owner: 'octocat', repo: 'hello-world', title: 'z' } } });
+    expect(text(r)).toContain('cannot ask the user to confirm writes in the qa environment');
     await c.close();
   });
 

@@ -70,7 +70,8 @@ export function apiToolEntry(ctx: RunContext, t: ToolDef, deferLoading?: boolean
     _meta: {
       [META_WRITE]: t.risk.write,
       [META_WRITES_ENABLED]: writes,
-      [META_CONFIRM]: t.risk.write && ctx.environment.kind === 'prod' && ctx.bundle.environment.writes.confirm === 'elicit' ? 'elicit' : 'none',
+      // both confirm modes ask the user through elicitation; they differ only for clients that cannot be asked
+      [META_CONFIRM]: t.risk.write && ctx.bundle.environment.writes.confirm !== 'none' ? 'elicit' : 'none',
       [META_DEF_HASH]: t.defHash,
       [META_DEFER_LOADING]: deferLoading ?? false,
     },
@@ -143,7 +144,7 @@ export function buildSurface(ctx: RunContext, opts: { executorHealthy: boolean; 
 /** Server `instructions` (§9.5), generated per bundle. */
 export function instructions(ctx: RunContext, surface: Surface): string {
   const e = ctx.bundle.environment;
-  const writeState = !e.writes.enabled ? 'read-only' : e.kind === 'prod' && e.writes.confirm !== 'none' ? "writes need your user's confirmation" : 'writes enabled';
+  const writeState = !e.writes.enabled ? 'read-only' : e.writes.confirm !== 'none' ? "writes need your user's confirmation" : 'writes enabled';
   const ns = ctx.server.slug.replace(/-/g, '_');
   const lines = [
     `This MCP server exposes the ${ctx.bundle.server.name} API (${e.slug}, ${writeState}) through Neurouter.`,

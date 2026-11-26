@@ -33,6 +33,15 @@ export type ExposureMode = z.infer<typeof ExposureMode>;
 export const DiscoveryMode = z.enum(['auto', 'full', 'search']);
 export type DiscoveryMode = z.infer<typeof DiscoveryMode>;
 
+/**
+ * Write confirmation (backend §9.7), for any environment kind (`none` is invalid on prod):
+ * - `elicit` (prod default): the user approves each write in the client (MCP elicitation). A client
+ *   that cannot ask gets the planned change back, not executed (scripts: their dry-run plan), so the
+ *   user can review it and run it from an elicitation-capable client.
+ * - `deny_without_elicitation`: same prompt, but a client that cannot ask is refused outright with
+ *   no planned-change details.
+ * No mode lets the agent confirm its own writes.
+ */
 export const ConfirmMode = z.enum(['none', 'elicit', 'deny_without_elicitation']);
 export type ConfirmMode = z.infer<typeof ConfirmMode>;
 

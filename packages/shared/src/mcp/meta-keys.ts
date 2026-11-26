@@ -17,13 +17,16 @@ export const META_RETRY_AFTER_MS = 'dev.neurouter/retry-after-ms';
 export const META_RESULT_HANDLE = 'dev.neurouter/result-handle';
 export const META_TRUNCATED = 'dev.neurouter/truncated';
 export const META_DRY_RUN = 'dev.neurouter/dry-run';
+/** The write that was not executed because nobody could confirm it (`confirm: elicit` fallback). */
+export const META_PLANNED_CHANGES = 'dev.neurouter/planned-changes';
 export const META_UNTRUSTED = 'dev.neurouter/untrusted-content';
 export const META_CALL_ID = 'dev.neurouter/call-id';
 export const META_GRAPHQL_ERRORS = 'dev.neurouter/graphql-errors';
 export const META_UPSTREAM_HEADERS = 'dev.neurouter/upstream-headers';
 
-/** Eval-only request headers (honoured only for `purpose = 'eval'` keys). */
+/** Eval-only request header (honoured only for `purpose = 'eval'` keys). */
 export const HEADER_MOCK_STATE = 'x-neurouter-mock-state';
+/** Narrows the surface to `tools` or `code` (any credential; code needs code mode to be available). */
 export const HEADER_EXPOSURE = 'x-neurouter-exposure';
 /** Eval verify runs: use this (temporary) build of the same server instead of the pinned one. */
 export const HEADER_BUILD = 'x-neurouter-build';

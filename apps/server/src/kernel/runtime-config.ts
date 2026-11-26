@@ -167,7 +167,7 @@ export function parseOpsTools(v: unknown): OpsToolToggles {
 
 export function parseWrites(v: unknown, kind: EnvironmentKind): WritesConfig {
   const w = (parseJsonColumn<Partial<WritesConfig>>(v) ?? {}) as Partial<WritesConfig>;
-  return { enabled: w.enabled === true, tools: Array.isArray(w.tools) ? w.tools : null, confirm: w.confirm ?? (kind === 'prod' ? 'deny_without_elicitation' : 'none') };
+  return { enabled: w.enabled === true, tools: Array.isArray(w.tools) ? w.tools : null, confirm: w.confirm ?? (kind === 'prod' ? 'elicit' : 'none') };
 }
 
 export function parseLimits(v: unknown): EnvLimits {

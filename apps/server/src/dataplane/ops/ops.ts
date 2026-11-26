@@ -280,7 +280,7 @@ export class OpsTools {
           environment_kind: e.kind,
           principal: { type: p.type, id: principalId(p), name: p.name },
           scopes: p.scopes,
-          writes: { enabled: e.writes.enabled && p.scopes.includes('tools:write'), tools: e.writes.tools ?? writeTools.filter((t) => writeEnabled(ctx, t)).map((t) => t.name), confirm: e.kind === 'prod' && e.writes.enabled ? e.writes.confirm : 'none' },
+          writes: { enabled: e.writes.enabled && p.scopes.includes('tools:write'), tools: e.writes.tools ?? writeTools.filter((t) => writeEnabled(ctx, t)).map((t) => t.name), confirm: e.writes.confirm, client_can_confirm: ctx.client.era === 'modern' && Boolean((ctx.client.caps as Record<string, unknown> | null)?.elicitation) },
           code_mode: e.codeMode && ctx.bundle.codeModeEnabled && p.scopes.includes('code:run'),
           limits: { rate_limit: (p.type === 'api_key' ? p.rateLimit : null) ?? e.limits.rateLimit, code: e.limits.code },
           profile: p.type === 'api_key' ? p.profile : null,

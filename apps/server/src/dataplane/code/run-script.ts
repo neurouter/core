@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import { generateOpsStub, generateStubs, pyArgMap } from '@neurouter/compiler';
 import type { Executor, HostCallResult, RunResult } from '@neurouter/executor';
-import { META_CALL_ID, META_RESULT_HANDLE, META_TASK_ID, META_TRUNCATED, type ScriptStatus, type ToolDef } from '@neurouter/shared';
+import { META_CALL_ID, META_PLANNED_CHANGES, META_RESULT_HANDLE, META_TASK_ID, META_TRUNCATED, type ErrorCode, type ScriptStatus, type ToolDef } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import type { MainDB } from '../../kernel/db/schema.js';
 import { sha256Hex } from '../../kernel/lib/crypto.js';
@@ -13,7 +13,7 @@ import type { ResultPages } from '../shaping/result-pages.js';
 import type { TaskTracker } from '../tasks/tracker.js';
 import type { RunContext } from '../pipeline/context.js';
 import { errorResult } from '../pipeline/errors.js';
-import { killSwitchFor, resolveVisibleTool, writeEnabled, type Confirmer, type McpToolResult, type Pipeline, type PlannedChange } from '../pipeline/pipeline.js';
+import { envLabel, killSwitchFor, resolveVisibleTool, writeEnabled, type Confirmer, type McpToolResult, type Pipeline, type PlannedChange } from '../pipeline/pipeline.js';
 import type { OpsTools } from '../ops/ops.js';
 import { opFor } from '../ops/ops.js';
 import { validateScript } from './validate.js';
@@ -113,19 +113,27 @@ export class ScriptRunner {
     }
     this.running.set(key, (this.running.get(key) ?? 0) + 1);
     try {
-      // prod + writes: dry run first, then elicit once with the plan (§9.7)
-      const prodWrites = ctx.environment.kind === 'prod' && ctx.bundle.environment.writes.enabled && ctx.bundle.environment.writes.confirm !== 'none';
-      if (mode === 'execute' && prodWrites) {
+      // writes that need confirmation (prod, or confirm set elsewhere): dry run first, then elicit once with the plan (§9.7)
+      const confirmMode = ctx.bundle.environment.writes.confirm;
+      const confirmWrites = ctx.bundle.environment.writes.enabled && confirmMode !== 'none';
+      if (mode === 'execute' && confirmWrites) {
         const dry = await this.runOnce(executor, ctx, code, 'dry_run', inputs, null, signal, true);
         if (dry.status !== 'ok') return { result: dry.result };
         if (dry.planned.length) {
           const listed = dry.planned.slice(0, 20).map((p) => `- ${p.method} ${p.path} (${p.tool})`).join('\n');
           const synthetic: ToolDef = { ...ctx.bundle.build.tools.find((t) => t.name === dry.planned[0]!.tool)!, name: 'run_script', title: `run a script with ${dry.planned.length} write(s)` };
           const planHash = sha256Hex(JSON.stringify(dry.planned.map((p) => `${p.tool}|${p.argsHash}`)));
-          const out = confirmer ? await confirmer.confirm({ tool: synthetic, args: { code_hash: sha256Hex(code), plan: planHash }, argsHash: planHash, message: `Allow ${ctx.client.name ?? 'this agent'} to run a script that makes ${dry.planned.length} change(s) in PROD?\n${listed}` }) : ({ status: 'unsupported' } as const);
+          const out = confirmer ? await confirmer.confirm({ tool: synthetic, args: { code_hash: sha256Hex(code), plan: planHash }, argsHash: planHash, message: `Allow ${ctx.client.name ?? 'this agent'} to run a script that makes ${dry.planned.length} change(s) in ${envLabel(ctx)}?\n${listed}` }) : ({ status: 'unsupported' } as const);
           if (out.status === 'pending') return { result: { content: [] }, inputRequired: out.result };
           if (out.status !== 'approved') {
-            const r = await this.finishRejected(ctx, code, 'execute', 'confirm_declined', out.status === 'unsupported' ? 'This client cannot ask the user to confirm production writes.' : 'The user declined the planned changes.');
+            const where = envLabel(ctx);
+            if (out.status === 'unsupported' && confirmMode === 'elicit') {
+              // elicit: the dry run already ran; return its plan (nothing was executed) for the user to review
+              const planned = dry.planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, arguments: p.arguments }));
+              const r = await this.finishRejected(ctx, code, 'execute', 'confirm_declined', `Not executed: this client cannot ask the user to confirm writes in ${where}. The dry run planned ${planned.length} change(s), none made:\n${listed}\nShow them to the user; they can approve the script from a client with MCP elicitation support.`, 'confirmation_unsupported');
+              return { result: { ...r, _meta: { ...(r._meta ?? {}), [META_PLANNED_CHANGES]: planned } } };
+            }
+            const r = await this.finishRejected(ctx, code, 'execute', 'confirm_declined', out.status === 'unsupported' ? `This client cannot ask the user to confirm writes in ${where}; the script was not run.` : 'The user declined the planned changes.', out.status === 'unsupported' ? 'confirmation_unsupported' : 'confirmation_declined');
             return { result: r };
           }
           const plan = new Set(dry.planned.map((p) => `${p.tool}|${p.argsHash}`));
@@ -138,12 +146,12 @@ export class ScriptRunner {
     }
   }
 
-  private async finishRejected(ctx: RunContext, code: string, mode: 'dry_run' | 'execute', status: ScriptStatus, message: string): Promise<McpToolResult> {
+  private async finishRejected(ctx: RunContext, code: string, mode: 'dry_run' | 'execute', status: ScriptStatus, message: string, errorCode?: ErrorCode): Promise<McpToolResult> {
     const id = newId();
     const now = this.d.now();
     await this.d.db.insertInto('script_runs').values({ id, tenant_id: ctx.tenantId, task_id: ctx.taskId, server_id: ctx.server.id, environment_id: ctx.environment.id, user_id: null, credential_key: ctx.credentialKey, code: code.slice(0, 16384), code_hash: sha256Hex(code), mode, status, error: toJsonColumn({ type: status, message }), started_at: now, ended_at: now }).execute();
     this.d.audit.record({ ...this.d.pipeline.auditBase(ctx), kind: 'script_run', toolName: 'run_script', scriptRunId: id, decision: 'denied_confirmation', status: 'blocked', params: { code_hash: sha256Hex(code), mode }, errorMessage: message });
-    return errorResult(message, null, status === 'confirm_declined' ? 'confirmation_declined' : 'script_rejected');
+    return errorResult(message, null, errorCode ?? (status === 'confirm_declined' ? 'confirmation_declined' : 'script_rejected'));
   }
 
   /** Stubs regenerated from the filtered tool list, cached by (build, allowedSetHash). */
