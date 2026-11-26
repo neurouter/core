@@ -105,6 +105,7 @@ describe('task upgrade and suite migration', () => {
     expect(j[0]).toEqual({ type: 'called', tool: 'list_refunds', incidental: { amount: { gte: 50 } } });
     expect(j.some((a) => a.type === 'answer_contains')).toBe(false);
     expect(j).toContainEqual(expect.objectContaining({ type: 'judge', kind: 'choice' }));
+    expect(upgradeTask({ ...judgment, rubric: 'Use an amount cutoff of 50.' }, { tools }).task.rubric).not.toContain('50');
     // n: 0 ("do not call the API") stays strict
     expect(upgradeTask(task({ category: 'ambiguous', assertions: [{ type: 'max_calls', n: 0 }] })).task.assertions).toEqual([{ type: 'max_calls', n: 0, hard: true }]);
   });

@@ -124,7 +124,11 @@ export function upgradeTask(task: EvalTask, opts: UpgradeOptions = {}): { task: 
     } else assertions.push(a);
   }
   if (!hadBudget && refs.length && task.category !== 'impossible') assertions.push({ type: 'max_calls', n: deriveCallBudget(refs, schemaOf) });
+  let rubric = task.rubric;
   if (judgment && !assertions.some((a) => a.type === 'judge' && a.kind === 'choice')) {
+    // a generated rubric often pins the generator's own choice ("use a cutoff of 50"): the judge would grade against it
+    rubric = 'The request leaves part of the decision to the agent. Any reasonable choice is acceptable when the answer states it and the results reported are consistent with it and with the API results. Nothing is modified.';
+    notes.push(`judgment task: rubric replaced (was: ${JSON.stringify(task.rubric.slice(0, 160))})`);
     assertions.push({ type: 'judge', kind: 'choice', criterion: 'States the choice it made for the part of the request left to its judgment, and the results it reports are consistent with that choice.' });
     notes.push('judgment task: judge {kind: choice} (stated choice, consistent results) instead of fixed values');
   }
@@ -133,7 +137,7 @@ export function upgradeTask(task: EvalTask, opts: UpgradeOptions = {}): { task: 
     assertions = b.assertions;
     notes.push(...b.notes);
   }
-  return { task: { ...task, referenceCalls: refs, assertions }, notes };
+  return { task: { ...task, rubric, referenceCalls: refs, assertions }, notes };
 }
 
 /** Converts a 0.2.1 (version 1) suite file to the 0.2.2 model, keeping mock data version 1 (its prompts name 0.2.1 mock values). */
