@@ -6,16 +6,17 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 /**
- * Cold start: the eval-only LLM SDKs and the MCP client are imported on first use, never by the
- * server's module graph at boot (each is hundreds of files; on Cloud Run every file is a cold read).
+ * Cold start: the eval-only LLM SDKs and the MCP client are imported on first use, and Monty (with
+ * its native addon and the OpenTelemetry API it pulls in) only by the executor, never by the server's
+ * module graph at boot (hundreds of files; on Cloud Run every file is a cold read).
  */
-const LAZY = ['/node_modules/@anthropic-ai/sdk/', '/node_modules/openai/', '/node_modules/@google/genai/', '/node_modules/@modelcontextprotocol/client/'];
+const LAZY = ['/node_modules/@anthropic-ai/sdk/', '/node_modules/openai/', '/node_modules/@google/genai/', '/node_modules/@modelcontextprotocol/client/', '/node_modules/@pydantic/monty/'];
 
 describe('server module graph at boot', () => {
   const dir = mkdtempSync(join(tmpdir(), 'nr-lazy-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('does not load the eval LLM SDKs or the MCP client', () => {
+  it('does not load the eval LLM SDKs, the MCP client or Monty', () => {
     const log = join(dir, 'loaded.txt');
     const hook = join(dir, 'hook.mjs');
     // synchronous hooks see both import and require
