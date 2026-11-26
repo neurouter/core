@@ -58,6 +58,11 @@ describe('GitHub eval action (actions/eval/action.yml)', () => {
     expect(runStep({ NR_CONFIG: 'neurouter.yaml' }).code).toBe(2);
   });
 
+  it('passes max-run-tokens when set', () => {
+    expect(runStep({ NR_SPEC: 'openapi.yaml', NR_MAX_RUN_TOKENS: '500000' }).npx.join(' ')).toContain('--max-run-tokens 500000');
+    expect(runStep({ NR_SPEC: 'openapi.yaml' }).npx).not.toContain('--max-run-tokens');
+  });
+
   it('the CLI version follows the action tag, else the package version; an explicit input wins', () => {
     expect(runStep({ NR_SPEC: 'openapi.yaml', NR_ACTION_REF: 'v0.4.2' }).npx[1]).toBe('neurouter@0.4.2');
     expect(runStep({ NR_SPEC: 'openapi.yaml', NR_ACTION_REF: '1.2.3-rc.1' }).npx[1]).toBe('neurouter@1.2.3-rc.1');

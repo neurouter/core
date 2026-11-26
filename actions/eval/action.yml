@@ -60,7 +60,7 @@ runs:
         else echo "::error::set spec, or config + server"; exit 2; fi
         if [ -n "$NR_OVERLAY" ]; then ARGS+=(--overlay "$NR_OVERLAY"); fi
         if [ -n "$NR_SUITE" ]; then ARGS+=(--suite "$NR_SUITE"); else ARGS+=(--generate); fi
-        if [ -n "$NR_MAX_RUN_TOKENS" ]; then ARGS+=(--max-run-tokens "$NR_MAX_RUN_TOKENS"); fi
+        if [ -n "${NR_MAX_RUN_TOKENS:-}" ]; then ARGS+=(--max-run-tokens "$NR_MAX_RUN_TOKENS"); fi
         echo "neurouter@${VERSION}"
         npx -y "neurouter@${VERSION}" eval "${ARGS[@]}" --models "$NR_MODELS" --modes "$NR_MODES" \
           --repeats "$NR_REPEATS" --min-score "$NR_MIN_SCORE" \
