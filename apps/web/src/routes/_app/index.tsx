@@ -54,7 +54,7 @@ function EmptyOverview() {
             {[
               { icon: LinkIcon, title: 'Paste a URL', text: 'Fetch an openapi.yaml or a GraphQL endpoint.', search: { tab: 'url' as const } },
               { icon: FileUpIcon, title: 'Upload a file', text: '.yaml, .json, .graphql up to 10 MB.', search: { tab: 'upload' as const } },
-              { icon: SparklesIcon, title: 'Try the sample', text: 'Acme Orders API (fictional), 46 operations.', search: { tab: 'url' as const, sample: '1' } },
+              { icon: SparklesIcon, title: 'Try the sample', text: 'Acme Orders API (fictional), on the built-in mock.', search: { tab: 'url' as const, sample: '1' } },
             ].map((t) => (
               <Link key={t.title} to="/servers/new" search={t.search} className="flex flex-col gap-1 rounded-xl border bg-card p-4 outline-none hover:border-primary focus-visible:ring-2 focus-visible:ring-ring">
                 <t.icon aria-hidden="true" className="size-5 text-primary" />

@@ -1,4 +1,6 @@
 import { GRAPHQL_ACCEPT, GRAPHQL_INTROSPECTION_QUERY, readIntrospectionResponse } from '@neurouter/compiler';
+import { SAMPLE_SPEC_URL } from '@neurouter/shared';
+import { SAMPLE_SPEC_YAML } from './sample-spec.js';
 import type { FetchLike } from '../../kernel/lib/net/safe-fetch.js';
 import { AppError } from '../../kernel/lib/errors.js';
 
@@ -13,6 +15,8 @@ export type SpecFetcher = (url: string) => Promise<{ bytes: Uint8Array; contentT
  */
 export function createSpecFetcher(fetchFn: FetchLike): SpecFetcher {
   return async (url: string) => {
+    // the bundled sample: served from memory, so it works offline and in the read-only demo
+    if (url === SAMPLE_SPEC_URL) return { bytes: new TextEncoder().encode(SAMPLE_SPEC_YAML), contentType: 'application/yaml' };
     let res: Response;
     try {
       res = await fetchFn(url, { headers: { accept: 'application/json, application/yaml, text/yaml, application/graphql, text/plain, */*' }, signal: AbortSignal.timeout(SPEC_TIMEOUT_MS) });

@@ -1,7 +1,7 @@
 import { gunzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import { compile, diffSpecs, parseOverlay, applyOverlayPatch, type CompileResult } from '@neurouter/compiler';
-import { api, OPS_TOOLS, parseSecretRef, OPS_VISIBILITY, readinessBand, type ConnectConfig, type EnvironmentCreate, type OpsTool, type SpecPreview, type SpecSourceIn, type ToolDef } from '@neurouter/shared';
+import { api, OPS_TOOLS, parseSecretRef, SAMPLE_SPEC_URL, OPS_VISIBILITY, readinessBand, type ConnectConfig, type EnvironmentCreate, type OpsTool, type SpecPreview, type SpecSourceIn, type ToolDef } from '@neurouter/shared';
 import { toIso } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -368,7 +368,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   route(app, 'specs.preview', api.specs.preview, async (req, reply) => {
     const u = requireUser(req);
     const body = req.body;
-    if (u.anonymous && ('url' in body.source || 'graphqlEndpoint' in body.source)) throw new AppError('forbidden', 'The public demo only previews pasted or uploaded specs', { extensions: { reason: 'demo_read_only' } });
+    if (u.anonymous && (('url' in body.source && body.source.url !== SAMPLE_SPEC_URL) || 'graphqlEndpoint' in body.source)) throw new AppError('forbidden', 'The public demo only previews pasted or uploaded specs', { extensions: { reason: 'demo_read_only' } });
     const started = c.clock.now();
     const source = body.source;
     const endpoint: GraphqlEndpointSource | null = 'graphqlEndpoint' in source ? { url: source.graphqlEndpoint, ...(source.headerRef ? { headerRef: source.headerRef } : {}) } : null;

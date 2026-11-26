@@ -37,6 +37,12 @@ export type SpecChangeSummary = z.infer<typeof SpecChangeSummary>;
 export const SpecRevisionDetail = SpecRevisionRow.extend({ summary: SpecChangeSummary });
 export type SpecRevisionDetail = z.infer<typeof SpecRevisionDetail>;
 
+/**
+ * The bundled sample spec (fictional Acme Orders API, examples/acme-orders). The server answers this
+ * URL from its bundled copy without any network access (console "Try the sample").
+ */
+export const SAMPLE_SPEC_URL = 'https://acme.example.test/openapi.yaml';
+
 /** Spec source: a URL to fetch, or pasted / uploaded content (≤ 10 MiB). */
 export const SpecSourceIn = z.union([
   z.object({ url: z.url({ protocol: /^https?$/ }) }),

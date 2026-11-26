@@ -3,7 +3,7 @@ import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as z from 'zod';
 import { AlertCircleIcon, CheckIcon, CircleDashedIcon, FileUpIcon, LoaderCircleIcon, SparklesIcon, XIcon } from 'lucide-react';
-import { api, readinessBand, type EnvironmentCreate, type SpecPreview, type UpstreamAuthIn } from '@/contract';
+import { api, readinessBand, SAMPLE_SPEC_URL, type EnvironmentCreate, type SpecPreview, type UpstreamAuthIn } from '@/contract';
 import { guard } from '@/app/route-guards';
 import { GatedButton, useGate } from '@/components/app/gated';
 import { ButtonTabs } from '@/components/app/link-tabs';
@@ -52,8 +52,8 @@ export const Route = createFileRoute('/_app/servers/new')({
   component: ImportWizard,
 });
 
-/** The bundled sample (fictional Acme Orders API). */
-export const SAMPLE_URL = 'https://acme.example.test/openapi.yaml';
+/** The bundled sample (fictional Acme Orders API): the server answers this URL from its bundled copy. */
+export const SAMPLE_URL = SAMPLE_SPEC_URL;
 
 const draftQuery = (id: string) => ({
   queryKey: ['spec-preview', id] as const,

@@ -62,6 +62,8 @@ describe('demo mode (NEUROUTER_DEMO_READ_ONLY)', () => {
     expect(v.statusCode).toBe(200);
     const url = await t.s.app.inject({ method: 'POST', url: '/api/spec-previews', payload: { source: { url: 'https://example.com/spec.yaml' } }, headers: h });
     expect(url.statusCode).toBe(403);
+    const gql = await t.s.app.inject({ method: 'POST', url: '/api/spec-previews', payload: { source: { graphqlEndpoint: 'https://example.com/graphql' } }, headers: h });
+    expect(gql.statusCode).toBe(403);
     await t.json(t.admin, { method: 'POST', url: `/api/servers/${serverId}/environments`, payload: { slug: 'prod', kind: 'prod', baseUrl: 'https://api.example.com', auth: { type: 'bearer', secretRef: 'env:PET_TOKEN' } } }, 201);
     const envs = JSON.parse((await t.s.app.inject({ url: `/api/servers/${serverId}/environments`, headers: h })).body);
     const prod = envs.items.find((e: any) => e.slug === 'prod');
