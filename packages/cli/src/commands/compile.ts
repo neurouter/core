@@ -19,6 +19,13 @@ export async function cmdCompile(o: { spec?: string; overlay?: string; out?: str
   const r = await compile({ spec: { bytes }, ...(overlay ? { overlay } : {}), namespace: ns });
   const visible = r.tools.filter((t) => !t.hidden);
   for (const d of r.diagnostics) console.error(`${d.severity}: ${d.code}: ${d.message}${d.pointer ? ` (${d.pointer})` : ''}${d.line ? ` line ${d.line}` : ''}`);
+  // an invalid overlay is not skipped: the result would silently differ from what the overlay asks for
+  const overlayErrors = r.diagnostics.filter((d) => d.severity === 'error' && d.code.startsWith('overlay_'));
+  if (overlayErrors.length) {
+    console.error(`${o.overlay}: ${overlayErrors.length} overlay error(s); nothing was written`);
+    process.exitCode = 1;
+    return;
+  }
   console.log(`${r.title || 'API'} (${r.format}): ${r.tools.length} tools (${visible.length} visible, ${visible.filter((t) => t.risk.write).length} write), lint score ${r.lint.score}`);
   for (const t of visible) console.log(`  ${t.risk.write ? 'W' : 'R'} ${t.name}`);
   if (o.out) writeFileSync(o.out, JSON.stringify({ format: r.format, title: r.title, tools: r.tools, lint: r.lint, diagnostics: r.diagnostics }, null, 2));

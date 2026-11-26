@@ -59,6 +59,23 @@ describe('neurouter compile', () => {
   });
 });
 
+describe('neurouter compile with an invalid overlay', () => {
+  it.each([
+    ['schema error', 'overlay: 2\n'],
+    ['YAML syntax error', 'overlay: 1\ntools:\n  foo: [1\n'],
+  ])('%s: exit 1, overlay diagnostics, no tools.json or stubs written', async (_name, overlay) => {
+    const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));
+    writeFileSync(join(dir, 'bad.overlay.yaml'), overlay);
+    const r = await run(['compile', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--overlay', join(dir, 'bad.overlay.yaml'), '--namespace', 'petstore', '--stubs', join(dir, 'stubs'), '--out', join(dir, 'tools.json')]);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/error: overlay_(invalid|yaml)/);
+    expect(r.err).toMatch(/nothing was written/);
+    expect(r.out).not.toMatch(/19 tools/);
+    expect(existsSync(join(dir, 'tools.json'))).toBe(false);
+    expect(existsSync(join(dir, 'stubs'))).toBe(false);
+  });
+});
+
 describe('neurouter eval (in-process, stub provider)', () => {
   it('boots a server from --spec, generates and runs a suite, writes reports, exit 1 below --min-score', async () => {
     process.env.NEUROUTER_EVAL_LLM = 'stub';
