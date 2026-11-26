@@ -58,8 +58,23 @@ function sampleResourcesOf(t: GenTool, resources: string[]): string[] {
 export function selectGeneratorInput(all: GenTool[], opts: { category: EvalCategory; budgetTokens: number; seed: number; samples: GeneratorCategoryInput['samples']; instructions?: string | null }): Selection {
   const fullCost = estimateTokens(all) + estimateTokens(opts.samples);
   if (fullCost <= opts.budgetTokens) return { tools: all, otherTools: [], samples: opts.samples, estimatedTokens: fullCost };
-
   const resources = Object.keys(opts.samples);
+  // every tool fits: send them all and as many samples as the rest of the budget holds (tools' resources first)
+  const toolsCost = estimateTokens(all);
+  if (toolsCost <= opts.budgetTokens * 0.75) {
+    const linked = new Set(all.flatMap((t) => sampleResourcesOf(t, resources)));
+    const order = [...resources.filter((r) => linked.has(r)), ...resources.filter((r) => !linked.has(r))];
+    const samples: GeneratorCategoryInput['samples'] = {};
+    let used = toolsCost;
+    for (const r of order) {
+      const c = estimateTokens(opts.samples[r]);
+      if (used + c > opts.budgetTokens) continue;
+      samples[r] = opts.samples[r]!;
+      used += c;
+    }
+    return { tools: all, otherTools: [], samples, estimatedTokens: used };
+  }
+
   const focus = new Set(tokens(opts.instructions ?? ''));
   const rand = mulberry32(opts.seed);
   const score = (t: GenTool): number => {
