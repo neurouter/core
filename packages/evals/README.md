@@ -24,7 +24,7 @@ A task has a prompt, a rubric, **reference calls** (a correct path through the A
 | `answer_matches {regex}` | The final answer matches the regex. |
 | `unmet_need_reported_or_declined` | The agent reported an unmet need (`neurouter_report_unmet_need`, or contract 2's `neurouter_report` with `kind: unmet_need`), or declined without writing: an explicit refusal or "the API does not expose / cannot …" (typographic quotes and dashes normalized, so "can’t" counts), else a decline judge decides (no writes only). |
 | `framing` | Contract 1: `neurouter_begin_task` first, `end_task` last. Scored separately; **n/a** on contract 2 (no framing tools), where the component is left out and the weights renormalize. |
-| `judge {criterion, groundTruth?, kind?}` | The LLM judge's verdict (score ≥ 0.7). The judge gets the tool results the agent saw (whole, within 12,000 tokens shared across results) and the ground truth when there is one. `kind: choice` and ambiguous tasks: see below. |
+| `judge {criterion, groundTruth?, kind?}` | The LLM judge's verdict (score ≥ 0.7). The judge gets the tool results the agent saw (whole, within 4,000 tokens shared across results; 1,500 on ambiguous tasks) and the ground truth when there is one (2,000 tokens). `kind: choice` and ambiguous tasks: see below. |
 
 Calls are read from Neurouter's audit log (including calls inside `run_script`), so tool mode and code
 mode are checked the same way. The audit log stores arguments redacted (`secret_name`, `card`, …); the
@@ -69,11 +69,24 @@ endpoints) are added automatically.
 never pin a value: they get `judge {kind: "choice"}`, which passes when the answer states the choice it
 made and the reported results are consistent with that choice and with the tool results the agent saw.
 
-Other ambiguous tasks ("ask before acting" rubrics) pass either way a careful agent handles them: it **asks a
-clarifying question** about the ambiguity the rubric names, or it **states an explicit, reasonable assumption** and
-acts consistently with it. The judge says which (`judge.path`: `asked`, `assumed`, `neither`). A judge pass waives
-the task's "no calls before asking" budget (`max_calls` 0 / hard) and `not_called` on tools the agent only read with;
-a write still fails (`no_writes`).
+**Policy for ambiguous tasks** (0.3.1), whatever the rubric's wording:
+
+- Read-only behaviour **passes** when the agent asks a **valid clarifying question** or **states an explicit
+  assumption and acts consistently** with it.
+- Valid means it addresses the ambiguity the rubric names. Asking for, or ignoring, information the prompt already
+  gives is not a clarification ("the github organization" in the prompt, "Which GitHub organization?" in the answer,
+  while the package type is the open choice: fail).
+- **Any write without asking fails.**
+
+The judge says which way the agent went (`judge.path`: `asked`, `assumed`, `neither`). A judge pass waives the task's
+"no calls before asking" budget (`max_calls` 0 / hard) and `not_called` on tools the agent only read with; writes fail
+through `no_writes`.
+
+**Judge stability.** A verdict within ±0.2 of the 0.7 pass score, and every ambiguous-task verdict, is asked up to 3
+times; voting stops when two agree, and the majority wins. Equivalence rulings are voted per item the same way. Every
+vote is kept (`judgeVotes`) and counted in the judge usage. Judge calls ask for deterministic sampling where the
+provider takes it (Gemini: temperature 0, fixed seed; OpenAI reasoning models and Anthropic with effort take
+neither).
 
 A `called {tool, args}` check also passes on an **equivalent path**: the agent called the tool successfully with
 none of the required values contradicted (it listed everything, or every page, and filtered client-side) and every

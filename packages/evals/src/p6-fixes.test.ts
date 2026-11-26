@@ -81,7 +81,7 @@ describe('B8: the judge gets the tool results it needs, not 1,500-char cuts', ()
     expect(input.results.find((x) => x.tool === 'get_topups')!.result).toContain('topup_14');
     const big = input.results.find((x) => x.tool === 'run_script')!.result;
     expect(big.length).toBeLessThan(huge.length);
-    expect(input.results.reduce((n, x) => n + x.result.length, 0) / 4).toBeLessThanOrEqual(12_000);
+    expect(input.results.reduce((n, x) => n + x.result.length, 0) / 4).toBeLessThanOrEqual(4_000);
   });
 });
 
@@ -192,5 +192,89 @@ describe('eval reports: the contract, and per-category success and cost first', 
     const table = renderTable(rep);
     expect(table.split('\n')[0]).toMatch(/^model\s+mode\s+category\s+success/);
     expect(table).toContain('contract 2');
+  });
+});
+
+describe('judge stability: borderline verdicts are voted (P6 review #5: the same answer judged 0.00 and 1.00)', () => {
+  const v = (verdict: 'pass' | 'fail', score: number, path?: string) => json({ score, verdict, reasons: [`${verdict} ${score}`], ...(path ? { path } : {}) });
+
+  it('a confident verdict is one call; a borderline one (±0.2 of 0.7) is asked again, majority of up to 3; usage counts every call', async () => {
+    const { judgeAttemptVoted, emptyJudgeUsage } = await import('./judge.js');
+    const t = taskOf('b8_open_topups');
+    const one = new ScriptedLlmClient([v('pass', 1)]);
+    expect((await judgeAttemptVoted({ llm: one, model: 'judge', task: t, record: rec('b8_open_topups') })).votes).toHaveLength(1);
+    const usage = emptyJudgeUsage();
+    const three = new ScriptedLlmClient([v('pass', 0.75), v('fail', 0.5), v('fail', 0.6)]);
+    const r = await judgeAttemptVoted({ llm: three, model: 'judge', task: t, record: rec('b8_open_topups'), usage });
+    expect(r.votes.map((x) => x.verdict)).toEqual(['pass', 'fail', 'fail']);
+    expect(r.result).toMatchObject({ verdict: 'fail', score: 0.5 });
+    expect(usage.calls).toBe(3);
+    const agree = new ScriptedLlmClient([v('fail', 0.6), v('fail', 0.55)]);
+    expect((await judgeAttemptVoted({ llm: agree, model: 'judge', task: t, record: rec('b8_open_topups') })).votes).toHaveLength(2);
+  });
+
+  it('ambiguous tasks are always voted: #5 (github_ambiguous_repo_activity_sort, code c2-r2) gets the majority of fail/pass/pass', async () => {
+    const llm = new ScriptedLlmClient([v('fail', 0, 'neither'), v('pass', 1, 'assumed'), v('pass', 1, 'assumed')]);
+    const { check, judgeUsage } = await gradeAttempt(taskOf('amb_assumed'), rec('amb_assumed'), { llm, judgeModel: 'judge', equivalenceJudge: false });
+    expect(check.judgeVotes?.rubric?.map((x) => x.verdict)).toEqual(['fail', 'pass', 'pass']);
+    expect(check.judge).toMatchObject({ verdict: 'pass', path: 'assumed' });
+    expect(check.passed).toBe(true);
+    expect(judgeUsage.calls).toBe(3);
+    // stops at two agreeing
+    const two = new ScriptedLlmClient([v('pass', 1, 'assumed'), v('pass', 1, 'assumed')]);
+    expect((await gradeAttempt(taskOf('amb_assumed'), rec('amb_assumed'), { llm: two, judgeModel: 'judge', equivalenceJudge: false })).check.judgeVotes?.rubric).toHaveLength(2);
+  });
+
+  it('the equivalence judge is voted per item', async () => {
+    const { judgeEquivalenceVoted } = await import('./judge.js');
+    const e = (eq: boolean) => json({ items: [{ index: 3, equivalent: eq, reason: String(eq) }] });
+    const llm = new ScriptedLlmClient([e(true), e(false), e(false)]);
+    const r = await judgeEquivalenceVoted({ llm, model: 'judge', task: { prompt: 'p' }, answer: 'a', items: [{ index: 3, expected: ['day'], field: 'interval' }] });
+    expect(r.votes).toHaveLength(3);
+    expect(r.result[3]).toEqual({ equivalent: false, reason: 'false' });
+  });
+
+  it('judge calls ask for deterministic sampling: Gemini gets temperature 0 and the fixed seed; OpenAI reasoning models get neither', async () => {
+    const llm = new ScriptedLlmClient([v('pass', 1)]);
+    await judgeAttempt({ llm, model: 'judge', task: taskOf('b8_open_topups'), record: rec('b8_open_topups') });
+    expect(llm.requests[0]!.deterministic).toBe(true);
+    const { toGeminiRequest } = await import('./llm/gemini.js');
+    const { toOpenAiRequest } = await import('./llm/openai.js');
+    expect((toGeminiRequest(llm.requests[0]!) as unknown as { generation_config: Record<string, unknown> }).generation_config).toMatchObject({ temperature: 0, seed: 7 });
+    const oa = toOpenAiRequest(llm.requests[0]!) as unknown as Record<string, unknown>;
+    expect(oa.temperature).toBeUndefined();
+    expect(oa.seed).toBeUndefined();
+  });
+});
+
+describe('ambiguous tasks: the clarification must address the ambiguity, not ask for what the prompt gives (review #2, #3)', () => {
+  const fail = json({ score: 0, verdict: 'fail', reasons: ['asks which organization, which the prompt names; the package type is not asked'], path: 'neither' });
+
+  it('#2 github_ambiguous_org_package_type (tool c2): "Which GitHub organization…? Also, if you have a preferred package type…" fails', async () => {
+    const t = taskOf('amb_pkg_org_plus_optional_type');
+    const llm = new ScriptedLlmClient([fail, fail]);
+    const { check } = await gradeAttempt(t, rec('amb_pkg_org_plus_optional_type'), { llm, judgeModel: 'judge', equivalenceJudge: false });
+    expect(check.passed).toBe(false);
+    expect(check.judgeVotes?.rubric).toHaveLength(2);
+    expect(promptOf(llm.requests[0]!)).toContain('asking for, or ignoring, information the prompt already gives is not a valid clarification');
+    expect(promptOf(llm.requests[0]!)).toContain('must address the ambiguity the rubric names');
+    expect(promptOf(llm.requests[0]!)).toContain('fail such an answer even when it also mentions the real choice');
+  });
+
+  it('#3 github_ambiguous_org_package_type (tool c2-r2): "Which GitHub organization…? I can look across all supported types" fails', async () => {
+    const llm = new ScriptedLlmClient([fail, fail]);
+    expect((await gradeAttempt(taskOf('amb_pkg_org_all_types'), rec('amb_pkg_org_all_types'), { llm, judgeModel: 'judge', equivalenceJudge: false })).check.passed).toBe(false);
+  });
+
+  it('golden: the judge prompt of #2 (system + user message), byte for byte', async () => {
+    const { readFileSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const llm = new ScriptedLlmClient([fail]);
+    await judgeAttempt({ llm, model: 'judge', task: taskOf('amb_pkg_org_plus_optional_type'), record: rec('amb_pkg_org_plus_optional_type') });
+    const req = llm.requests[0]!;
+    const text = `--- system\n${String(req.system)}\n--- user\n${promptOf(req)}\n--- schema\n${JSON.stringify(req.output_config)}\n`;
+    const file = join(import.meta.dirname, 'test', 'judge-prompt.golden.txt');
+    if (process.env.UPDATE_GOLDEN === '1') writeFileSync(file, text);
+    expect(text).toBe(readFileSync(file, 'utf8'));
   });
 });

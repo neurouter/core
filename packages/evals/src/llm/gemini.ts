@@ -1,5 +1,5 @@
 import type { GoogleGenAI, GoogleGenAIInteraction, Interactions } from '@google/genai';
-import { LlmError, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmContentBlock, type LlmCreateOptions, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmTextBlock, type LlmToolResultBlock, type LlmToolUseBlock } from './types.js';
+import { LlmError, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmContentBlock, type LlmCreateOptions, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmTextBlock, type LlmToolResultBlock, type LlmToolUseBlock, JUDGE_SEED } from './types.js';
 
 type CreateParams = Parameters<GoogleGenAI['interactions']['create']>[0];
 type CreateOptions = Parameters<GoogleGenAI['interactions']['create']>[1];
@@ -73,6 +73,7 @@ export function toGeminiRequest(req: LlmRequest): CreateParams {
     generation_config: {
       max_output_tokens: req.max_tokens,
       ...(effort ? { thinking_level: THINKING_LEVEL[effort] } : {}),
+      ...(req.deterministic ? { temperature: 0, seed: JUDGE_SEED } : {}),
       ...(req.tools?.length && req.tool_choice ? { tool_choice: req.tool_choice.type } : {}),
     },
     ...(format ? { response_format: { type: 'text' as const, mime_type: 'application/json', schema: format.schema } } : {}),

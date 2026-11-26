@@ -37,7 +37,15 @@ export interface LlmRequest {
   metadata?: { user_id?: string };
   /** Beta: server-side refusal fallbacks (`server-side-fallback-2026-07-01`). Sent through the beta endpoint. */
   fallbacks?: 'default';
+  /**
+   * Judge calls: ask for deterministic sampling where the provider allows it (Gemini: temperature 0 + a fixed seed).
+   * OpenAI reasoning models and Anthropic with effort/adaptive thinking take no temperature or seed: not sent there.
+   */
+  deterministic?: boolean;
 }
+
+/** The fixed sampling seed of `deterministic` requests. */
+export const JUDGE_SEED = 7;
 
 export interface LlmUsage {
   input_tokens: number;

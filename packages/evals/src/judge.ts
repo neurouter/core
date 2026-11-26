@@ -67,9 +67,14 @@ export function judgeTokens(u: JudgeUsage | null | undefined): number {
  * fit together; otherwise the budget is shared (small results whole, the large ones cut to an equal share), so an
  * answer that reports items from deep in a result can be verified (B8: a 1,500-char cut hid `topup_14` at char 1,756).
  */
-export const JUDGE_RESULTS_TOKENS = 12_000;
+export const JUDGE_RESULTS_TOKENS = 4_000;
+/**
+ * Ambiguous tasks: the verdict turns on the question or the stated assumption; results only show the agent acted
+ * consistently with it, so they get a smaller share (voting asks such a verdict at least twice).
+ */
+export const JUDGE_AMBIGUOUS_RESULTS_TOKENS = 1_500;
 /** Token budget for the ground-truth preview given to the judge. */
-export const JUDGE_GROUND_TRUTH_TOKENS = 4_000;
+export const JUDGE_GROUND_TRUTH_TOKENS = 2_000;
 const CHARS_PER_TOKEN = 4;
 
 /** Tool results the agent saw (API calls, call_tool, run_script; not search or ops), within `tokens`. */
@@ -114,7 +119,7 @@ export async function judgeAttempt(opts: { llm: LlmClient; model: string; task: 
     finalAnswer: opts.record.finalAnswer.slice(0, 8000),
     calls: opts.record.calls.slice(0, 60).map((c) => ({ tool: c.tool, args: truncateJson(c.arguments, 300), status: c.status, ...(c.write ? { write: c.decision === 'dry_run' ? 'dry_run' : 'yes' } : {}) })),
     // the results the agent saw, so facts in the answer can be verified (B8: whole, within a token budget)
-    results: observedResults(opts.record),
+    results: observedResults(opts.record, ambiguous ? JUDGE_AMBIGUOUS_RESULTS_TOKENS : JUDGE_RESULTS_TOKENS),
     ...(opts.groundTruth?.refs.length ? { groundTruth: groundTruthPreview(opts.groundTruth, JUDGE_GROUND_TRUTH_TOKENS * CHARS_PER_TOKEN) } : {}),
   };
   const content = markerMessage(JUDGE_MARKER, JUDGE_PROMPT_VERSION, input, 'Grade the agent against the rubric and criteria.');
@@ -125,11 +130,65 @@ export async function judgeAttempt(opts: { llm: LlmClient; model: string; task: 
       system: JUDGE_SYSTEM,
       messages: [{ role: 'user', content }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema: ambiguous ? JUDGE_AMBIGUOUS_SCHEMA : JUDGE_SCHEMA } },
+      deterministic: true,
     },
     opts.signal ? { signal: opts.signal } : {},
   );
   if (opts.usage) addJudgeUsage(opts.usage, res.usage, content.length);
   return normalizeJudge(parseJsonText(textOf(res)));
+}
+
+/** A verdict within this distance of the pass threshold is borderline (voted). */
+export const JUDGE_BORDERLINE = 0.2;
+/** At most this many calls per voted verdict; voting stops as soon as two agree. */
+export const JUDGE_MAX_VOTES = 3;
+
+/** Borderline: the score is within ±`JUDGE_BORDERLINE` of the pass threshold, or the task is an ambiguous one. */
+export function judgeBorderline(task: Pick<EvalTask, 'category' | 'assertions'>, j: JudgeResult): boolean {
+  return isAmbiguousJudged(task) || Math.abs(j.score - JUDGE_PASS_SCORE) <= JUDGE_BORDERLINE + 1e-9;
+}
+
+/**
+ * The rubric judge with voting: one call; a borderline verdict (`judgeBorderline`) is asked again, up to 3 calls,
+ * stopping as soon as two agree; the result is the first vote of the majority verdict. Every vote is returned.
+ */
+export async function judgeAttemptVoted(opts: Parameters<typeof judgeAttempt>[0]): Promise<{ result: JudgeResult; votes: JudgeResult[] }> {
+  const votes: JudgeResult[] = [await judgeAttempt(opts)];
+  if (!judgeBorderline(opts.task, votes[0]!)) return { result: votes[0]!, votes };
+  while (votes.length < JUDGE_MAX_VOTES) {
+    votes.push(await judgeAttempt(opts));
+    const pass = votes.filter((v) => v.verdict === 'pass').length;
+    const fail = votes.length - pass;
+    if (pass >= 2 || fail >= 2) break;
+  }
+  const pass = votes.filter((v) => v.verdict === 'pass').length;
+  const win = pass * 2 > votes.length ? 'pass' : 'fail';
+  return { result: votes.find((v) => v.verdict === win)!, votes };
+}
+
+/**
+ * The equivalence judge with voting (its rulings are yes/no, so every call is voted): up to 3 calls, stopping when
+ * each item has two agreeing rulings; per item, the majority ruling (and its first reason).
+ */
+export async function judgeEquivalenceVoted(opts: Parameters<typeof judgeEquivalence>[0]): Promise<{ result: Record<number, { equivalent: boolean; reason: string }>; votes: Array<Record<number, { equivalent: boolean; reason: string }>> }> {
+  const votes: Array<Record<number, { equivalent: boolean; reason: string }>> = [];
+  const settled = () => opts.items.every((it) => {
+    const r = votes.map((v) => v[it.index]).filter((x): x is { equivalent: boolean; reason: string } => Boolean(x));
+    return r.filter((x) => x.equivalent).length >= 2 || r.filter((x) => !x.equivalent).length >= 2;
+  });
+  while (votes.length < JUDGE_MAX_VOTES) {
+    votes.push(await judgeEquivalence(opts));
+    if (votes.length >= 2 && settled()) break;
+  }
+  const result: Record<number, { equivalent: boolean; reason: string }> = {};
+  for (const it of opts.items) {
+    const r = votes.map((v) => v[it.index]).filter((x): x is { equivalent: boolean; reason: string } => Boolean(x));
+    if (!r.length) continue;
+    const yes = r.filter((x) => x.equivalent).length;
+    const win = yes * 2 > r.length;
+    result[it.index] = r.find((x) => x.equivalent === win)!;
+  }
+  return { result, votes };
 }
 
 /** An ambiguous task judged by a rubric criterion (not `kind: choice`): asking or an explicit assumption both pass. */
@@ -151,6 +210,7 @@ export async function judgeDecline(opts: { llm: LlmClient; model: string; task: 
       system: DECLINE_SYSTEM,
       messages: [{ role: 'user', content }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema: DECLINE_SCHEMA } },
+      deterministic: true,
     },
     opts.signal ? { signal: opts.signal } : {},
   );
@@ -180,6 +240,7 @@ export async function judgeEquivalence(opts: { llm: LlmClient; model: string; ta
       system: EQUIV_SYSTEM,
       messages: [{ role: 'user', content }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema: EQUIV_SCHEMA } },
+      deterministic: true,
     },
     opts.signal ? { signal: opts.signal } : {},
   );

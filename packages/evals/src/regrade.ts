@@ -12,7 +12,7 @@ import { emptyJudgeUsage, isAmbiguousJudged, judgeTokens } from './judge.js';
 import { attemptTokens } from './score.js';
 import type { GroundTruth } from './groundtruth.js';
 import type { LlmClient } from './llm/types.js';
-import type { AgentCall, AttemptRecord, EvalTask, JudgeResult, JudgeUsage, ObservedCall, TaskRunResult, TranscriptItem } from './types.js';
+import type { AgentCall, AttemptRecord, EvalTask, JudgeResult, JudgeUsage, JudgeVotes, ObservedCall, TaskRunResult, TranscriptItem } from './types.js';
 
 /** One entry of a transcripts file (a TaskRunResult plus the prompt). */
 export type TranscriptEntry = Partial<TaskRunResult> & Pick<TaskRunResult, 'taskKey' | 'passed' | 'transcript' | 'calls' | 'model' | 'mode' | 'attempt'> & { prompt?: string | null };
@@ -121,6 +121,8 @@ export interface RegradeRow {
   failed: string[];
   /** Judge verdict could not be made (budget exhausted). */
   unjudged: boolean;
+  /** Every judge call this re-grade made for the attempt (borderline verdicts voted). */
+  judgeVotes?: JudgeVotes | null;
   /** The rubric verdict the new grade used (recorded or new; `judged`: made by this re-grade), when the task has one. */
   judge?: (JudgeResult & { judged: boolean }) | null;
   /** Assertions that passed by a 0.3.1 rule (equivalent path, ambiguous waiver, decline judge): their details. */
@@ -185,6 +187,7 @@ export async function regradeTranscripts(entries: TranscriptEntry[], o: RegradeO
       matchedByJudge: check.results.some((r) => r.matchedBy === 'judge'),
       failed: check.results.filter((r) => !r.passed && r.assertion.type !== 'framing').map((r) => `${r.assertion.type}: ${r.detail}`),
       unjudged,
+      ...(check.judgeVotes ? { judgeVotes: check.judgeVotes } : {}),
       ...(js.length ? { judge: check.judge ? { ...check.judge, judged: !reuse && judgeUsage.calls > 0 } : null } : {}),
       notes: check.results.filter((r) => r.passed && (r.waived || r.matchedBy === 'judge' || /\(judge: /.test(r.detail))).map((r) => `${r.assertion.type}: ${r.detail}`.slice(0, 300)),
     });

@@ -360,6 +360,38 @@
    "seedState": {},
    "tags": [],
    "enabled": true
+  },
+  "github_ambiguous_org_package_type": {
+   "key": "github_ambiguous_org_package_type",
+   "category": "ambiguous",
+   "prompt": "Can you show me the packages published by the github organization?",
+   "rubric": "Ask which package type or ecosystem to look for because the listing endpoint requires a package type, such as npm, maven, docker, or container. Do not guess or make a request without that required choice.",
+   "assertions": [
+    {
+     "type": "framing"
+    },
+    {
+     "type": "judge",
+     "criterion": "Asks which package type the user wants to list, noting that the organization package listing requires that choice."
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "max_calls",
+     "n": 0,
+     "hard": true
+    },
+    {
+     "type": "not_called",
+     "tool": "packages_list_packages_for_organization",
+     "toolKey": "operationId:packages/list-packages-for-organization"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
   }
  },
  "attempts": {
@@ -2337,6 +2369,277 @@
    "inputTokens": 2858,
    "outputTokens": 683,
    "cacheReadTokens": 46809,
+   "cacheWriteTokens": 0
+  },
+  "amb_pkg_org_plus_optional_type": {
+   "source": "github/github-tool-c2-transcripts.json",
+   "taskKey": "github_ambiguous_org_package_type",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "tool",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Asks which package type the user wants to list, noting that the organization package listing requires that choice."
+     },
+     "passed": false,
+     "detail": "judge fail (0.50): Mentions package types and invites the user to choose one, but frames it as optional rather than required.; Does not explain that a package type is required to list organization packages."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": true,
+     "detail": "0 upstream calls (budget 0)"
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "packages_list_packages_for_organization",
+      "toolKey": "operationId:packages/list-packages-for-organization"
+     },
+     "passed": true,
+     "detail": "packages_list_packages_for_organization not called"
+    }
+   ],
+   "judge": {
+    "score": 0.5,
+    "verdict": "fail",
+    "reasons": [
+     "Mentions package types and invites the user to choose one, but frames it as optional rather than required.",
+     "Does not explain that a package type is required to list organization packages."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Can you show me the packages published by the github organization?",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Can you show me the packages published by the github organization?"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_9b7399d042234380b26642d20d0e99bf",
+     "name": "search_tools",
+     "arguments": {
+      "query": "List packages published by a GitHub organization, organization packages"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_9b7399d042234380b26642d20d0e99bf",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"packages_list_packages_for_organization\",\"purpose\":\"List packages of one specified type published by an organization.\",\"signature\":\"packages_list_packages_for_organization(package_type*: \\\"npm\\\"|\\\"maven\\\"|\\\"rubygems\\\"|\\\"docker\\\"|\\\"nuget\\\"|\\\"container\\\", org*: string, visibility?: \\\"public\\\"|\\\"private\\\"|\\\"internal\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"packages_list_packages_for_organization({\\\"package_type\\\":\\\"npm\\\",\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"packages_list_packages_for_user\",\"purpose\":\"Lists all packages in a user's namespace for which the requesting user has access.\",\"signature\":\"packages_list_packages_for_user(package_type*: \\\"npm\\\"|\\\"maven\\\"|\\\"rubygems\\\"|\\\"docker\\\"|\\\"nuget\\\"|\\\"container\\\", username*: string, visibility?: \\\"public\\\"|\\\"private\\\"|\\\"internal\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"packages_list_packages_for_user({\\\"package_type\\\":\\\"npm\\\",\\\"username\\\":\\\"octocat\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"pulls_list\",\"purpose\":\"List pull requests in a repository.\",\"signature\":\"pulls_list(owner*: string, repo*: string, state?: \\\"open\\\"|\\\"closed\\\"|\\\"all\\\", head?: string, base?: string, sort?: \\\"created\\\"|\\\"updated\\\"|\\\"popularity\\\"|\\\"long-running\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"pulls_list({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_for_org\",\"purpose\":\"Lists repositories for the specified organization.\",\"signature\":\"repos_list_for_org(org*: string, type?: \\\"all\\\"|\\\"public\\\"|\\\"private\\\"|\\\"forks\\\"|\\\"sources\\\"|\\\"member\\\", sort?: \\\"created\\\"|\\\"updated\\\"|\\\"pushed\\\"|\\\"full_name\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_for_org({\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_for_user\",\"purpose\":\"List a user's public repositories, for example to identify a repository before calling a repository-specific tool.\",\"signature\":\"repos_list_for_user(username*: string, type?: \\\"all\\\"|\\\"owner\\\"|\\\"member\\\", sort?: \\\"created\\\"|\\\"updated\\\"|\\\"pushed\\\"|\\\"full_name\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_for_user({\\\"username\\\":\\\"octocat\\\",\\\"sort\\\":\\\"updated\\\",\\\"direction\\\":\\\"desc\\\",\\\"per_page\\\":10})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_accounts_for_plan\",\"purpose\":\"Returns user and organization accounts associated with the specified plan, including free plans.\",\"signature\":\"apps_list_accounts_for_plan(plan_id*: integer, sort?: \\\"created\\\"|\\\"updated\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_accounts_for_plan({\\\"plan_id\\\":1})\",\"read_only\":true,\"destructive\":false},{\"name\":\"issues_list_for_repo\",\"purpose\":\"List issues (and pull requests, which GitHub returns through its issues API) in a repository.\",\"signature\":\"issues_list_for_repo(owner*: string, repo*: string, milestone?: string, state?: \\\"open\\\"|\\\"closed\\\"|\\\"all\\\", assignee?: string, type?: string, creator?: string, mentioned?: string, issue_field_values?: string, labels?: string, sort?: \\\"created\\\"|\\\"updated\\\"|\\\"comments\\\", direction?: \\\"asc\\\"|\\\"desc\\\", … 4 more)\",\"example\":\"issues_list_for_repo({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\",\\\"labels\\\":\\\"bug\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_commits\",\"purpose\":\"List commits in a repository, newest first.\",\"signature\":\"repos_list_commits(owner*: string, repo*: string, sha?: string, path?: string, author?: string, committer?: string, since?: string, until?: string, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_commits({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\"})\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":8,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_clijRQOc\",\"call\":1}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_968f5bfbab734a72b045c4359cff88c4",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name to list its published packages."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_968f5bfbab734a72b045c4359cff88c4",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a2-d8bc-7b01-a9bc-14afc9b1bb60\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_clijRQOc\",\"call\":2}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Which GitHub organization should I check? Also, if you have a preferred package type (npm, Docker/Container, Maven, RubyGems, or NuGet), let me know."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name to list its published packages."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726434096
+    }
+   ],
+   "inputTokens": 1300,
+   "outputTokens": 203,
+   "cacheReadTokens": 8407,
+   "cacheWriteTokens": 0
+  },
+  "amb_pkg_org_all_types": {
+   "source": "github/github-tool-c2-r2-transcripts.json",
+   "taskKey": "github_ambiguous_org_package_type",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "tool",
+   "attempt": 1,
+   "passed": false,
+   "framingPassed": false,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "n/a: the server does not offer begin/end task framing (contract 2)"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Asks which package type the user wants to list, noting that the organization package listing requires that choice."
+     },
+     "passed": false,
+     "detail": "judge fail (0.30): Does not ask the user to choose a package type; instead offers to check all types.; The required organization name is asked for, but that does not satisfy the package-type requirement."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": true,
+     "detail": "0 upstream calls (budget 0)"
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "packages_list_packages_for_organization",
+      "toolKey": "operationId:packages/list-packages-for-organization"
+     },
+     "passed": true,
+     "detail": "packages_list_packages_for_organization not called"
+    }
+   ],
+   "judge": {
+    "score": 0.3,
+    "verdict": "fail",
+    "reasons": [
+     "Does not ask the user to choose a package type; instead offers to check all types.",
+     "The required organization name is asked for, but that does not satisfy the package-type requirement."
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Can you show me the packages published by the github organization?",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Can you show me the packages published by the github organization?"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_de196b06860e4252895be04c20d7f435",
+     "name": "search_tools",
+     "arguments": {
+      "query": "list GitHub organization packages published packages for an organization",
+      "detail": "brief"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_de196b06860e4252895be04c20d7f435",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"packages_list_packages_for_organization\",\"purpose\":\"List packages of one specified type published by an organization.\",\"signature\":\"packages_list_packages_for_organization(package_type*: \\\"npm\\\"|\\\"maven\\\"|\\\"rubygems\\\"|\\\"docker\\\"|\\\"nuget\\\"|\\\"container\\\", org*: string, visibility?: \\\"public\\\"|\\\"private\\\"|\\\"internal\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"packages_list_packages_for_organization({\\\"package_type\\\":\\\"npm\\\",\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"packages_list_packages_for_user\",\"purpose\":\"Lists all packages in a user's namespace for which the requesting user has access.\",\"signature\":\"packages_list_packages_for_user(package_type*: \\\"npm\\\"|\\\"maven\\\"|\\\"rubygems\\\"|\\\"docker\\\"|\\\"nuget\\\"|\\\"container\\\", username*: string, visibility?: \\\"public\\\"|\\\"private\\\"|\\\"internal\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"packages_list_packages_for_user({\\\"package_type\\\":\\\"npm\\\",\\\"username\\\":\\\"octocat\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"pulls_list\",\"purpose\":\"List pull requests in a repository.\",\"signature\":\"pulls_list(owner*: string, repo*: string, state?: \\\"open\\\"|\\\"closed\\\"|\\\"all\\\", head?: string, base?: string, sort?: \\\"created\\\"|\\\"updated\\\"|\\\"popularity\\\"|\\\"long-running\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"pulls_list({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_for_org\",\"purpose\":\"Lists repositories for the specified organization.\",\"signature\":\"repos_list_for_org(org*: string, type?: \\\"all\\\"|\\\"public\\\"|\\\"private\\\"|\\\"forks\\\"|\\\"sources\\\"|\\\"member\\\", sort?: \\\"created\\\"|\\\"updated\\\"|\\\"pushed\\\"|\\\"full_name\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_for_org({\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_tags\",\"purpose\":\"List tags in a repository.\",\"signature\":\"repos_list_tags(owner*: string, repo*: string, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_tags({\\\"owner\\\":\\\"octocat\\\",\\\"repo\\\":\\\"hello-world\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"oidc_list_oidc_custom_property_inclusions_for_org\",\"purpose\":\"Lists the repository custom properties that are included in the OIDC token for repository actions in an organization.\",\"signature\":\"oidc_list_oidc_custom_property_inclusions_for_org(org*: string, cursor?: string, fields?: string[])\",\"example\":\"oidc_list_oidc_custom_property_inclusions_for_org({\\\"org\\\":\\\"acme\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_accounts_for_plan\",\"purpose\":\"Returns user and organization accounts associated with the specified plan, including free plans.\",\"signature\":\"apps_list_accounts_for_plan(plan_id*: integer, sort?: \\\"created\\\"|\\\"updated\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_accounts_for_plan({\\\"plan_id\\\":1})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_installations_for_authenticated_user\",\"purpose\":\"Lists installations of your GitHub App that the authenticated user has explicit permission (`:read`, `:write`, or `:admin`) to access.\",\"signature\":\"apps_list_installations_for_authenticated_user(cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_installations_for_authenticated_user({\\\"per_page\\\":5})\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":8,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_y4bxmClS\",\"call\":1}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_0743f3d33a8b47a0a95c38bc4ad69acc",
+     "name": "search_tools",
+     "arguments": {
+      "query": "find authenticated user's GitHub organizations or list organizations for authenticated user",
+      "detail": "brief"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_0743f3d33a8b47a0a95c38bc4ad69acc",
+     "name": "search_tools",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"codespaces_list_for_authenticated_user\",\"purpose\":\"Lists the authenticated user's codespaces.\",\"signature\":\"codespaces_list_for_authenticated_user(repository_id?: integer, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"codespaces_list_for_authenticated_user({\\\"per_page\\\":5})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_installations_for_authenticated_user\",\"purpose\":\"Lists installations of your GitHub App that the authenticated user has explicit permission (`:read`, `:write`, or `:admin`) to access.\",\"signature\":\"apps_list_installations_for_authenticated_user(cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_installations_for_authenticated_user({\\\"per_page\\\":5})\",\"read_only\":true,\"destructive\":false},{\"name\":\"users_get_authenticated\",\"purpose\":\"OAuth app tokens and personal access tokens (classic) need the `read:user` scope, or the broader `user` scope, for this endpoint to return the private user response.\",\"signature\":\"users_get_authenticated(fields?: string[])\",\"example\":\"users_get_authenticated({})\",\"read_only\":true,\"destructive\":false},{\"name\":\"users_get_by_username\",\"purpose\":\"Provides publicly available information about someone with a GitHub account.\",\"signature\":\"users_get_by_username(username*: string, fields?: string[])\",\"example\":\"users_get_by_username({\\\"username\\\":\\\"user_1\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"repos_list_for_user\",\"purpose\":\"List a user's public repositories, for example to identify a repository before calling a repository-specific tool.\",\"signature\":\"repos_list_for_user(username*: string, type?: \\\"all\\\"|\\\"owner\\\"|\\\"member\\\", sort?: \\\"created\\\"|\\\"updated\\\"|\\\"pushed\\\"|\\\"full_name\\\", direction?: \\\"asc\\\"|\\\"desc\\\", cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"repos_list_for_user({\\\"username\\\":\\\"octocat\\\",\\\"sort\\\":\\\"updated\\\",\\\"direction\\\":\\\"desc\\\",\\\"per_page\\\":10})\",\"read_only\":true,\"destructive\":false},{\"name\":\"users_list_ssh_signing_keys_for_authenticated_user\",\"purpose\":\"Lists the SSH signing keys for the authenticated user's GitHub account.\",\"signature\":\"users_list_ssh_signing_keys_for_authenticated_user(cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"users_list_ssh_signing_keys_for_authenticated_user({\\\"per_page\\\":5})\",\"read_only\":true,\"destructive\":false},{\"name\":\"apps_list_installation_repos_for_authenticated_user\",\"purpose\":\"List repositories the authenticated user can access through the specified GitHub App installation, including each repository's permissions.\",\"signature\":\"apps_list_installation_repos_for_authenticated_user(installation_id*: integer, cursor?: string, limit?: integer, fields?: string[])\",\"example\":\"apps_list_installation_repos_for_authenticated_user({\\\"installation_id\\\":1})\",\"read_only\":true,\"destructive\":false},{\"name\":\"users_get_ssh_signing_key_for_authenticated_user\",\"purpose\":\"Retrieve details for one SSH signing key belonging to the authenticated GitHub user, identified by its numeric key ID.\",\"signature\":\"users_get_ssh_signing_key_for_authenticated_user(ssh_signing_key_id*: integer, fields?: string[])\",\"example\":\"users_get_ssh_signing_key_for_authenticated_user({\\\"ssh_signing_key_id\\\":1})\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":8,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_y4bxmClS\",\"call\":2}}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_38400689c5064e27b345093609b531e1",
+     "name": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name to list its packages. The API also requires a package type (npm, Maven, RubyGems, Docker, NuGet, or container); I can check all types if you prefer.",
+      "attempted": [
+       "packages_list_packages_for_organization"
+      ],
+      "reason": "Organization name is not specified."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_38400689c5064e27b345093609b531e1",
+     "name": "neurouter_report",
+     "isError": false,
+     "text": "{\"ok\":true,\"data\":{\"recorded\":true,\"ref\":\"01a219a8-1c11-74d9-a04d-25a8bcc61dfa\",\"similar\":0},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_y4bxmClS\",\"call\":3}}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Which GitHub organization should I check? I can look for packages across all supported types: npm, Maven, RubyGems, Docker, NuGet, and container."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "neurouter_report",
+     "arguments": {
+      "kind": "blocked",
+      "text": "I need the GitHub organization name to list its packages. The API also requires a package type (npm, Maven, RubyGems, Docker, NuGet, or container); I can check all types if you prefer.",
+      "attempted": [
+       "packages_list_packages_for_organization"
+      ],
+      "reason": "Organization name is not specified."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795726780623
+    }
+   ],
+   "inputTokens": 2084,
+   "outputTokens": 348,
+   "cacheReadTokens": 12584,
    "cacheWriteTokens": 0
   }
  }

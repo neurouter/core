@@ -627,7 +627,7 @@ export class EvalsService {
               served_by_model: r.servedByModel,
               fallback_used: r.fallbackUsed ? 1 : 0,
               task_id_neurouter: r.neurouterTaskId,
-              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes, framingPassed: r.framingPassed }),
+              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes, framingPassed: r.framingPassed, judgeVotes: r.judgeVotes ?? null }),
               created_at: this.d.clock.now(),
             })
             .execute();
@@ -681,7 +681,7 @@ export class EvalsService {
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
     const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.cache_read_tokens', 'r.cache_write_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
-      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number; framingPassed?: boolean | null } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
+      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number; framingPassed?: boolean | null; judgeVotes?: TaskRunResult['judgeVotes'] } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
       return {
         key: `${r.key}|${r.model}|${r.mode}|${r.attempt}`,
         taskKey: r.key,
@@ -714,6 +714,7 @@ export class EvalsService {
         ...(tr?.upstreamCalls !== undefined ? { upstreamCalls: tr.upstreamCalls, callBudget: tr.callBudget ?? null, overBudget: tr.overBudget ?? false } : {}),
         ...(tr?.judgeUsage ? { judgeUsage: tr.judgeUsage } : {}),
         ...(tr?.toolsListBytes !== undefined ? { toolsListBytes: tr.toolsListBytes } : {}),
+        ...(tr?.judgeVotes ? { judgeVotes: tr.judgeVotes } : {}),
       } as TaskRunResult;
     });
   }

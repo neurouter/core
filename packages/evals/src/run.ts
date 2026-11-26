@@ -1,8 +1,8 @@
 import { agentSystemPrompt } from './prompts.js';
 import { BEGIN_TASK_TOOL, checkAttempt, failedAnswerExpectations, primaryTool, workCalls, type CheckOptions } from './check.js';
-import { emptyJudgeUsage, judgeAttempt, judgeDecline, judgeEquivalence, judgeTokens, needsJudge } from './judge.js';
+import { emptyJudgeUsage, judgeAttemptVoted, judgeDecline, judgeEquivalenceVoted, judgeTokens, needsJudge } from './judge.js';
 import type { GroundTruth } from './groundtruth.js';
-import type { CheckResult, JudgeResult, JudgeUsage } from './types.js';
+import type { CheckResult, JudgeResult, JudgeUsage, JudgeVotes } from './types.js';
 import { fallbackUsed, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmToolResultBlock, type LlmToolUseBlock } from './llm/types.js';
 import { resultText, taskIdFromResult, type McpSession } from './mcp.js';
 import type { StateReader } from './check.js';
@@ -347,10 +347,13 @@ export async function gradeAttempt(task: EvalTask, record: AttemptRecord, o: Gra
   const usage = emptyJudgeUsage();
   const model = o.judgeModel ?? 'judge';
   let judge: JudgeResult | null = o.judge ?? null;
+  const votes: JudgeVotes = {};
   const judgeable = record.endReason !== 'error' && record.endReason !== 'refusal';
   if (!judge && o.llm && needsJudge(task) && judgeable) {
     try {
-      judge = await judgeAttempt({ llm: o.llm, model, task, record, groundTruth: o.groundTruth ?? null, usage, ...(o.signal ? { signal: o.signal } : {}) });
+      const voted = await judgeAttemptVoted({ llm: o.llm, model, task, record, groundTruth: o.groundTruth ?? null, usage, ...(o.signal ? { signal: o.signal } : {}) });
+      judge = voted.result;
+      votes.rubric = voted.votes;
     } catch (err) {
       if (err instanceof LlmKeyError) throw err;
       judge = { score: 0, verdict: 'fail' as const, reasons: [`judge failed: ${(err as Error).message}`] };
@@ -371,12 +374,15 @@ export async function gradeAttempt(task: EvalTask, record: AttemptRecord, o: Gra
   const items = failedAnswerExpectations(task, check, o.groundTruth ?? null);
   if (o.llm && o.equivalenceJudge !== false && items.length && judgeable && record.finalAnswer.trim()) {
     try {
-      const equivalence = await judgeEquivalence({ llm: o.llm, model, task, answer: record.finalAnswer, items, usage, ...(o.signal ? { signal: o.signal } : {}) });
+      const voted = await judgeEquivalenceVoted({ llm: o.llm, model, task, answer: record.finalAnswer, items, usage, ...(o.signal ? { signal: o.signal } : {}) });
+      votes.equivalence = voted.votes;
+      const equivalence = voted.result;
       if (Object.keys(equivalence).length) check = await checkAttempt(task, record, { ...base, equivalence });
     } catch (err) {
       if (err instanceof LlmKeyError) throw err;
     }
   }
+  if (votes.rubric || votes.equivalence) check = { ...check, judgeVotes: votes };
   return { check, judgeUsage: usage };
 }
 
@@ -437,6 +443,7 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext, gtOf: (task: E
       callBudget: check.callBudget,
       overBudget: check.overBudget,
       judgeUsage: judgeUsage.calls ? judgeUsage : null,
+      ...(check.judgeVotes ? { judgeVotes: check.judgeVotes } : {}),
       ...(run.toolsListBytes !== undefined ? { toolsListBytes: run.toolsListBytes } : {}),
     };
   } finally {

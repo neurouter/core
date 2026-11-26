@@ -159,9 +159,17 @@ export interface JudgeResult {
   path?: 'asked' | 'assumed' | 'neither';
 }
 
+/** Every judge call behind a verdict (borderline verdicts are voted: up to 3 calls, majority). */
+export interface JudgeVotes {
+  rubric?: JudgeResult[];
+  /** answer-equivalence judge: one map (assertion index → ruling) per call */
+  equivalence?: Array<Record<number, { equivalent: boolean; reason: string }>>;
+}
+
 export interface CheckResult {
   passed: boolean;
   results: AssertionResult[];
+  judgeVotes?: JudgeVotes;
   /** null when the task has no `framing` assertion. */
   framingPassed: boolean | null;
   judge: JudgeResult | null;
@@ -213,6 +221,8 @@ export interface TaskRunResult {
   overBudget?: boolean;
   /** Judge LLM usage for this attempt. */
   judgeUsage?: JudgeUsage | null;
+  /** All judge calls behind the verdicts (voting on borderline ones). */
+  judgeVotes?: JudgeVotes | null;
   toolsListBytes?: number;
 }
 
