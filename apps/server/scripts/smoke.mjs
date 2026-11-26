@@ -112,9 +112,12 @@ try {
   const call = await rpc('tools/call', { name: 'get_pet_by_id', arguments: { pet_id: 1 } });
   check('mock tool call get_pet_by_id', !call.isError && !call.error, text(call).slice(0, 100).replace(/\s+/g, ' '));
   const script = await rpc('tools/call', { name: 'run_script', arguments: { code: 'pet = petstore.get_pet_by_id(pet_id=1)\nreturn {"answer": 6 * 7, "has_pet": pet is not None}' } });
-  check('run_script', !script.isError && script.structuredContent?.status === 'ok' && script.structuredContent?.result?.answer === 42, JSON.stringify(script.structuredContent ?? script).slice(0, 200));
+  // the example config's servers are new, so they serve agent contract 2 (envelope); contract 1 answers {status,result}
+  const sc = script.structuredContent;
+  const answer = sc?.ok === true ? sc.data?.answer : sc?.status === 'ok' ? sc.result?.answer : undefined;
+  check('run_script', !script.isError && answer === 42, JSON.stringify(sc ?? script).slice(0, 200));
   const found = await rpc('tools/call', { name: 'search_tools', arguments: { query: 'find a pet by its id', format: 'json' } }, { 'x-neurouter-exposure': 'code' });
-  const hits = (found.structuredContent?.tools ?? []).map((t) => t.name);
+  const hits = (found.structuredContent?.data?.tools ?? found.structuredContent?.tools ?? []).map((t) => t.name);
   check('search_tools', hits.includes('get_pet_by_id'), hits.slice(0, 5).join(', '));
 } catch (err) {
   check('smoke', false, String(err?.message ?? err));

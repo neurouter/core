@@ -13,6 +13,11 @@ import type { ResultPages } from '../shaping/result-pages.js';
 import type { TaskTracker } from '../tasks/tracker.js';
 import type { RunContext } from '../pipeline/context.js';
 import { errorResult } from '../pipeline/errors.js';
+import { errorDraft, okDraft, type Draft, type ErrorSpec } from '../envelope/draft.js';
+import { errorInfoFor } from '../envelope/render.js';
+import { closestNames } from '../envelope/relations.js';
+import type { Call, EnvelopeErrorCode, ErrorInfo } from '../envelope/types.js';
+import { NO_RESULT, v1Result } from '../envelope/v1.js';
 import { envLabel, killSwitchFor, resolveVisibleTool, writeEnabled, type Confirmer, type McpToolResult, type Pipeline, type PlannedChange } from '../pipeline/pipeline.js';
 import type { OpsTools } from '../ops/ops.js';
 import { opFor } from '../ops/ops.js';
@@ -62,6 +67,52 @@ interface Phase {
 }
 
 const MAX_CONCURRENT_PER_PRINCIPAL = 2;
+
+/** Contract 2: the Python exception a tool error raises inside a script (its message is the error object as JSON). */
+const PY_ERROR: Partial<Record<EnvelopeErrorCode, string>> = {
+  not_found: 'LookupError',
+  invalid_args: 'ValueError',
+  unknown_tool: 'AttributeError',
+  forbidden: 'PermissionError',
+  writes_disabled: 'PermissionError',
+  policy_denied: 'PermissionError',
+  confirmation_required: 'PermissionError',
+  confirmation_declined: 'PermissionError',
+  confirmation_unsupported: 'PermissionError',
+  timeout: 'TimeoutError',
+};
+
+/** A JSON value as a Python literal. */
+function pyLiteral(v: unknown): string {
+  if (v === null || v === undefined) return 'None';
+  if (v === true) return 'True';
+  if (v === false) return 'False';
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(pyLiteral).join(', ')}]`;
+  return `{${Object.entries(v as Record<string, unknown>).map(([k, x]) => `${JSON.stringify(k)}: ${pyLiteral(x)}`).join(', ')}}`;
+}
+
+/** An API tool call as the `run_script` call that makes it (next calls inside code mode). */
+function asScriptCall(call: Call, tools: ToolDef[]): Call {
+  const t = tools.find((x) => x.name === call.tool);
+  if (!t) return call;
+  const inv = Object.fromEntries(Object.entries(pyArgMap(t)).map(([py, arg]) => [arg, py]));
+  const kw = Object.entries(call.args).map(([k, v]) => `${inv[k] ?? k}=${pyLiteral(v)}`).join(', ');
+  return { tool: 'run_script', args: { code: `return ${t.pyName}(${kw})` } };
+}
+
+export interface ScriptReply {
+  result: McpToolResult;
+  draft: Draft;
+  inputRequired?: unknown;
+}
+
+/** How a script run is addressed in next calls (run_script itself, or the composite tool that wraps it). */
+export interface ScriptCallAs {
+  name: string;
+  args: Record<string, unknown>;
+}
 const QUEUE_WAIT_MS = 5000;
 
 /** Allowed functions for the principal: visible tools ∩ static ACL (steps 1–4 of §9.6, evaluated per tool). */
@@ -123,20 +174,25 @@ export class ScriptRunner {
 
   constructor(private readonly d: RunScriptDeps) {}
 
-  async run(ctx: RunContext, args: Record<string, unknown>, confirmer: Confirmer | null, signal?: AbortSignal, opts: { allowWithoutScope?: boolean } = {}): Promise<{ result: McpToolResult; inputRequired?: unknown }> {
+  async run(ctx: RunContext, args: Record<string, unknown>, confirmer: Confirmer | null, signal?: AbortSignal, opts: { allowWithoutScope?: boolean; callAs?: ScriptCallAs } = {}): Promise<ScriptReply> {
     const code = typeof args.code === 'string' ? args.code : '';
     const mode = args.mode === 'dry_run' ? 'dry_run' : 'execute';
     const inputs = args.inputs && typeof args.inputs === 'object' && !Array.isArray(args.inputs) ? (args.inputs as Record<string, unknown>) : {};
-    if (!code) return { result: errorResult('run_script needs `code`', null, 'script_rejected') };
-    if (Buffer.byteLength(code, 'utf8') > 16 * 1024) return { result: errorResult('Script larger than 16 KiB', null, 'script_rejected') };
+    const callAs = opts.callAs ?? { name: 'run_script', args };
+    const early = (message: string, code_: 'script_rejected' | 'executor_unavailable' | 'executor_busy', spec: Partial<ErrorSpec> = {}, extra: { retryAfterMs?: number } = {}): ScriptReply => ({
+      result: errorResult(message, null, code_, extra),
+      draft: errorDraft({ code: code_, message, name: callAs.name, args: callAs.args, next: [], ...(extra.retryAfterMs !== undefined ? { retryAfterMs: extra.retryAfterMs } : {}), ...spec }),
+    });
+    if (!code) return early('run_script needs `code`', 'script_rejected', { code: 'invalid_args', text: 'run_script needs `code` (a Python script); nothing was run.', issues: [{ path: '', keyword: 'required', params: { missingProperty: 'code' }, message: 'required' }] });
+    if (Buffer.byteLength(code, 'utf8') > 16 * 1024) return early('Script larger than 16 KiB', 'script_rejected', { code: 'too_large', text: 'The script is larger than 16 KiB; nothing was run.' });
     const executor = this.d.executor();
-    if (!executor || !(opts.allowWithoutScope ? this.d.healthy() && ctx.bundle.codeModeEnabled && !killSwitchFor(ctx, null, ['code_mode', 'all']) : codeModeAvailable(ctx, this.d.healthy()))) return { result: errorResult('Code mode is not available in this environment.', null, 'executor_unavailable') };
+    if (!executor || !(opts.allowWithoutScope ? this.d.healthy() && ctx.bundle.codeModeEnabled && !killSwitchFor(ctx, null, ['code_mode', 'all']) : codeModeAvailable(ctx, this.d.healthy()))) return early('Code mode is not available in this environment.', 'executor_unavailable', { text: 'Code mode is not available in this environment; call the API tools directly. Nothing was run.' });
 
     // per-principal concurrency (≤ 2), wait ≤ 5 s
     const key = ctx.credentialKey;
     const deadline = this.d.now() + QUEUE_WAIT_MS;
     while ((this.running.get(key) ?? 0) >= MAX_CONCURRENT_PER_PRINCIPAL) {
-      if (this.d.now() > deadline) return { result: errorResult('Too many scripts running for this credential; retry shortly.', null, 'executor_busy', { retryAfterMs: 2000 }) };
+      if (this.d.now() > deadline) return early('Too many scripts running for this credential; retry shortly.', 'executor_busy', { next: [{ tool: callAs.name, args: callAs.args }] }, { retryAfterMs: 2000 });
       await new Promise((r) => setTimeout(r, 50));
     }
     this.running.set(key, (this.running.get(key) ?? 0) + 1);
@@ -145,30 +201,34 @@ export class ScriptRunner {
       const confirmMode = ctx.bundle.environment.writes.confirm;
       const confirmWrites = ctx.bundle.environment.writes.enabled && confirmMode !== 'none';
       if (mode === 'execute' && confirmWrites) {
-        const dry = await this.runOnce(executor, ctx, code, 'dry_run', inputs, null, signal, true);
-        if (dry.status !== 'ok') return { result: dry.result };
+        const dry = await this.runOnce(executor, ctx, code, 'dry_run', inputs, callAs, signal, true);
+        if (dry.status !== 'ok') return { result: dry.result, draft: dry.draft };
         if (dry.planned.length) {
           const listed = dry.planned.slice(0, 20).map((p) => `- ${p.method} ${p.path} (${p.tool})`).join('\n');
           const synthetic: ToolDef = { ...ctx.bundle.build.tools.find((t) => t.name === dry.planned[0]!.tool)!, name: 'run_script', title: `run a script with ${dry.planned.length} write(s)` };
           const planHash = sha256Hex(JSON.stringify(dry.planned.map((p) => `${p.tool}|${p.argsHash}`)));
           const out = confirmer ? await confirmer.confirm({ tool: synthetic, args: { code_hash: sha256Hex(code), plan: planHash }, argsHash: planHash, message: `Allow ${ctx.client.name ?? 'this agent'} to run a script that makes ${dry.planned.length} change(s) in ${envLabel(ctx)}?\n${listed}` }) : ({ status: 'unsupported' } as const);
-          if (out.status === 'pending') return { result: { content: [] }, inputRequired: out.result };
+          if (out.status === 'pending') return { result: NO_RESULT, draft: errorDraft({ code: 'confirmation_required', message: 'Waiting for the user to confirm.' }), inputRequired: out.result };
           if (out.status !== 'approved') {
             const where = envLabel(ctx);
             if (out.status === 'unsupported' && confirmMode === 'elicit') {
               // elicit: the dry run already ran; return its plan (nothing was executed) for the user to review
               const planned = dry.planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, arguments: p.arguments }));
               const r = await this.finishRejected(ctx, code, 'execute', 'confirm_declined', `Not executed: this client cannot ask the user to confirm writes in ${where}. The dry run planned ${planned.length} change(s), none made:\n${listed}\nShow them to the user; they can approve the script from a client with MCP elicitation support.`, 'confirmation_unsupported');
-              return { result: { ...r, _meta: { ...(r._meta ?? {}), [META_PLANNED_CHANGES]: planned } } };
+              const draft = errorDraft({ code: 'confirmation_unsupported', message: '', text: `The script makes ${planned.length} change(s) that need your user's approval in ${where}, and this client cannot ask; nothing changed. Show data.plan to the user.`, name: callAs.name, args: callAs.args, next: [] }, { write: true, data: { plan: planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, args: p.arguments })) } });
+              return { result: { ...r, _meta: { ...(r._meta ?? {}), [META_PLANNED_CHANGES]: planned } }, draft };
             }
-            const r = await this.finishRejected(ctx, code, 'execute', 'confirm_declined', out.status === 'unsupported' ? `This client cannot ask the user to confirm writes in ${where}; the script was not run.` : 'The user declined the planned changes.', out.status === 'unsupported' ? 'confirmation_unsupported' : 'confirmation_declined');
-            return { result: r };
+            const message = out.status === 'unsupported' ? `This client cannot ask the user to confirm writes in ${where}; the script was not run.` : 'The user declined the planned changes.';
+            const r = await this.finishRejected(ctx, code, 'execute', 'confirm_declined', message, out.status === 'unsupported' ? 'confirmation_unsupported' : 'confirmation_declined');
+            return { result: r, draft: errorDraft({ code: out.status === 'unsupported' ? 'confirmation_unsupported' : 'confirmation_declined', message: `${message} Nothing changed.`, name: callAs.name, args: callAs.args, next: [] }) };
           }
           const plan = new Set(dry.planned.map((p) => `${p.tool}|${p.argsHash}`));
-          return { result: (await this.runOnce(executor, { ...ctx, approvedPlan: plan }, code, 'execute', inputs, null, signal)).result };
+          const run = await this.runOnce(executor, { ...ctx, approvedPlan: plan }, code, 'execute', inputs, callAs, signal);
+          return { result: run.result, draft: run.draft };
         }
       }
-      return { result: (await this.runOnce(executor, ctx, code, mode, inputs, null, signal)).result };
+      const run = await this.runOnce(executor, ctx, code, mode, inputs, callAs, signal);
+      return { result: run.result, draft: run.draft };
     } finally {
       this.running.set(key, (this.running.get(key) ?? 1) - 1);
     }
@@ -180,6 +240,60 @@ export class ScriptRunner {
     await this.d.db.insertInto('script_runs').values({ id, tenant_id: ctx.tenantId, task_id: ctx.taskId, server_id: ctx.server.id, environment_id: ctx.environment.id, user_id: null, credential_key: ctx.credentialKey, code: code.slice(0, 16384), code_hash: sha256Hex(code), mode, status, error: toJsonColumn({ type: status, message }), started_at: now, ended_at: now }).execute();
     this.d.audit.record({ ...this.d.pipeline.auditBase(ctx), kind: 'script_run', toolName: 'run_script', scriptRunId: id, decision: 'denied_confirmation', status: 'blocked', params: { code_hash: sha256Hex(code), mode }, errorMessage: message });
     return errorResult(message, null, errorCode ?? (status === 'confirm_declined' ? 'confirmation_declined' : 'script_rejected'));
+  }
+
+  /**
+   * Contract-2 form of a run: `data` = the script's return value (dry run: `{result, plan}`), `truncated` when
+   * the value is over the result limit, `state.left` / `script_calls`, and errors without tracebacks (a tool
+   * error the script did not catch keeps its code and next calls).
+   */
+  private scriptDraft(
+    ctx: RunContext,
+    status: ScriptStatus,
+    body: { error?: Record<string, unknown>; truncated?: boolean; preview?: unknown; valueBytes?: number },
+    value: unknown,
+    mode: 'dry_run' | 'execute',
+    planned: PlannedChange[],
+    callAs: ScriptCallAs,
+    budget: { calls: number; left: { calls: number; seconds: number } },
+    innerErrors: Map<string, ErrorInfo>,
+    meta: Record<string, unknown>,
+  ): Draft {
+    const extra = { left: budget.left, scriptCalls: budget.calls, meta, ...(mode === 'dry_run' ? { flags: ['dry_run' as const] } : {}), ...(planned.length ? { write: true } : {}) };
+    if (status === 'ok') {
+      const plan = planned.map((p) => ({ tool: p.tool, method: p.method, path: p.path, args: p.arguments }));
+      const data = mode === 'dry_run' ? { result: value, plan } : value;
+      if (!body.truncated) return okDraft(data, extra);
+      const shown = typeof body.preview === 'string' ? Buffer.byteLength(body.preview) : 0;
+      return okDraft(data, {
+        ...extra,
+        truncated: { omitted_bytes: Math.max(0, (body.valueBytes ?? shown) - shown), next: { tool: callAs.name, args: callAs.args } },
+        hint: `The return value (${body.valueBytes ?? '?'} bytes) is over the script result limit; data is its first part. Return less: filter, count or slice inside the script.`,
+      });
+    }
+    const e = body.error ?? {};
+    const raw = String(e.message ?? '').replace(/__neurouter_main__/g, 'script');
+    const line = typeof e.line === 'number' ? e.line : undefined;
+    const base = { name: callAs.name, args: callAs.args, ...(line !== undefined ? { line } : {}) };
+    // an uncaught tool error: the message is the error object raised into the script
+    const inner = [...innerErrors.entries()].find(([json]) => raw.includes(json))?.[1];
+    if (inner) return errorDraft({ code: inner.code, message: inner.message, info: inner, ...base }, extra);
+    const msg = (s: string) => (s.length <= 200 ? s : `${s.slice(0, 199)}…`);
+    switch (status) {
+      case 'rejected':
+        return errorDraft({ code: 'script_rejected', message: raw, text: msg(`Script rejected: ${raw}${e.hint ? ` ${String(e.hint)}` : ''}`), next: [], ...base }, extra);
+      case 'type_error':
+      case 'syntax_error':
+        return errorDraft({ code: 'script_type_error', message: raw, text: msg(`${status === 'syntax_error' ? 'Syntax error' : 'Type error'}: ${raw.split('\n')[0]}${e.hint ? ` ${String(e.hint)}` : ''}`), next: [], ...base }, extra);
+      case 'limit_exceeded':
+        return errorDraft({ code: 'script_limit', message: raw, text: msg(`Script limit exceeded: ${raw}. Do less per script.`), next: [], ...base }, extra);
+      case 'executor_unavailable':
+        return errorDraft({ code: 'executor_unavailable', message: raw, text: 'Code mode failed to run the script; nothing was run. Call the API tools directly.', next: [], ...base }, extra);
+      case 'cancelled':
+        return errorDraft({ code: 'unavailable', message: raw, text: 'The script was cancelled.', retry: 'yes', next: [], ...base }, extra);
+      default:
+        return errorDraft({ code: 'script_error', message: raw, text: msg(`${String(e.type ?? 'Error')}: ${raw.split('\n')[0]}${e.hint ? ` ${String(e.hint)}` : ''}`), next: [], ...base }, extra);
+    }
   }
 
   /** Stubs regenerated from the filtered tool list, cached by (build, allowedSetHash). */
@@ -194,7 +308,7 @@ export class ScriptRunner {
     return out;
   }
 
-  private async runOnce(executor: Executor, ctx0: RunContext, code: string, mode: 'dry_run' | 'execute', inputs: Record<string, unknown>, _x: null, signal: AbortSignal | undefined, planOnly = false): Promise<{ status: ScriptStatus; result: McpToolResult; planned: PlannedChange[] }> {
+  private async runOnce(executor: Executor, ctx0: RunContext, code: string, mode: 'dry_run' | 'execute', inputs: Record<string, unknown>, callAs: ScriptCallAs, signal: AbortSignal | undefined, planOnly = false): Promise<{ status: ScriptStatus; result: McpToolResult; planned: PlannedChange[]; draft: Draft }> {
     const started = this.d.now();
     const runId = newId();
     const codeHash = sha256Hex(code);
@@ -217,7 +331,7 @@ export class ScriptRunner {
     await this.d.db.insertInto('script_runs').values({ id: runId, tenant_id: ctx.tenantId, task_id: taskId, server_id: ctx.server.id, environment_id: ctx.environment.id, user_id: ctx.principal.type === 'external' ? null : ctx.principal.userId, credential_key: ctx.credentialKey, code: code.slice(0, 16384), code_hash: codeHash, mode, status: 'running', started_at: started }).execute();
 
     const ns = ctx.server.slug.replace(/-/g, '_');
-    const finish = async (status: ScriptStatus, body: { value?: unknown; error?: Record<string, unknown>; stats?: Record<string, unknown>; stdout?: string; truncated?: boolean; preview?: unknown; valueBytes?: number }): Promise<{ status: ScriptStatus; result: McpToolResult; planned: PlannedChange[] }> => {
+    const finish = async (status: ScriptStatus, body: { value?: unknown; error?: Record<string, unknown>; stats?: Record<string, unknown>; stdout?: string; truncated?: boolean; preview?: unknown; valueBytes?: number }): Promise<{ status: ScriptStatus; result: McpToolResult; planned: PlannedChange[]; draft: Draft }> => {
       const ended = this.d.now();
       const stats = { wallMs: ended - started, toolCalls: calls, blockedCalls: blocked, suspensions: calls, ...(body.stats ?? {}) };
       let handle: string | null = null;
@@ -260,8 +374,11 @@ export class ScriptRunner {
       }
       const isError = status !== 'ok';
       const text = JSON.stringify(structured);
-      return { status, planned, result: { content: [{ type: 'text', text: text.length > 8192 ? `${text.slice(0, 8150)}… (truncated preview)` : text }], structuredContent: structured, ...(isError ? { isError: true } : {}), _meta: meta } };
+      const draft = this.scriptDraft(ctx, status, body, value ?? null, mode, planned, callAs, { calls, left: { calls: Math.max(0, lim.maxToolCalls - calls), seconds: Math.max(0, Math.floor((lim.wallTimeSec * 1000 - (ended - started)) / 1000)) } }, innerErrors, { [META_CALL_ID]: auditId, [META_TASK_ID]: taskId, 'dev.neurouter/script-run-id': runId });
+      return { status, planned, result: v1Result(text.length > 8192 ? `${text.slice(0, 8150)}… (truncated preview)` : text, structured, meta, isError), draft };
     };
+    /** contract 2: the error objects raised into the script (by JSON message), so an uncaught one becomes the run's error */
+    const innerErrors = new Map<string, ErrorInfo>();
     let calls = 0;
     let blocked = 0;
 
@@ -286,6 +403,7 @@ export class ScriptRunner {
     const opsFns = SCRIPT_OPS.filter((o) => ctx.bundle.server.opsTools[o]);
     const capability = `rc_${randomBytes(32).toString('base64url')}`;
     const wrapped = wrapScript(code);
+    const v2 = ctx.contract === 2;
     const sem = new Semaphore(lim.maxConcurrentCalls);
 
     const host = {
@@ -293,16 +411,22 @@ export class ScriptRunner {
         if (calls >= lim.maxToolCalls) return { ok: false, error: { code: 'limit_exceeded', message: `${lim.maxToolCalls} tool calls` } };
         calls++;
         return sem.run(async () => {
+          const raise = (info: ErrorInfo): HostCallResult => {
+            const message = JSON.stringify(info);
+            innerErrors.set(message, info);
+            return { ok: false, error: { code: info.code, message, ...(PY_ERROR[info.code] ? { pyType: PY_ERROR[info.code] } : { pyType: 'RuntimeError' }) } } as HostCallResult;
+          };
+          const unknownFn = async (): Promise<HostCallResult> => raise(await errorInfoFor(ctx, { code: 'unknown_tool', message: '', text: `No function ${fn} in this script's namespaces; nothing was called.`, name: fn, closest: closestNames(fn, [...byFn.keys()]), next: [{ tool: 'search_tools', args: { query: fn.split('.').pop() ?? fn } }] }));
           if (fn.startsWith('ops.')) {
             const op = opFor(ctx, fn);
-            if (!op || !(SCRIPT_OPS as readonly string[]).includes(op)) return { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
+            if (!op || !(SCRIPT_OPS as readonly string[]).includes(op)) return v2 ? unknownFn() : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
             const r = await this.d.ops.call(ctx, op, kwargs);
             return { ok: true, value: r.value };
           }
           const t = byFn.get(fn);
           if (!t) {
             blocked++;
-            return { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
+            return v2 ? unknownFn() : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
           }
           const map = pyArgMap(t);
           const argsIn: Record<string, unknown> = {};
@@ -310,6 +434,11 @@ export class ScriptRunner {
           const out = await this.d.pipeline.invoke(ctx, t.name, argsIn, { planned, ...(signal ? { signal } : {}) });
           if (!out.ok) {
             blocked += out.decision.startsWith('denied_') ? 1 : 0;
+            if (v2 && out.draft.error) {
+              // next calls name API tools; inside a script they become run_script calls of the same function
+              const info = await errorInfoFor(ctx, out.draft.error);
+              return raise({ ...info, next: info.next.map((c) => asScriptCall(c, tools)) });
+            }
             return { ok: false, error: { code: out.error?.code ?? 'tool_error', message: out.error?.message ?? 'tool call failed', ...(out.error?.errorId ? { errorId: out.error.errorId } : {}) } };
           }
           return { ok: true, value: out.value ?? null };

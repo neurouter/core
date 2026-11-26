@@ -51,6 +51,27 @@ mean of that over the multi-step attempts. Cached input (OpenAI `cached_tokens`,
 writes are counted as input. `--transcripts <file>` writes every attempt untrimmed (`--transcript-max-chars`
 to cap each item).
 
+## Agent contract
+
+Tool results follow one of two contracts, chosen per session:
+
+- **Contract 2** (default for servers created from this release on): every `tools/call` result is one envelope,
+  `{"ok","data","page","truncated","error","state"}` (plus an optional `hint`), as the only text item and as
+  `structuredContent`. `data` is the API's payload unchanged; `page` says `count`/`total`/`has_more` on list tools;
+  `truncated` names what Neurouter cut and the exact call that returns it; `error` has a code, a short message,
+  every invalid field with its allowed values, `retry` and `next` (the exact call to make next); `state` carries the
+  environment, write mode, task and call counter (and identical-result streaks). Unknown tools answer with an
+  envelope (`unknown_tool` + closest names), not a JSON-RPC error. In `run_script`, tool functions return plain data
+  and raise `LookupError`/`ValueError`/`PermissionError`/… whose message is the error object.
+- **Contract 1**: the 0.2.x shapes. Servers created before contract 2 keep it until switched.
+
+A client picks a version with the capability `experimental["dev.neurouter/contract"] = {"versions":[2,1]}` or the
+header `X-Neurouter-Contract: 2`; otherwise `exposure.contract` (server, or per environment in `neurouter.yaml`)
+decides. `NEUROUTER_NEW_SERVER_CONTRACT` (default `2`) sets the contract of new servers. `exposure.outputSchema`
+is `envelope` (default: the shared envelope schema with an open `data`), `none`, or `typed` (the shaped upstream
+schema as `data`, validated before sending; a tool whose response does not match is re-listed without it and
+reported in the inbox).
+
 ## Development
 
 | Command | What |

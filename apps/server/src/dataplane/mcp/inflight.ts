@@ -10,6 +10,8 @@ export interface RpcInspection {
   cancels: RpcId[];
   /** `initialize` params (legacy era: clientInfo is only sent here) */
   initialize: { name: string | null; version: string | null; protocolVersion: string | null; capabilities?: Record<string, unknown> | null } | null;
+  /** client capabilities from a 2026-07-28 per-request `_meta` envelope (contract negotiation before the SDK runs) */
+  envelopeCaps?: Record<string, unknown> | null;
 }
 
 const isId = (v: unknown): v is RpcId => typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v));
@@ -29,6 +31,8 @@ export function inspectJsonRpc(body: string | undefined): RpcInspection {
     if (!m || typeof m !== 'object') continue;
     const msg = m as { method?: unknown; id?: unknown; params?: Record<string, unknown> };
     const params = msg.params && typeof msg.params === 'object' ? msg.params : {};
+    const env = params._meta && typeof params._meta === 'object' ? (params._meta as Record<string, unknown>)['io.modelcontextprotocol/clientCapabilities'] : undefined;
+    if (env && typeof env === 'object' && !Array.isArray(env)) out.envelopeCaps = env as Record<string, unknown>;
     if (msg.method === 'tools/call' && isId(msg.id)) out.calls.push(msg.id);
     else if (msg.method === 'notifications/cancelled' && isId(params.requestId)) out.cancels.push(params.requestId);
     else if (msg.method === 'initialize') {

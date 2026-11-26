@@ -15,7 +15,8 @@ function measure(schema: unknown, depth = 0, acc = { count: 0, maxDepth: 0 }): {
   return acc;
 }
 
-export type ArgCheck = { ok: true } | { ok: false; errors: string[] };
+/** A failed check: v1 message lines, plus the structured failures the contract-2 error builder uses. */
+export type ArgCheck = { ok: true } | { ok: false; errors: string[]; issues: Array<{ path: string; keyword: string; params: Record<string, unknown>; message: string }> };
 
 /**
  * Validates `call_tool` arguments against the PINNED input schema (backend §5.6 step 3):
@@ -53,8 +54,13 @@ export class ArgValidator {
 
   check(hash: string, schema: Record<string, unknown>, args: unknown): ArgCheck {
     const v = this.compile(hash, schema);
-    if (v instanceof Error) return { ok: false, errors: [v.message] };
+    if (v instanceof Error) return { ok: false, errors: [v.message], issues: [] };
     if (v(args)) return { ok: true };
-    return { ok: false, errors: (v.errors ?? []).slice(0, 20).map((e) => `${e.instancePath || '(root)'} ${e.message ?? 'is invalid'}`.trim()) };
+    const errs = (v.errors ?? []).slice(0, 20);
+    return {
+      ok: false,
+      errors: errs.map((e) => `${e.instancePath || '(root)'} ${e.message ?? 'is invalid'}`.trim()),
+      issues: errs.map((e) => ({ path: e.instancePath, keyword: e.keyword, params: (e.params ?? {}) as Record<string, unknown>, message: e.message ?? 'is invalid' })),
+    };
   }
 }

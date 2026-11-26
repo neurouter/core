@@ -1,0 +1,4657 @@
+{
+ "initialize": {
+  "protocolVersion": "2025-11-25",
+  "capabilities": {
+   "tools": {
+    "listChanged": true
+   }
+  },
+  "serverInfo": {
+   "name": "neurouter-acme",
+   "title": "Acme Orders via Neurouter",
+   "version": "0.2.1"
+  },
+  "instructions": "This MCP server exposes the Acme Orders API (mock, writes enabled) through Neurouter.\nStart every user request with neurouter_begin_task(goal) and finish with neurouter_end_task(outcome). If the user needs something no tool can do, call neurouter_report_unmet_need instead of guessing.\nFor multi-step work, prefer run_script: a short Python script (no imports, no I/O) that calls tools as acme.<fn>(...) and returns a small result. Get signatures with search_tools. Use mode=\"dry_run\" first for anything that writes.\nErrors include an error_id; neurouter_explain_error(error_id) tells you how to fix the call. Search \"neurouter\" to find the other helper tools."
+ },
+ "tools_list": [
+  {
+   "name": "list_orders",
+   "title": "List orders",
+   "description": "List orders\n\nLists orders, newest first. Filter by status or customer.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "pending",
+       "paid",
+       "shipped",
+       "delivered",
+       "cancelled",
+       "refunded"
+      ],
+      "x-schema-name": "OrderStatus",
+      "description": "Only orders in this status."
+     },
+     "customer_id": {
+      "type": "string",
+      "description": "Only orders of this customer."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     },
+     "cursor": {
+      "type": "string",
+      "description": "Cursor from the previous page's nextCursor."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List orders",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1dffbb5178cd822fb2cd95506c8ea6155d4d6c1e63d81ccacb0982667c94fa6a",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_order",
+   "title": "Create an order",
+   "description": "Create an order\n\nCreates a pending order for a customer with one or more line items.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "customerId": {
+      "type": "string",
+      "description": "The customer who places the order."
+     },
+     "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+       "type": "object",
+       "required": [
+        "sku",
+        "quantity"
+       ],
+       "properties": {
+        "sku": {
+         "type": "string"
+        },
+        "quantity": {
+         "type": "integer",
+         "minimum": 1
+        }
+       },
+       "x-schema-name": "LineItem"
+      }
+     },
+     "shippingAddress": {
+      "type": "object",
+      "required": [
+       "line1",
+       "city",
+       "postalCode",
+       "country"
+      ],
+      "properties": {
+       "line1": {
+        "type": "string"
+       },
+       "line2": {
+        "type": "string"
+       },
+       "city": {
+        "type": "string"
+       },
+       "postalCode": {
+        "type": "string"
+       },
+       "country": {
+        "type": "string",
+        "description": "ISO 3166-1 alpha-2 country code."
+       }
+      },
+      "x-schema-name": "Address"
+     }
+    },
+    "required": [
+     "customerId",
+     "items"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Create an order",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "c8309826cc2057996342b28446aa7fce8a34accd6af4e9177212005d8b033a05",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_order",
+   "title": "Get an order",
+   "description": "Get an order\n\nReturns one order with its line items, totals and status.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get an order",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1b5bb6bbd18b32a80f89aaf0e962baacb39b714f4df1ddea1d61b64b424bc9f7",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "update_order",
+   "title": "Update an order",
+   "description": "Update an order\n\nChanges the shipping address or the note of an order that has not shipped yet.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "shippingAddress": {
+      "type": "object",
+      "required": [
+       "line1",
+       "city",
+       "postalCode",
+       "country"
+      ],
+      "properties": {
+       "line1": {
+        "type": "string"
+       },
+       "line2": {
+        "type": "string"
+       },
+       "city": {
+        "type": "string"
+       },
+       "postalCode": {
+        "type": "string"
+       },
+       "country": {
+        "type": "string",
+        "description": "ISO 3166-1 alpha-2 country code."
+       }
+      },
+      "x-schema-name": "Address"
+     },
+     "note": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Internal note shown to support agents."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Update an order",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "4bed4f0f0fafa74eb442f64ef4a5e7f8aef4e97c74762ba098ad4cc57e2a9dc1",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "cancel_order",
+   "title": "Cancel an order",
+   "description": "Cancel an order\n\nCancels an order that has not shipped. Paid orders are refunded in full automatically.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "reason": {
+      "type": "string",
+      "enum": [
+       "customer_request",
+       "out_of_stock",
+       "fraud",
+       "other"
+      ],
+      "description": "Why the order is cancelled."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Cancel an order",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1f01f0222e4989c489d825fdef208a03fd2cb53d09a81280c0bd086ece250845",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_order_refunds",
+   "title": "List refunds of an order",
+   "description": "List refunds of an order\n\nLists the refunds issued for one order.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List refunds of an order",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "b9e3ded63c512ae960a22f68296ee68e2b20b6860db7ace7b103c6d1d97fd868",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_refund",
+   "title": "Refund an order",
+   "description": "Refund an order\n\nRefunds part or all of a paid order. The amount cannot exceed what is left to refund.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "amount": {
+      "type": "number",
+      "minimum": 0.01,
+      "description": "Amount to refund"
+     },
+     "reason": {
+      "type": "string",
+      "enum": [
+       "damaged",
+       "not_received",
+       "wrong_item",
+       "goodwill"
+      ],
+      "description": "Why the money is returned."
+     }
+    },
+    "required": [
+     "order_id",
+     "amount",
+     "reason"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Refund an order",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "e686eaa1e5e2730c72c9738e67f901bf40098acf98c1ff818ae53d82d53b2060",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_customers",
+   "title": "List customers",
+   "description": "List customers\n\nLists customers. Search by name or email with q.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "q": {
+      "type": "string",
+      "description": "Text to match in the name or email."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     },
+     "cursor": {
+      "type": "string",
+      "description": "Cursor from the previous page's nextCursor."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List customers",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "39a00f93590b675a6d44be8704d35c60d298739846bed81a036da6258debabf5",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_customer",
+   "title": "Create a customer",
+   "description": "Create a customer\n\nCreates a customer account.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Full name."
+     },
+     "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Contact email"
+     },
+     "phone": {
+      "type": "string",
+      "description": "Phone number in E.164 format."
+     }
+    },
+    "required": [
+     "name",
+     "email"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Create a customer",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "91d41b44a122c77c389c472ee1d398b8fd4dcc1f563d3a74dc3fcc005a14e12a",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_customer",
+   "title": "Get a customer",
+   "description": "Get a customer\n\nReturns one customer with their lifetime order count and spend.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string",
+      "description": "The customer id."
+     }
+    },
+    "required": [
+     "customer_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get a customer",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "7cc38e57691829839ee3ccb5587b1019408c9be4edc876849218db6e028c9922",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_shipments",
+   "title": "List shipments",
+   "description": "List shipments\n\nLists shipments, optionally only those of one order.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "Only shipments of this order."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List shipments",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "81aca3b46445f85adb1728ec59a12eaa49a206c7752b973e8ab8fb31234034d5",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_shipment",
+   "title": "Track a shipment",
+   "description": "Track a shipment\n\nReturns the carrier, tracking number and delivery status of a shipment.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "shipment_id": {
+      "type": "string",
+      "description": "The shipment id."
+     }
+    },
+    "required": [
+     "shipment_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Track a shipment",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "04b002673f1f2a3b169369a2646364544184de44851d7055dc1269fe836dc644",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_products",
+   "title": "List products",
+   "description": "List products\n\nLists products in the catalog with price and stock.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "q": {
+      "type": "string",
+      "description": "Text to match in the product name or SKU."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List products",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "91e7f55c291b982d81b51fb71887bc315874aca92cd735808578bb260a84ebe8",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_product",
+   "title": "Get a product",
+   "description": "Get a product\n\nReturns one product with its price and stock level.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "sku": {
+      "type": "string",
+      "description": "The product SKU."
+     }
+    },
+    "required": [
+     "sku"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get a product",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "fd962624a06ce56d9b51b3159047139988f77d714be2e635f7609cea7f2373fa",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "count_orders",
+   "title": "Count orders",
+   "description": "Count the orders with a status.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "pending",
+       "paid",
+       "shipped",
+       "delivered",
+       "cancelled",
+       "refunded"
+      ]
+     }
+    },
+    "required": [
+     "status"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Count orders",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "217e162462bdec382ce97171eb930c1124f93c865065f1e30902facd9a1b37ff",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "neurouter_begin_task",
+   "title": "Begin a task",
+   "description": "Start tracking one user request as a task. Call this first with the user's goal in one sentence; every following call attaches to the task until neurouter_end_task.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What the user wants done, in one sentence"
+     }
+    },
+    "required": [
+     "goal"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_end_task",
+   "title": "End the task",
+   "description": "Finish the current task with its outcome. Call this when you have answered the user or given up.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "outcome": {
+      "type": "string",
+      "enum": [
+       "success",
+       "partial",
+       "failure"
+      ]
+     },
+     "notes": {
+      "type": "string",
+      "description": "Optional short notes"
+     },
+     "task_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "outcome"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_report_unmet_need",
+   "title": "Report an unmet need",
+   "description": "Tell the API's operators that the user needs something no available tool can do. Use this instead of guessing or improvising.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What the user wanted to do"
+     },
+     "attempted": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "description": "Tool names you tried"
+     }
+    },
+    "required": [
+     "intent"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_log_decision",
+   "title": "Log a decision",
+   "description": "Record a non-obvious choice you made (what and why), so humans can review the reasoning later.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "choice": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What you chose"
+     },
+     "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Why"
+     },
+     "alternatives": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 5
+     }
+    },
+    "required": [
+     "choice",
+     "reason"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_report_issue",
+   "title": "Report a tool issue",
+   "description": "Report that a tool behaved wrongly or its documentation is misleading (wrong results, confusing errors).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "tool": {
+      "type": "string"
+     },
+     "problem": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What went wrong"
+     },
+     "evidence": {
+      "type": "object",
+      "description": "Small JSON evidence (≤ 4 KiB)"
+     },
+     "error_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "tool",
+     "problem"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_explain_error",
+   "title": "Explain an error",
+   "description": "Explain an error_id returned by a failed call and how to fix the call.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "error_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "error_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_get_examples",
+   "title": "Get examples",
+   "description": "Get known-good example arguments (or scripts) for a tool.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "tool": {
+      "type": "string"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "call",
+       "script"
+      ]
+     }
+    },
+    "required": [
+     "tool"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_whoami",
+   "title": "Who am I",
+   "description": "Show the environment, your identity, scopes, whether writes and code mode are enabled, and your limits.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_read_result",
+   "title": "Read more of a truncated result",
+   "description": "Page through a large result that was truncated. Pass the result handle from the earlier call.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "handle": {
+      "type": "string"
+     },
+     "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 50
+     }
+    },
+    "required": [
+     "handle"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "run_script",
+   "title": "Run a Python script against the API",
+   "description": "Run a short Python script that calls API tools as functions (e.g. acme.list_orders()) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins (len, sorted, isinstance, type, iter/next, …; no map/filter/getattr) and ops.* helpers. Tool results are whole dicts/lists inside scripts (no maxItems/maxBytes cuts); the script result limit applies to what you return. Use mode=\"dry_run\" to see planned writes without executing them. Get function signatures from search_tools.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "dry_run",
+       "execute"
+      ],
+      "default": "execute"
+     },
+     "inputs": {
+      "type": "object",
+      "description": "Values bound as global variables",
+      "default": {}
+     }
+    },
+    "required": [
+     "code"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+   }
+  }
+ ],
+ "tools_list_code": [
+  {
+   "name": "search_tools",
+   "title": "Search the API tools",
+   "description": "Find tools for what you want to do (natural language). Returns tool names with their input schemas or Python signatures. Search \"neurouter\" for the helper tools.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 25,
+      "default": 8
+     },
+     "format": {
+      "type": "string",
+      "enum": [
+       "json",
+       "python"
+      ]
+     },
+     "include_schemas": {
+      "type": "boolean",
+      "default": true
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "run_script",
+   "title": "Run a Python script against the API",
+   "description": "Run a short Python script that calls API tools as functions (e.g. acme.list_orders()) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins (len, sorted, isinstance, type, iter/next, …; no map/filter/getattr) and ops.* helpers. Tool results are whole dicts/lists inside scripts (no maxItems/maxBytes cuts); the script result limit applies to what you return. Use mode=\"dry_run\" to see planned writes without executing them. Get function signatures from search_tools.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "dry_run",
+       "execute"
+      ],
+      "default": "execute"
+     },
+     "inputs": {
+      "type": "object",
+      "description": "Values bound as global variables",
+      "default": {}
+     }
+    },
+    "required": [
+     "code"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+   }
+  },
+  {
+   "name": "neurouter_begin_task",
+   "title": "Begin a task",
+   "description": "Start tracking one user request as a task. Call this first with the user's goal in one sentence; every following call attaches to the task until neurouter_end_task.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What the user wants done, in one sentence"
+     }
+    },
+    "required": [
+     "goal"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_end_task",
+   "title": "End the task",
+   "description": "Finish the current task with its outcome. Call this when you have answered the user or given up.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "outcome": {
+      "type": "string",
+      "enum": [
+       "success",
+       "partial",
+       "failure"
+      ]
+     },
+     "notes": {
+      "type": "string",
+      "description": "Optional short notes"
+     },
+     "task_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "outcome"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_report_unmet_need",
+   "title": "Report an unmet need",
+   "description": "Tell the API's operators that the user needs something no available tool can do. Use this instead of guessing or improvising.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What the user wanted to do"
+     },
+     "attempted": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "description": "Tool names you tried"
+     }
+    },
+    "required": [
+     "intent"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  }
+ ],
+ "tools_list_tools": [
+  {
+   "name": "list_orders",
+   "title": "List orders",
+   "description": "List orders\n\nLists orders, newest first. Filter by status or customer.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "pending",
+       "paid",
+       "shipped",
+       "delivered",
+       "cancelled",
+       "refunded"
+      ],
+      "x-schema-name": "OrderStatus",
+      "description": "Only orders in this status."
+     },
+     "customer_id": {
+      "type": "string",
+      "description": "Only orders of this customer."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     },
+     "cursor": {
+      "type": "string",
+      "description": "Cursor from the previous page's nextCursor."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List orders",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1dffbb5178cd822fb2cd95506c8ea6155d4d6c1e63d81ccacb0982667c94fa6a",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_order",
+   "title": "Create an order",
+   "description": "Create an order\n\nCreates a pending order for a customer with one or more line items.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "customerId": {
+      "type": "string",
+      "description": "The customer who places the order."
+     },
+     "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+       "type": "object",
+       "required": [
+        "sku",
+        "quantity"
+       ],
+       "properties": {
+        "sku": {
+         "type": "string"
+        },
+        "quantity": {
+         "type": "integer",
+         "minimum": 1
+        }
+       },
+       "x-schema-name": "LineItem"
+      }
+     },
+     "shippingAddress": {
+      "type": "object",
+      "required": [
+       "line1",
+       "city",
+       "postalCode",
+       "country"
+      ],
+      "properties": {
+       "line1": {
+        "type": "string"
+       },
+       "line2": {
+        "type": "string"
+       },
+       "city": {
+        "type": "string"
+       },
+       "postalCode": {
+        "type": "string"
+       },
+       "country": {
+        "type": "string",
+        "description": "ISO 3166-1 alpha-2 country code."
+       }
+      },
+      "x-schema-name": "Address"
+     }
+    },
+    "required": [
+     "customerId",
+     "items"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Create an order",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "c8309826cc2057996342b28446aa7fce8a34accd6af4e9177212005d8b033a05",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_order",
+   "title": "Get an order",
+   "description": "Get an order\n\nReturns one order with its line items, totals and status.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get an order",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1b5bb6bbd18b32a80f89aaf0e962baacb39b714f4df1ddea1d61b64b424bc9f7",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "update_order",
+   "title": "Update an order",
+   "description": "Update an order\n\nChanges the shipping address or the note of an order that has not shipped yet.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "shippingAddress": {
+      "type": "object",
+      "required": [
+       "line1",
+       "city",
+       "postalCode",
+       "country"
+      ],
+      "properties": {
+       "line1": {
+        "type": "string"
+       },
+       "line2": {
+        "type": "string"
+       },
+       "city": {
+        "type": "string"
+       },
+       "postalCode": {
+        "type": "string"
+       },
+       "country": {
+        "type": "string",
+        "description": "ISO 3166-1 alpha-2 country code."
+       }
+      },
+      "x-schema-name": "Address"
+     },
+     "note": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Internal note shown to support agents."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Update an order",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "4bed4f0f0fafa74eb442f64ef4a5e7f8aef4e97c74762ba098ad4cc57e2a9dc1",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "cancel_order",
+   "title": "Cancel an order",
+   "description": "Cancel an order\n\nCancels an order that has not shipped. Paid orders are refunded in full automatically.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "reason": {
+      "type": "string",
+      "enum": [
+       "customer_request",
+       "out_of_stock",
+       "fraud",
+       "other"
+      ],
+      "description": "Why the order is cancelled."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Cancel an order",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1f01f0222e4989c489d825fdef208a03fd2cb53d09a81280c0bd086ece250845",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_order_refunds",
+   "title": "List refunds of an order",
+   "description": "List refunds of an order\n\nLists the refunds issued for one order.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List refunds of an order",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "b9e3ded63c512ae960a22f68296ee68e2b20b6860db7ace7b103c6d1d97fd868",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_refund",
+   "title": "Refund an order",
+   "description": "Refund an order\n\nRefunds part or all of a paid order. The amount cannot exceed what is left to refund.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "amount": {
+      "type": "number",
+      "minimum": 0.01,
+      "description": "Amount to refund"
+     },
+     "reason": {
+      "type": "string",
+      "enum": [
+       "damaged",
+       "not_received",
+       "wrong_item",
+       "goodwill"
+      ],
+      "description": "Why the money is returned."
+     }
+    },
+    "required": [
+     "order_id",
+     "amount",
+     "reason"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Refund an order",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "e686eaa1e5e2730c72c9738e67f901bf40098acf98c1ff818ae53d82d53b2060",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_customers",
+   "title": "List customers",
+   "description": "List customers\n\nLists customers. Search by name or email with q.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "q": {
+      "type": "string",
+      "description": "Text to match in the name or email."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     },
+     "cursor": {
+      "type": "string",
+      "description": "Cursor from the previous page's nextCursor."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List customers",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "39a00f93590b675a6d44be8704d35c60d298739846bed81a036da6258debabf5",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_customer",
+   "title": "Create a customer",
+   "description": "Create a customer\n\nCreates a customer account.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Full name."
+     },
+     "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Contact email"
+     },
+     "phone": {
+      "type": "string",
+      "description": "Phone number in E.164 format."
+     }
+    },
+    "required": [
+     "name",
+     "email"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Create a customer",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "91d41b44a122c77c389c472ee1d398b8fd4dcc1f563d3a74dc3fcc005a14e12a",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_customer",
+   "title": "Get a customer",
+   "description": "Get a customer\n\nReturns one customer with their lifetime order count and spend.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string",
+      "description": "The customer id."
+     }
+    },
+    "required": [
+     "customer_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get a customer",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "7cc38e57691829839ee3ccb5587b1019408c9be4edc876849218db6e028c9922",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_shipments",
+   "title": "List shipments",
+   "description": "List shipments\n\nLists shipments, optionally only those of one order.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "Only shipments of this order."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List shipments",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "81aca3b46445f85adb1728ec59a12eaa49a206c7752b973e8ab8fb31234034d5",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_shipment",
+   "title": "Track a shipment",
+   "description": "Track a shipment\n\nReturns the carrier, tracking number and delivery status of a shipment.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "shipment_id": {
+      "type": "string",
+      "description": "The shipment id."
+     }
+    },
+    "required": [
+     "shipment_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Track a shipment",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "04b002673f1f2a3b169369a2646364544184de44851d7055dc1269fe836dc644",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_products",
+   "title": "List products",
+   "description": "List products\n\nLists products in the catalog with price and stock.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "q": {
+      "type": "string",
+      "description": "Text to match in the product name or SKU."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List products",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "91e7f55c291b982d81b51fb71887bc315874aca92cd735808578bb260a84ebe8",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_product",
+   "title": "Get a product",
+   "description": "Get a product\n\nReturns one product with its price and stock level.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "sku": {
+      "type": "string",
+      "description": "The product SKU."
+     }
+    },
+    "required": [
+     "sku"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get a product",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "fd962624a06ce56d9b51b3159047139988f77d714be2e635f7609cea7f2373fa",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "count_orders",
+   "title": "Count orders",
+   "description": "Count the orders with a status.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "pending",
+       "paid",
+       "shipped",
+       "delivered",
+       "cancelled",
+       "refunded"
+      ]
+     }
+    },
+    "required": [
+     "status"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Count orders",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "217e162462bdec382ce97171eb930c1124f93c865065f1e30902facd9a1b37ff",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "neurouter_begin_task",
+   "title": "Begin a task",
+   "description": "Start tracking one user request as a task. Call this first with the user's goal in one sentence; every following call attaches to the task until neurouter_end_task.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What the user wants done, in one sentence"
+     }
+    },
+    "required": [
+     "goal"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_end_task",
+   "title": "End the task",
+   "description": "Finish the current task with its outcome. Call this when you have answered the user or given up.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "outcome": {
+      "type": "string",
+      "enum": [
+       "success",
+       "partial",
+       "failure"
+      ]
+     },
+     "notes": {
+      "type": "string",
+      "description": "Optional short notes"
+     },
+     "task_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "outcome"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_report_unmet_need",
+   "title": "Report an unmet need",
+   "description": "Tell the API's operators that the user needs something no available tool can do. Use this instead of guessing or improvising.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What the user wanted to do"
+     },
+     "attempted": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "description": "Tool names you tried"
+     }
+    },
+    "required": [
+     "intent"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_log_decision",
+   "title": "Log a decision",
+   "description": "Record a non-obvious choice you made (what and why), so humans can review the reasoning later.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "choice": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What you chose"
+     },
+     "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Why"
+     },
+     "alternatives": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 5
+     }
+    },
+    "required": [
+     "choice",
+     "reason"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_report_issue",
+   "title": "Report a tool issue",
+   "description": "Report that a tool behaved wrongly or its documentation is misleading (wrong results, confusing errors).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "tool": {
+      "type": "string"
+     },
+     "problem": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What went wrong"
+     },
+     "evidence": {
+      "type": "object",
+      "description": "Small JSON evidence (≤ 4 KiB)"
+     },
+     "error_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "tool",
+     "problem"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_explain_error",
+   "title": "Explain an error",
+   "description": "Explain an error_id returned by a failed call and how to fix the call.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "error_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "error_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_get_examples",
+   "title": "Get examples",
+   "description": "Get known-good example arguments (or scripts) for a tool.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "tool": {
+      "type": "string"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "call",
+       "script"
+      ]
+     }
+    },
+    "required": [
+     "tool"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_whoami",
+   "title": "Who am I",
+   "description": "Show the environment, your identity, scopes, whether writes and code mode are enabled, and your limits.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_read_result",
+   "title": "Read more of a truncated result",
+   "description": "Page through a large result that was truncated. Pass the result handle from the earlier call.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "handle": {
+      "type": "string"
+     },
+     "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 50
+     }
+    },
+    "required": [
+     "handle"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  }
+ ],
+ "get_order": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/next-tools": [
+    "neurouter_begin_task"
+   ]
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"id\":\"order_1\",\"customerId\":\"cimentarius\",\"status\":\"paid\",\"items\":[{\"sku\":\"tamen\",\"quantity\":75,\"unitPrice\":654.26}],\"total\":989.25,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"bibo\",\"line2\":\"capio\",\"city\":\"summopere\",\"postalCode\":\"demergo\",\"country\":\"alii\"},\"note\":\"depono\",\"createdAt\":\"2025-11-27T03:44:33.051Z\"}"
+   },
+   {
+    "type": "text",
+    "text": "Tip: call neurouter_begin_task(goal) so this work is tracked as one task."
+   }
+  ],
+  "structuredContent": {
+   "id": "order_1",
+   "customerId": "cimentarius",
+   "status": "paid",
+   "items": [
+    {
+     "sku": "tamen",
+     "quantity": 75,
+     "unitPrice": 654.26
+    }
+   ],
+   "total": 989.25,
+   "currency": "EUR",
+   "shippingAddress": {
+    "line1": "bibo",
+    "line2": "capio",
+    "city": "summopere",
+    "postalCode": "demergo",
+    "country": "alii"
+   },
+   "note": "depono",
+   "createdAt": "2025-11-27T03:44:33.051Z"
+  }
+ },
+ "list_orders": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"nextCursor\":\"eos\",\"total_count\":20,\"items\":[{\"id\":\"order_1\",\"customerId\":\"cimentarius\",\"status\":\"paid\",\"items\":[{\"sku\":\"tamen\",\"quantity\":75,\"unitPrice\":654.26}],\"total\":989.25,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"bibo\",\"line2\":\"capio\",\"city\":\"summopere\",\"postalCode\":\"demergo\",\"country\":\"alii\"},\"note\":\"depono\",\"createdAt\":\"2025-11-27T03:44:33.051Z\"},{\"id\":\"order_2\",\"customerId\":\"usque\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"trucido\",\"quantity\":47,\"unitPrice\":586.08},{\"sku\":\"adnuo\",\"quantity\":2,\"unitPrice\":373.86},{\"sku\":\"cauda\",\"quantity\":5,\"unitPrice\":232.73}],\"total\":848.26,\"currency\":\"sophismata\",\"shippingAddress\":{\"line1\":\"ver\",\"line2\":\"culpo\",\"city\":\"crur\",\"postalCode\":\"toties\",\"country\":\"deripio\"},\"note\":\"ubi\",\"createdAt\":\"2025-10-27T21:21:05.220Z\"}]}"
+   }
+  ],
+  "structuredContent": {
+   "nextCursor": "eos",
+   "total_count": 20,
+   "items": [
+    {
+     "id": "order_1",
+     "customerId": "cimentarius",
+     "status": "paid",
+     "items": [
+      {
+       "sku": "tamen",
+       "quantity": 75,
+       "unitPrice": 654.26
+      }
+     ],
+     "total": 989.25,
+     "currency": "EUR",
+     "shippingAddress": {
+      "line1": "bibo",
+      "line2": "capio",
+      "city": "summopere",
+      "postalCode": "demergo",
+      "country": "alii"
+     },
+     "note": "depono",
+     "createdAt": "2025-11-27T03:44:33.051Z"
+    },
+    {
+     "id": "order_2",
+     "customerId": "usque",
+     "status": "cancelled",
+     "items": [
+      {
+       "sku": "trucido",
+       "quantity": 47,
+       "unitPrice": 586.08
+      },
+      {
+       "sku": "adnuo",
+       "quantity": 2,
+       "unitPrice": 373.86
+      },
+      {
+       "sku": "cauda",
+       "quantity": 5,
+       "unitPrice": 232.73
+      }
+     ],
+     "total": 848.26,
+     "currency": "sophismata",
+     "shippingAddress": {
+      "line1": "ver",
+      "line2": "culpo",
+      "city": "crur",
+      "postalCode": "toties",
+      "country": "deripio"
+     },
+     "note": "ubi",
+     "createdAt": "2025-10-27T21:21:05.220Z"
+    }
+   ]
+  }
+ },
+ "list_orders_empty": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"nextCursor\":\"eos\",\"total_count\":0,\"items\":[]}"
+   }
+  ],
+  "structuredContent": {
+   "nextCursor": "eos",
+   "total_count": 0,
+   "items": []
+  }
+ },
+ "list_products_truncated": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/result-handle": "rh_<id>",
+   "dev.neurouter/truncated": {
+    "totalItems": 20,
+    "returnedItems": 3,
+    "totalBytes": 1801,
+    "returnedBytes": 279
+   },
+   "dev.neurouter/next-tools": [
+    "neurouter_read_result"
+   ]
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Showing 3 of 20 items. Call neurouter_read_result(handle=\"rh_<id>\", offset) for more.\n{\"total_count\":20,\"items\":[{\"sku\":\"product_1\",\"name\":\"meanwhile\",\"price\":194.17,\"currency\":\"dedecor\",\"stock\":97},{\"sku\":\"product_2\",\"name\":\"other\",\"price\":680.52,\"currency\":\"abundans\",\"stock\":83},{\"sku\":\"product_3\",\"name\":\"following\",\"price\":916.05,\"currency\":\"vero\",\"stock\":1}]}"
+   }
+  ],
+  "structuredContent": {
+   "total_count": 20,
+   "items": [
+    {
+     "sku": "product_1",
+     "name": "meanwhile",
+     "price": 194.17,
+     "currency": "dedecor",
+     "stock": 97
+    },
+    {
+     "sku": "product_2",
+     "name": "other",
+     "price": 680.52,
+     "currency": "abundans",
+     "stock": 83
+    },
+    {
+     "sku": "product_3",
+     "name": "following",
+     "price": 916.05,
+     "currency": "vero",
+     "stock": 1
+    }
+   ]
+  }
+ },
+ "get_shipment": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"id\":\"shipment_1\",\"orderId\":\"cauda\",\"carrier\":\"dhl\",\"trackingNumber\":\"studio\",\"status\":\"delivered\",\"estimatedDelivery\":\"2025-10-01\"}"
+   }
+  ],
+  "structuredContent": {
+   "id": "shipment_1",
+   "orderId": "cauda",
+   "carrier": "dhl",
+   "trackingNumber": "studio",
+   "status": "delivered",
+   "estimatedDelivery": "2025-10-01"
+  }
+ },
+ "create_customer": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace\",\"email\":\"ada@example.com\",\"phone\":\"(535) 574-7184 x346\",\"orderCount\":39,\"lifetimeSpend\":267.12,\"createdAt\":\"2026-01-02T04:41:36.878Z\"}"
+   }
+  ],
+  "structuredContent": {
+   "id": "customer_21",
+   "name": "Ada Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace Lovelace",
+   "email": "ada@example.com",
+   "phone": "(535) 574-7184 x346",
+   "orderCount": 39,
+   "lifetimeSpend": 267.12,
+   "createdAt": "2026-01-02T04:41:36.878Z"
+  }
+ },
+ "get_customer_clipped": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/result-handle": "rh_<id>",
+   "dev.neurouter/truncated": {
+    "totalBytes": 437,
+    "returnedBytes": 207,
+    "fields": [
+     "name"
+    ]
+   },
+   "dev.neurouter/next-tools": [
+    "neurouter_read_result"
+   ]
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Clipped to fit: name. Call neurouter_read_result(handle=\"rh_<id>\", offset) for more.\n{\"id\":\"customer_21\",\"name\":\"Ada Lovelace Lovelace Lovelace Lovelace …\",\"email\":\"ada@example.com\",\"phone\":\"(535) 574-7184 x346\",\"orderCount\":39,\"lifetimeSpend\":267.12,\"createdAt\":\"2026-01-02T04:41:36.878Z\"}"
+   }
+  ],
+  "structuredContent": {
+   "id": "customer_21",
+   "name": "Ada Lovelace Lovelace Lovelace Lovelace …",
+   "email": "ada@example.com",
+   "phone": "(535) 574-7184 x346",
+   "orderCount": 39,
+   "lifetimeSpend": 267.12,
+   "createdAt": "2026-01-02T04:41:36.878Z"
+  }
+ },
+ "get_order_not_found": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error"
+   ],
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/error-id": "err_<id>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "The API answered 404 for get_order: {\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"order ord_doesnotexist not found\"} (error_id=err_<id>; call neurouter_explain_error for how to fix)"
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "upstream_not_found",
+    "message": "The API answered 404 for get_order: {\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"order ord_doesnotexist not found\"}",
+    "error_id": "err_<id>"
+   }
+  },
+  "isError": true
+ },
+ "list_orders_invalid": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error"
+   ],
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/error-id": "err_<id>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Invalid arguments for list_orders:\n- /status must be equal to one of the allowed values\n- /limit must be <= 100 (error_id=err_<id>; call neurouter_explain_error for how to fix)"
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "invalid_args",
+    "message": "Invalid arguments for list_orders:\n- /status must be equal to one of the allowed values\n- /limit must be <= 100",
+    "error_id": "err_<id>"
+   }
+  },
+  "isError": true
+ },
+ "get_order_missing_arg": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error"
+   ],
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/error-id": "err_<id>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Invalid arguments for get_order:\n- (root) must have required property 'order_id'\n- (root) must NOT have additional properties (error_id=err_<id>; call neurouter_explain_error for how to fix)"
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "invalid_args",
+    "message": "Invalid arguments for get_order:\n- (root) must have required property 'order_id'\n- (root) must NOT have additional properties",
+    "error_id": "err_<id>"
+   }
+  },
+  "isError": true
+ },
+ "unknown_tool": {
+  "jsonrpc_error": {
+   "code": -32602,
+   "message": "Unknown tool: get_invoice"
+  }
+ },
+ "composite": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/script-run-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"status\":\"ok\",\"result\":{\"status\":\"shipped\",\"count\":3},\"stats\":{\"wallMs\":0,\"toolCalls\":1,\"blockedCalls\":0,\"suspensions\":0}}"
+   }
+  ],
+  "structuredContent": {
+   "status": "ok",
+   "result": {
+    "status": "shipped",
+    "count": 3
+   },
+   "stats": {
+    "wallMs": 0,
+    "toolCalls": 1,
+    "blockedCalls": 0,
+    "suspensions": 0
+   }
+  }
+ },
+ "search_json": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "list_order_refunds(order_id*: string) — List refunds of an order\ncreate_refund(order_id*: string, amount*: number, reason*: \"damaged\"|\"not_received\"|\"wrong_item\"|\"goodwill\") — Refund an order (write)\nget_order(order_id*: string) — Get an order\ncancel_order(order_id*: string, reason?: \"customer_request\"|\"out_of_stock\"|\"fraud\"|\"other\") — Cancel an order (write)\nupdate_order(order_id*: string, shippingAddress?: object, note?: string) — Update an order (write)\ncreate_order(customerId*: string, items*: object[], shippingAddress?: object) — Create an order (write)\nlist_orders(status?: \"pending\"|\"paid\"|\"shipped\"|\"delivered\"|\"cancelled\"|\"refunded\", customer_id?: string, limit?: integer, cursor?: string) — List orders\nlist_shipments(order_id?: string, limit?: integer) — List shipments\n\nArguments: name: type; \"*\" = required. Full JSON Schemas are in structuredContent.tools[].inputSchema."
+   }
+  ],
+  "structuredContent": {
+   "tools": [
+    {
+     "name": "list_order_refunds",
+     "title": "List refunds of an order",
+     "description": "List refunds of an order\n\nLists the refunds issued for one order.",
+     "readOnly": true,
+     "write": false,
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "order_id": {
+        "type": "string",
+        "description": "The order id."
+       }
+      },
+      "required": [
+       "order_id"
+      ],
+      "additionalProperties": false
+     },
+     "args": "order_id*: string",
+     "score": 0.02254
+    },
+    {
+     "name": "create_refund",
+     "title": "Refund an order",
+     "description": "Refund an order\n\nRefunds part or all of a paid order. The amount cannot exceed what is left to refund.",
+     "readOnly": false,
+     "write": true,
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "order_id": {
+        "type": "string",
+        "description": "The order id."
+       },
+       "amount": {
+        "type": "number",
+        "minimum": 0.01,
+        "description": "Amount to refund"
+       },
+       "reason": {
+        "type": "string",
+        "enum": [
+         "damaged",
+         "not_received",
+         "wrong_item",
+         "goodwill"
+        ],
+        "description": "Why the money is returned."
+       }
+      },
+      "required": [
+       "order_id",
+       "amount",
+       "reason"
+      ],
+      "additionalProperties": false
+     },
+     "args": "order_id*: string, amount*: number, reason*: \"damaged\"|\"not_received\"|\"wrong_item\"|\"goodwill\"",
+     "score": 0.021393
+    },
+    {
+     "name": "get_order",
+     "title": "Get an order",
+     "description": "Get an order\n\nReturns one order with its line items, totals and status.",
+     "readOnly": true,
+     "write": false,
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "order_id": {
+        "type": "string",
+        "description": "The order id."
+       }
+      },
+      "required": [
+       "order_id"
+      ],
+      "additionalProperties": false
+     },
+     "args": "order_id*: string",
+     "score": 0.021129
+    },
+    {
+     "name": "cancel_order",
+     "title": "Cancel an order",
+     "description": "Cancel an order\n\nCancels an order that has not shipped. Paid orders are refunded in full automatically.",
+     "readOnly": false,
+     "write": true,
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "order_id": {
+        "type": "string",
+        "description": "The order id."
+       },
+       "reason": {
+        "type": "string",
+        "enum": [
+         "customer_request",
+         "out_of_stock",
+         "fraud",
+         "other"
+        ],
+        "description": "Why the order is cancelled."
+       }
+      },
+      "required": [
+       "order_id"
+      ],
+      "additionalProperties": false
+     },
+     "args": "order_id*: string, reason?: \"customer_request\"|\"out_of_stock\"|\"fraud\"|\"other\"",
+     "score": 0.020625
+    },
+    {
+     "name": "update_order",
+     "title": "Update an order",
+     "description": "Update an order\n\nChanges the shipping address or the note of an order that has not shipped yet.",
+     "readOnly": false,
+     "write": true,
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "order_id": {
+        "type": "string",
+        "description": "The order id."
+       },
+       "shippingAddress": {
+        "type": "object",
+        "required": [
+         "line1",
+         "city",
+         "postalCode",
+         "country"
+        ],
+        "properties": {
+         "line1": {
+          "type": "string"
+         },
+         "line2": {
+          "type": "string"
+         },
+         "city": {
+          "type": "string"
+         },
+         "postalCode": {
+          "type": "string"
+         },
+         "country": {
+          "type": "string",
+          "description": "ISO 3166-1 alpha-2 country code."
+         }
+        },
+        "x-schema-name": "Address"
+       },
+       "note": {
+        "type": "string",
+        "maxLength": 500,
+        "description": "Internal note shown to support agents."
+       }
+      },
+      "required": [
+       "order_id"
+      ],
+      "additionalProperties": false
+     },
+     "args": "order_id*: string, shippingAddress?: object, note?: string",
+     "score": 0.020385
+    },
+    {
+     "name": "create_order",
+     "title": "Create an order",
+     "description": "Create an order\n\nCreates a pending order for a customer with one or more line items.",
+     "readOnly": false,
+     "write": true,
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "customerId": {
+        "type": "string",
+        "description": "The customer who places the order."
+       },
+       "items": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+         "type": "object",
+         "required": [
+          "sku",
+          "quantity"
+         ],
+         "properties": {
+          "sku": {
+           "type": "string"
+          },
+          "quantity": {
+           "type": "integer",
+           "minimum": 1
+          }
+         },
+         "x-schema-name": "LineItem"
+        }
+       },
+       "shippingAddress": {
+        "type": "object",
+        "required": [
+         "line1",
+         "city",
+         "postalCode",
+         "country"
+        ],
+        "properties": {
+         "line1": {
+          "type": "string"
+         },
+         "line2": {
+          "type": "string"
+         },
+         "city": {
+          "type": "string"
+         },
+         "postalCode": {
+          "type": "string"
+         },
+         "country": {
+          "type": "string",
+          "description": "ISO 3166-1 alpha-2 country code."
+         }
+        },
+        "x-schema-name": "Address"
+       }
+      },
+      "required": [
+       "customerId",
+       "items"
+      ],
+      "additionalProperties": false
+     },
+     "args": "customerId*: string, items*: object[], shippingAddress?: object",
+     "score": 0.020152
+    },
+    {
+     "name": "list_orders",
+     "title": "List orders",
+     "description": "List orders\n\nLists orders, newest first. Filter by status or customer.",
+     "readOnly": true,
+     "write": false,
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "status": {
+        "type": "string",
+        "enum": [
+         "pending",
+         "paid",
+         "shipped",
+         "delivered",
+         "cancelled",
+         "refunded"
+        ],
+        "x-schema-name": "OrderStatus",
+        "description": "Only orders in this status."
+       },
+       "customer_id": {
+        "type": "string",
+        "description": "Only orders of this customer."
+       },
+       "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 20,
+        "description": "Page size (default 20)."
+       },
+       "cursor": {
+        "type": "string",
+        "description": "Cursor from the previous page's nextCursor."
+       }
+      },
+      "additionalProperties": false
+     },
+     "args": "status?: \"pending\"|\"paid\"|\"shipped\"|\"delivered\"|\"cancelled\"|\"refunded\", customer_id?: string, limit?: integer, cursor?: string",
+     "score": 0.019925
+    },
+    {
+     "name": "list_shipments",
+     "title": "List shipments",
+     "description": "List shipments\n\nLists shipments, optionally only those of one order.",
+     "readOnly": true,
+     "write": false,
+     "inputSchema": {
+      "type": "object",
+      "properties": {
+       "order_id": {
+        "type": "string",
+        "description": "Only shipments of this order."
+       },
+       "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 20,
+        "description": "Page size (default 20)."
+       }
+      },
+      "additionalProperties": false
+     },
+     "args": "order_id?: string, limit?: integer",
+     "score": 0.014706
+    }
+   ],
+   "totalVisible": 14
+  }
+ },
+ "search_python": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "# In run_script call these as acme.<name>(...), e.g. acme.list_orders(...); helpers as ops.<name>(...).\n# Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type, iter, next, repr, chr, ord, hex, print (type takes one argument). No map/filter (use comprehensions), no getattr/hasattr (results are dicts).\n\ndef list_orders(*, status: Literal[\"pending\", \"paid\", \"shipped\", \"delivered\", \"cancelled\", \"refunded\"] | None = None, customer_id: str | None = None, limit: int = 20, cursor: str | None = None) -> ListOrdersResult\n    \"\"\"List orders\"\"\"\n\ndef create_order(*, customerId: str, items: list[LineItem], shippingAddress: Address | None = None) -> dict[str, Any]\n    \"\"\"Create an order\"\"\"\n\ndef get_customer(*, customer_id: str) -> Customer\n    \"\"\"Get a customer\"\"\"\n\ndef create_customer(*, name: str, email: str, phone: str | None = None) -> dict[str, Any]\n    \"\"\"Create a customer\"\"\"\n\ndef cancel_order(*, order_id: str, reason: Literal[\"customer_request\", \"out_of_stock\", \"fraud\", \"other\"] | None = None) -> dict[str, Any]\n    \"\"\"Cancel an order\"\"\"\n\ndef list_customers(*, q: str | None = None, limit: int = 20, cursor: str | None = None) -> ListCustomersResult\n    \"\"\"List customers\"\"\"\n\ndef update_order(*, order_id: str, shippingAddress: Address | None = None, note: str | None = None) -> dict[str, Any]\n    \"\"\"Update an order\"\"\"\n\ndef get_order(*, order_id: str) -> Order\n    \"\"\"Get an order\"\"\""
+   }
+  ],
+  "structuredContent": {
+   "tools": [
+    {
+     "name": "list_orders",
+     "title": "List orders",
+     "description": "List orders\n\nLists orders, newest first. Filter by status or customer.",
+     "readOnly": true,
+     "write": false,
+     "pySignature": "def list_orders(*, status: Literal[\"pending\", \"paid\", \"shipped\", \"delivered\", \"cancelled\", \"refunded\"] | None = None, customer_id: str | None = None, limit: int = 20, cursor: str | None = None) -> ListOrdersResult",
+     "pyName": "acme.list_orders",
+     "score": 0.021393
+    },
+    {
+     "name": "create_order",
+     "title": "Create an order",
+     "description": "Create an order\n\nCreates a pending order for a customer with one or more line items.",
+     "readOnly": false,
+     "write": true,
+     "pySignature": "def create_order(*, customerId: str, items: list[LineItem], shippingAddress: Address | None = None) -> dict[str, Any]",
+     "pyName": "acme.create_order",
+     "score": 0.021129
+    },
+    {
+     "name": "get_customer",
+     "title": "Get a customer",
+     "description": "Get a customer\n\nReturns one customer with their lifetime order count and spend.",
+     "readOnly": true,
+     "write": false,
+     "pySignature": "def get_customer(*, customer_id: str) -> Customer",
+     "pyName": "acme.get_customer",
+     "score": 0.020873
+    },
+    {
+     "name": "create_customer",
+     "title": "Create a customer",
+     "description": "Create a customer\n\nCreates a customer account.",
+     "readOnly": false,
+     "write": true,
+     "pySignature": "def create_customer(*, name: str, email: str, phone: str | None = None) -> dict[str, Any]",
+     "pyName": "acme.create_customer",
+     "score": 0.020625
+    },
+    {
+     "name": "cancel_order",
+     "title": "Cancel an order",
+     "description": "Cancel an order\n\nCancels an order that has not shipped. Paid orders are refunded in full automatically.",
+     "readOnly": false,
+     "write": true,
+     "pySignature": "def cancel_order(*, order_id: str, reason: Literal[\"customer_request\", \"out_of_stock\", \"fraud\", \"other\"] | None = None) -> dict[str, Any]",
+     "pyName": "acme.cancel_order",
+     "score": 0.020385
+    },
+    {
+     "name": "list_customers",
+     "title": "List customers",
+     "description": "List customers\n\nLists customers. Search by name or email with q.",
+     "readOnly": true,
+     "write": false,
+     "pySignature": "def list_customers(*, q: str | None = None, limit: int = 20, cursor: str | None = None) -> ListCustomersResult",
+     "pyName": "acme.list_customers",
+     "score": 0.020152
+    },
+    {
+     "name": "update_order",
+     "title": "Update an order",
+     "description": "Update an order\n\nChanges the shipping address or the note of an order that has not shipped yet.",
+     "readOnly": false,
+     "write": true,
+     "pySignature": "def update_order(*, order_id: str, shippingAddress: Address | None = None, note: str | None = None) -> dict[str, Any]",
+     "pyName": "acme.update_order",
+     "score": 0.019925
+    },
+    {
+     "name": "get_order",
+     "title": "Get an order",
+     "description": "Get an order\n\nReturns one order with its line items, totals and status.",
+     "readOnly": true,
+     "write": false,
+     "pySignature": "def get_order(*, order_id: str) -> Order",
+     "pyName": "acme.get_order",
+     "score": 0.019493
+    }
+   ],
+   "totalVisible": 14
+  }
+ },
+ "search_empty": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/next-tools": [
+    "neurouter_report_unmet_need"
+   ]
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "No tool matches. If the user needs something this API cannot do, call neurouter_report_unmet_need."
+   }
+  ],
+  "structuredContent": {
+   "tools": [],
+   "totalVisible": 14,
+   "hint": "No tool matches. If the user needs something this API cannot do, call neurouter_report_unmet_need."
+  }
+ },
+ "search_invalid": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error"
+   ]
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "search_tools needs a query of 1–500 characters"
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "invalid_args",
+    "message": "search_tools needs a query of 1–500 characters"
+   }
+  },
+  "isError": true
+ },
+ "begin_task": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"task_id\":\"<uuid>\",\"attached_calls\":12}"
+   }
+  ],
+  "structuredContent": {
+   "task_id": "<uuid>",
+   "attached_calls": 12
+  }
+ },
+ "whoami": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"server\":\"acme\",\"environment\":\"mock\",\"environment_kind\":\"dev\",\"principal\":{\"type\":\"api_key\",\"id\":\"<uuid>\",\"name\":\"test mock\"},\"scopes\":[\"tools:read\",\"tools:write\",\"code:run\"],\"writes\":{\"enabled\":true,\"tools\":[\"create_order\",\"update_order\",\"cancel_order\",\"create_refund\",\"create_customer\"],\"confirm\":\"none\",\"client_can_confirm\":false},\"code_mode\":true,\"limits\":{\"rate_limit\":null,\"code\":{\"maxToolCalls\":200,\"wallTimeSec\":30,\"cpuTimeSec\":10,\"maxMemoryMb\":64,\"maxConcurrentCalls\":8,\"maxResultBytes\":1048576}},\"profile\":null}"
+   }
+  ],
+  "structuredContent": {
+   "server": "acme",
+   "environment": "mock",
+   "environment_kind": "dev",
+   "principal": {
+    "type": "api_key",
+    "id": "<uuid>",
+    "name": "test mock"
+   },
+   "scopes": [
+    "tools:read",
+    "tools:write",
+    "code:run"
+   ],
+   "writes": {
+    "enabled": true,
+    "tools": [
+     "create_order",
+     "update_order",
+     "cancel_order",
+     "create_refund",
+     "create_customer"
+    ],
+    "confirm": "none",
+    "client_can_confirm": false
+   },
+   "code_mode": true,
+   "limits": {
+    "rate_limit": null,
+    "code": {
+     "maxToolCalls": 200,
+     "wallTimeSec": 30,
+     "cpuTimeSec": 10,
+     "maxMemoryMb": 64,
+     "maxConcurrentCalls": 8,
+     "maxResultBytes": 1048576
+    }
+   },
+   "profile": null
+  }
+ },
+ "get_examples": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"examples\":[{\"arguments\":{\"order_id\":\"order_1\"}}],\"source\":\"traffic\"}"
+   }
+  ],
+  "structuredContent": {
+   "examples": [
+    {
+     "arguments": {
+      "order_id": "order_1"
+     }
+    }
+   ],
+   "source": "traffic"
+  }
+ },
+ "explain_error": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"code\":\"upstream_not_found\",\"title\":\"Not found\",\"explanation\":\"The API answered 404 for \\\"get_order\\\".\",\"how_to_fix\":\"Check identifiers (list the parent resource first to find valid ids).\",\"details\":{\"tool\":\"get_order\",\"environment\":\"mock\",\"status\":404}}"
+   }
+  ],
+  "structuredContent": {
+   "code": "upstream_not_found",
+   "title": "Not found",
+   "explanation": "The API answered 404 for \"get_order\".",
+   "how_to_fix": "Check identifiers (list the parent resource first to find valid ids).",
+   "details": {
+    "tool": "get_order",
+    "environment": "mock",
+    "status": 404
+   }
+  }
+ },
+ "explain_error_unknown": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"code\":\"unknown\",\"title\":\"Unknown error id\",\"explanation\":\"No error err_<id> is known (they expire after 7 days).\",\"how_to_fix\":\"Retry the call to get a fresh error_id.\",\"details\":{}}"
+   }
+  ],
+  "structuredContent": {
+   "code": "unknown",
+   "title": "Unknown error id",
+   "explanation": "No error err_<id> is known (they expire after 7 days).",
+   "how_to_fix": "Retry the call to get a fresh error_id.",
+   "details": {}
+  }
+ },
+ "log_decision": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"recorded\":true}"
+   }
+  ],
+  "structuredContent": {
+   "recorded": true
+  }
+ },
+ "report_issue": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"recorded\":true,\"issue_id\":\"<uuid>\"}"
+   }
+  ],
+  "structuredContent": {
+   "recorded": true,
+   "issue_id": "<uuid>"
+  }
+ },
+ "report_unmet_need": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"recorded\":true,\"group_id\":\"<uuid>\",\"similar_reports\":0}"
+   }
+  ],
+  "structuredContent": {
+   "recorded": true,
+   "group_id": "<uuid>",
+   "similar_reports": 0
+  }
+ },
+ "read_result": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"items\":[{\"sku\":\"product_4\",\"name\":\"newsletter\",\"price\":213.01,\"currency\":\"sonitus\",\"stock\":43},{\"sku\":\"product_5\",\"name\":\"near\",\"price\":455.27,\"currency\":\"cursim\",\"stock\":1}],\"offset\":3,\"total\":20,\"next_offset\":5}"
+   }
+  ],
+  "structuredContent": {
+   "items": [
+    {
+     "sku": "product_4",
+     "name": "newsletter",
+     "price": 213.01,
+     "currency": "sonitus",
+     "stock": 43
+    },
+    {
+     "sku": "product_5",
+     "name": "near",
+     "price": 455.27,
+     "currency": "cursim",
+     "stock": 1
+    }
+   ],
+   "offset": 3,
+   "total": 20,
+   "next_offset": 5
+  }
+ },
+ "read_result_unknown": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"recorded\":false,\"reason\":\"unknown or expired handle\"}"
+   }
+  ],
+  "structuredContent": {
+   "recorded": false,
+   "reason": "unknown or expired handle"
+  }
+ },
+ "script_ok": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/script-run-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"status\":\"ok\",\"result\":[\"order_1\",\"order_2\",\"order_3\"],\"stats\":{\"wallMs\":0,\"toolCalls\":1,\"blockedCalls\":0,\"suspensions\":0}}"
+   }
+  ],
+  "structuredContent": {
+   "status": "ok",
+   "result": [
+    "order_1",
+    "order_2",
+    "order_3"
+   ],
+   "stats": {
+    "wallMs": 0,
+    "toolCalls": 1,
+    "blockedCalls": 0,
+    "suspensions": 0
+   }
+  }
+ },
+ "script_not_found": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/script-run-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"status\":\"script_error\",\"result\":null,\"stats\":{\"wallMs\":0,\"toolCalls\":1,\"blockedCalls\":0,\"suspensions\":0},\"error\":{\"type\":\"RuntimeError\",\"message\":\"upstream_not_found: The API answered 404 for get_order: {\\\"type\\\":\\\"about:blank\\\",\\\"title\\\":\\\"Not Found\\\",\\\"status\\\":404,\\\"detail\\\":\\\"order ord_nope not found\\\"} (error_id=err_<id>)\",\"line\":1,\"col\":8,\"traceback\":\"Traceback (most recent call last):\\n  File \\\"script.py\\\", line 2, in <module>\\n    __neurouter_main__()\\n    ~~~~~~~~~~~~~~~~~~~~\\n  File \\\"script.py\\\", line 1, in __neurouter_main__\\n    return acme.get_order(order_id=\\\"ord_nope\\\")\\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\\nRuntimeError: upstream_not_found: The API answered 404 for get_order: {\\\"type\\\":\\\"about:blank\\\",\\\"title\\\":\\\"Not Found\\\",\\\"status\\\":404,\\\"detail\\\":\\\"order ord_nope not found\\\"} (error_id=err_<id>)\"}}"
+   }
+  ],
+  "structuredContent": {
+   "status": "script_error",
+   "result": null,
+   "stats": {
+    "wallMs": 0,
+    "toolCalls": 1,
+    "blockedCalls": 0,
+    "suspensions": 0
+   },
+   "error": {
+    "type": "RuntimeError",
+    "message": "upstream_not_found: The API answered 404 for get_order: {\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"order ord_nope not found\"} (error_id=err_<id>)",
+    "line": 1,
+    "col": 8,
+    "traceback": "Traceback (most recent call last):\n  File \"script.py\", line 2, in <module>\n    __neurouter_main__()\n    ~~~~~~~~~~~~~~~~~~~~\n  File \"script.py\", line 1, in __neurouter_main__\n    return acme.get_order(order_id=\"ord_nope\")\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nRuntimeError: upstream_not_found: The API answered 404 for get_order: {\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"order ord_nope not found\"} (error_id=err_<id>)"
+   }
+  },
+  "isError": true
+ },
+ "script_dry_run": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/script-run-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"status\":\"ok\",\"result\":{\"dry_run\":true,\"planned\":{\"tool\":\"cancel_order\",\"method\":\"POST\",\"path\":\"/orders/{orderId}/cancel\",\"arguments\":{\"order_id\":\"order_2\",\"reason\":\"other\"}}},\"stats\":{\"wallMs\":0,\"toolCalls\":1,\"blockedCalls\":0,\"suspensions\":0},\"planned_changes\":[{\"tool\":\"cancel_order\",\"method\":\"POST\",\"path\":\"/orders/{orderId}/cancel\",\"arguments\":{\"order_id\":\"order_2\",\"reason\":\"other\"},\"wouldConfirm\":false}]}"
+   }
+  ],
+  "structuredContent": {
+   "status": "ok",
+   "result": {
+    "dry_run": true,
+    "planned": {
+     "tool": "cancel_order",
+     "method": "POST",
+     "path": "/orders/{orderId}/cancel",
+     "arguments": {
+      "order_id": "order_2",
+      "reason": "other"
+     }
+    }
+   },
+   "stats": {
+    "wallMs": 0,
+    "toolCalls": 1,
+    "blockedCalls": 0,
+    "suspensions": 0
+   },
+   "planned_changes": [
+    {
+     "tool": "cancel_order",
+     "method": "POST",
+     "path": "/orders/{orderId}/cancel",
+     "arguments": {
+      "order_id": "order_2",
+      "reason": "other"
+     },
+     "wouldConfirm": false
+    }
+   ]
+  }
+ },
+ "script_rejected": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/script-run-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"status\":\"rejected\",\"result\":null,\"stats\":{\"wallMs\":0,\"toolCalls\":0,\"blockedCalls\":0,\"suspensions\":0},\"error\":{\"type\":\"rejected\",\"message\":\"Imports are not allowed\",\"line\":1,\"col\":1,\"hint\":\"Tools are already available as acme.<fn> and ops.<fn>; remove the import.\",\"errors\":[{\"line\":1,\"col\":1,\"rule\":\"import\",\"message\":\"Imports are not allowed\",\"hint\":\"Tools are already available as acme.<fn> and ops.<fn>; remove the import.\"}]}}"
+   }
+  ],
+  "structuredContent": {
+   "status": "rejected",
+   "result": null,
+   "stats": {
+    "wallMs": 0,
+    "toolCalls": 0,
+    "blockedCalls": 0,
+    "suspensions": 0
+   },
+   "error": {
+    "type": "rejected",
+    "message": "Imports are not allowed",
+    "line": 1,
+    "col": 1,
+    "hint": "Tools are already available as acme.<fn> and ops.<fn>; remove the import.",
+    "errors": [
+     {
+      "line": 1,
+      "col": 1,
+      "rule": "import",
+      "message": "Imports are not allowed",
+      "hint": "Tools are already available as acme.<fn> and ops.<fn>; remove the import."
+     }
+    ]
+   }
+  },
+  "isError": true
+ },
+ "script_type_error": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/script-run-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"status\":\"type_error\",\"result\":null,\"stats\":{\"wallMs\":0,\"toolCalls\":0,\"blockedCalls\":0,\"suspensions\":0},\"error\":{\"type\":\"TypeError\",\"message\":\"Module `acme` has no member `no_such_fn`\",\"line\":1,\"col\":8,\"traceback\":\"line 1, col 8: Module `acme` has no member `no_such_fn` [unresolved-attribute]\"}}"
+   }
+  ],
+  "structuredContent": {
+   "status": "type_error",
+   "result": null,
+   "stats": {
+    "wallMs": 0,
+    "toolCalls": 0,
+    "blockedCalls": 0,
+    "suspensions": 0
+   },
+   "error": {
+    "type": "TypeError",
+    "message": "Module `acme` has no member `no_such_fn`",
+    "line": 1,
+    "col": 8,
+    "traceback": "line 1, col 8: Module `acme` has no member `no_such_fn` [unresolved-attribute]"
+   }
+  },
+  "isError": true
+ },
+ "script_runtime_error": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/script-run-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"status\":\"script_error\",\"result\":null,\"stats\":{\"wallMs\":0,\"toolCalls\":0,\"blockedCalls\":0,\"suspensions\":0},\"error\":{\"type\":\"KeyError\",\"message\":\"missing\",\"line\":2,\"col\":8,\"traceback\":\"Traceback (most recent call last):\\n  File \\\"script.py\\\", line 3, in <module>\\n    __neurouter_main__()\\n    ~~~~~~~~~~~~~~~~~~~~\\n  File \\\"script.py\\\", line 2, in __neurouter_main__\\n    return x[\\\"missing\\\"]\\n           ~~~~~~~~~~~~\\nKeyError: missing\"}}"
+   }
+  ],
+  "structuredContent": {
+   "status": "script_error",
+   "result": null,
+   "stats": {
+    "wallMs": 0,
+    "toolCalls": 0,
+    "blockedCalls": 0,
+    "suspensions": 0
+   },
+   "error": {
+    "type": "KeyError",
+    "message": "missing",
+    "line": 2,
+    "col": 8,
+    "traceback": "Traceback (most recent call last):\n  File \"script.py\", line 3, in <module>\n    __neurouter_main__()\n    ~~~~~~~~~~~~~~~~~~~~\n  File \"script.py\", line 2, in __neurouter_main__\n    return x[\"missing\"]\n           ~~~~~~~~~~~~\nKeyError: missing"
+   }
+  },
+  "isError": true
+ },
+ "cancel_order": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"id\":\"animi\",\"customerId\":\"triumphus\",\"status\":\"delivered\",\"items\":[{\"sku\":\"similique\",\"quantity\":34,\"unitPrice\":860.6},{\"sku\":\"modi\",\"quantity\":94,\"unitPrice\":370.11}],\"total\":442.66,\"currency\":\"EUR\",\"shippingAddress\":{\"line1\":\"creo\",\"line2\":\"calcar\",\"city\":\"vorax\",\"postalCode\":\"aurum\",\"country\":\"vergo\"},\"note\":\"vobis\",\"createdAt\":\"2025-10-18T10:41:37.477Z\"}"
+   }
+  ],
+  "structuredContent": {
+   "id": "animi",
+   "customerId": "triumphus",
+   "status": "delivered",
+   "items": [
+    {
+     "sku": "similique",
+     "quantity": 34,
+     "unitPrice": 860.6
+    },
+    {
+     "sku": "modi",
+     "quantity": 94,
+     "unitPrice": 370.11
+    }
+   ],
+   "total": 442.66,
+   "currency": "EUR",
+   "shippingAddress": {
+    "line1": "creo",
+    "line2": "calcar",
+    "city": "vorax",
+    "postalCode": "aurum",
+    "country": "vergo"
+   },
+   "note": "vobis",
+   "createdAt": "2025-10-18T10:41:37.477Z"
+  }
+ },
+ "end_task": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"task_id\":\"<uuid>\",\"calls\":17,\"errors\":4,\"duration_ms\":0}"
+   }
+  ],
+  "structuredContent": {
+   "task_id": "<uuid>",
+   "calls": 17,
+   "errors": 4,
+   "duration_ms": 0
+  }
+ },
+ "prod_cancel_no_elicitation": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error",
+    "neurouter_begin_task"
+   ],
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/planned-changes": [
+    {
+     "tool": "cancel_order",
+     "method": "POST",
+     "path": "/orders/{orderId}/cancel",
+     "arguments": {
+      "order_id": "order_1",
+      "reason": "other"
+     }
+    }
+   ],
+   "dev.neurouter/error-id": "err_<id>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Not executed: this client cannot ask the user to confirm writes in PROD. Planned change (nothing was changed): POST /orders/{orderId}/cancel {\"order_id\":\"order_1\",\"reason\":\"other\"}. Show it to the user; they can approve it from a client with MCP elicitation support. (error_id=err_<id>; call neurouter_explain_error for how to fix)"
+   },
+   {
+    "type": "text",
+    "text": "Tip: call neurouter_begin_task(goal) so this work is tracked as one task."
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "confirmation_unsupported",
+    "message": "Not executed: this client cannot ask the user to confirm writes in PROD. Planned change (nothing was changed): POST /orders/{orderId}/cancel {\"order_id\":\"order_1\",\"reason\":\"other\"}. Show it to the user; they can approve it from a client with MCP elicitation support.",
+    "error_id": "err_<id>"
+   }
+  },
+  "isError": true
+ },
+ "prod_script_no_elicitation": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error"
+   ],
+   "dev.neurouter/planned-changes": [
+    {
+     "tool": "cancel_order",
+     "method": "POST",
+     "path": "/orders/{orderId}/cancel",
+     "arguments": {
+      "order_id": "order_1",
+      "reason": "other"
+     }
+    }
+   ]
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Not executed: this client cannot ask the user to confirm writes in PROD. The dry run planned 1 change(s), none made:\n- POST /orders/{orderId}/cancel (cancel_order)\nShow them to the user; they can approve the script from a client with MCP elicitation support."
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "confirmation_unsupported",
+    "message": "Not executed: this client cannot ask the user to confirm writes in PROD. The dry run planned 1 change(s), none made:\n- POST /orders/{orderId}/cancel (cancel_order)\nShow them to the user; they can approve the script from a client with MCP elicitation support."
+   }
+  },
+  "isError": true
+ },
+ "ro_initialize": {
+  "protocolVersion": "2025-11-25",
+  "capabilities": {
+   "tools": {
+    "listChanged": true
+   }
+  },
+  "serverInfo": {
+   "name": "neurouter-acme",
+   "title": "Acme Orders via Neurouter",
+   "version": "0.2.1"
+  },
+  "instructions": "This MCP server exposes the Acme Orders API (ro, read-only) through Neurouter.\nStart every user request with neurouter_begin_task(goal) and finish with neurouter_end_task(outcome). If the user needs something no tool can do, call neurouter_report_unmet_need instead of guessing.\nFor multi-step work, prefer run_script: a short Python script (no imports, no I/O) that calls tools as acme.<fn>(...) and returns a small result. Get signatures with search_tools. Use mode=\"dry_run\" first for anything that writes.\nErrors include an error_id; neurouter_explain_error(error_id) tells you how to fix the call. Search \"neurouter\" to find the other helper tools."
+ },
+ "ro_tools_list": [
+  {
+   "name": "list_orders",
+   "title": "List orders",
+   "description": "List orders\n\nLists orders, newest first. Filter by status or customer.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "pending",
+       "paid",
+       "shipped",
+       "delivered",
+       "cancelled",
+       "refunded"
+      ],
+      "x-schema-name": "OrderStatus",
+      "description": "Only orders in this status."
+     },
+     "customer_id": {
+      "type": "string",
+      "description": "Only orders of this customer."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     },
+     "cursor": {
+      "type": "string",
+      "description": "Cursor from the previous page's nextCursor."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List orders",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1dffbb5178cd822fb2cd95506c8ea6155d4d6c1e63d81ccacb0982667c94fa6a",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_order",
+   "title": "Create an order",
+   "description": "Create an order\n\nCreates a pending order for a customer with one or more line items.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "customerId": {
+      "type": "string",
+      "description": "The customer who places the order."
+     },
+     "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+       "type": "object",
+       "required": [
+        "sku",
+        "quantity"
+       ],
+       "properties": {
+        "sku": {
+         "type": "string"
+        },
+        "quantity": {
+         "type": "integer",
+         "minimum": 1
+        }
+       },
+       "x-schema-name": "LineItem"
+      }
+     },
+     "shippingAddress": {
+      "type": "object",
+      "required": [
+       "line1",
+       "city",
+       "postalCode",
+       "country"
+      ],
+      "properties": {
+       "line1": {
+        "type": "string"
+       },
+       "line2": {
+        "type": "string"
+       },
+       "city": {
+        "type": "string"
+       },
+       "postalCode": {
+        "type": "string"
+       },
+       "country": {
+        "type": "string",
+        "description": "ISO 3166-1 alpha-2 country code."
+       }
+      },
+      "x-schema-name": "Address"
+     }
+    },
+    "required": [
+     "customerId",
+     "items"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Create an order",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": false,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "c8309826cc2057996342b28446aa7fce8a34accd6af4e9177212005d8b033a05",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_order",
+   "title": "Get an order",
+   "description": "Get an order\n\nReturns one order with its line items, totals and status.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get an order",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1b5bb6bbd18b32a80f89aaf0e962baacb39b714f4df1ddea1d61b64b424bc9f7",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "update_order",
+   "title": "Update an order",
+   "description": "Update an order\n\nChanges the shipping address or the note of an order that has not shipped yet.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "shippingAddress": {
+      "type": "object",
+      "required": [
+       "line1",
+       "city",
+       "postalCode",
+       "country"
+      ],
+      "properties": {
+       "line1": {
+        "type": "string"
+       },
+       "line2": {
+        "type": "string"
+       },
+       "city": {
+        "type": "string"
+       },
+       "postalCode": {
+        "type": "string"
+       },
+       "country": {
+        "type": "string",
+        "description": "ISO 3166-1 alpha-2 country code."
+       }
+      },
+      "x-schema-name": "Address"
+     },
+     "note": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Internal note shown to support agents."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Update an order",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": false,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "4bed4f0f0fafa74eb442f64ef4a5e7f8aef4e97c74762ba098ad4cc57e2a9dc1",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "cancel_order",
+   "title": "Cancel an order",
+   "description": "Cancel an order\n\nCancels an order that has not shipped. Paid orders are refunded in full automatically.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "reason": {
+      "type": "string",
+      "enum": [
+       "customer_request",
+       "out_of_stock",
+       "fraud",
+       "other"
+      ],
+      "description": "Why the order is cancelled."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Cancel an order",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": false,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "1f01f0222e4989c489d825fdef208a03fd2cb53d09a81280c0bd086ece250845",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_order_refunds",
+   "title": "List refunds of an order",
+   "description": "List refunds of an order\n\nLists the refunds issued for one order.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     }
+    },
+    "required": [
+     "order_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List refunds of an order",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "b9e3ded63c512ae960a22f68296ee68e2b20b6860db7ace7b103c6d1d97fd868",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_refund",
+   "title": "Refund an order",
+   "description": "Refund an order\n\nRefunds part or all of a paid order. The amount cannot exceed what is left to refund.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "The order id."
+     },
+     "amount": {
+      "type": "number",
+      "minimum": 0.01,
+      "description": "Amount to refund"
+     },
+     "reason": {
+      "type": "string",
+      "enum": [
+       "damaged",
+       "not_received",
+       "wrong_item",
+       "goodwill"
+      ],
+      "description": "Why the money is returned."
+     }
+    },
+    "required": [
+     "order_id",
+     "amount",
+     "reason"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Refund an order",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": false,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "e686eaa1e5e2730c72c9738e67f901bf40098acf98c1ff818ae53d82d53b2060",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_customers",
+   "title": "List customers",
+   "description": "List customers\n\nLists customers. Search by name or email with q.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "q": {
+      "type": "string",
+      "description": "Text to match in the name or email."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     },
+     "cursor": {
+      "type": "string",
+      "description": "Cursor from the previous page's nextCursor."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List customers",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "39a00f93590b675a6d44be8704d35c60d298739846bed81a036da6258debabf5",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "create_customer",
+   "title": "Create a customer",
+   "description": "Create a customer\n\nCreates a customer account.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Full name."
+     },
+     "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Contact email"
+     },
+     "phone": {
+      "type": "string",
+      "description": "Phone number in E.164 format."
+     }
+    },
+    "required": [
+     "name",
+     "email"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Create a customer",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": true,
+    "dev.neurouter/writes-enabled": false,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "91d41b44a122c77c389c472ee1d398b8fd4dcc1f563d3a74dc3fcc005a14e12a",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_customer",
+   "title": "Get a customer",
+   "description": "Get a customer\n\nReturns one customer with their lifetime order count and spend.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "customer_id": {
+      "type": "string",
+      "description": "The customer id."
+     }
+    },
+    "required": [
+     "customer_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get a customer",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "7cc38e57691829839ee3ccb5587b1019408c9be4edc876849218db6e028c9922",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_shipments",
+   "title": "List shipments",
+   "description": "List shipments\n\nLists shipments, optionally only those of one order.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "order_id": {
+      "type": "string",
+      "description": "Only shipments of this order."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List shipments",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "81aca3b46445f85adb1728ec59a12eaa49a206c7752b973e8ab8fb31234034d5",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_shipment",
+   "title": "Track a shipment",
+   "description": "Track a shipment\n\nReturns the carrier, tracking number and delivery status of a shipment.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "shipment_id": {
+      "type": "string",
+      "description": "The shipment id."
+     }
+    },
+    "required": [
+     "shipment_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Track a shipment",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "04b002673f1f2a3b169369a2646364544184de44851d7055dc1269fe836dc644",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "list_products",
+   "title": "List products",
+   "description": "List products\n\nLists products in the catalog with price and stock.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "q": {
+      "type": "string",
+      "description": "Text to match in the product name or SKU."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 20,
+      "description": "Page size (default 20)."
+     }
+    },
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "List products",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "91e7f55c291b982d81b51fb71887bc315874aca92cd735808578bb260a84ebe8",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "get_product",
+   "title": "Get a product",
+   "description": "Get a product\n\nReturns one product with its price and stock level.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "sku": {
+      "type": "string",
+      "description": "The product SKU."
+     }
+    },
+    "required": [
+     "sku"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Get a product",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "fd962624a06ce56d9b51b3159047139988f77d714be2e635f7609cea7f2373fa",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "count_orders",
+   "title": "Count orders",
+   "description": "Count the orders with a status.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "pending",
+       "paid",
+       "shipped",
+       "delivered",
+       "cancelled",
+       "refunded"
+      ]
+     }
+    },
+    "required": [
+     "status"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "title": "Count orders",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   },
+   "_meta": {
+    "dev.neurouter/write": false,
+    "dev.neurouter/writes-enabled": true,
+    "dev.neurouter/confirm": "none",
+    "dev.neurouter/def-hash": "217e162462bdec382ce97171eb930c1124f93c865065f1e30902facd9a1b37ff",
+    "dev.neurouter/defer_loading": false
+   }
+  },
+  {
+   "name": "neurouter_begin_task",
+   "title": "Begin a task",
+   "description": "Start tracking one user request as a task. Call this first with the user's goal in one sentence; every following call attaches to the task until neurouter_end_task.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What the user wants done, in one sentence"
+     }
+    },
+    "required": [
+     "goal"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_end_task",
+   "title": "End the task",
+   "description": "Finish the current task with its outcome. Call this when you have answered the user or given up.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "outcome": {
+      "type": "string",
+      "enum": [
+       "success",
+       "partial",
+       "failure"
+      ]
+     },
+     "notes": {
+      "type": "string",
+      "description": "Optional short notes"
+     },
+     "task_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "outcome"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_report_unmet_need",
+   "title": "Report an unmet need",
+   "description": "Tell the API's operators that the user needs something no available tool can do. Use this instead of guessing or improvising.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What the user wanted to do"
+     },
+     "attempted": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 20,
+      "description": "Tool names you tried"
+     }
+    },
+    "required": [
+     "intent"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_log_decision",
+   "title": "Log a decision",
+   "description": "Record a non-obvious choice you made (what and why), so humans can review the reasoning later.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "choice": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What you chose"
+     },
+     "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Why"
+     },
+     "alternatives": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 5
+     }
+    },
+    "required": [
+     "choice",
+     "reason"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_report_issue",
+   "title": "Report a tool issue",
+   "description": "Report that a tool behaved wrongly or its documentation is misleading (wrong results, confusing errors).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "tool": {
+      "type": "string"
+     },
+     "problem": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "What went wrong"
+     },
+     "evidence": {
+      "type": "object",
+      "description": "Small JSON evidence (≤ 4 KiB)"
+     },
+     "error_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "tool",
+     "problem"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_explain_error",
+   "title": "Explain an error",
+   "description": "Explain an error_id returned by a failed call and how to fix the call.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "error_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "error_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_get_examples",
+   "title": "Get examples",
+   "description": "Get known-good example arguments (or scripts) for a tool.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "tool": {
+      "type": "string"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "call",
+       "script"
+      ]
+     }
+    },
+    "required": [
+     "tool"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_whoami",
+   "title": "Who am I",
+   "description": "Show the environment, your identity, scopes, whether writes and code mode are enabled, and your limits.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "neurouter_read_result",
+   "title": "Read more of a truncated result",
+   "description": "Page through a large result that was truncated. Pass the result handle from the earlier call.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "handle": {
+      "type": "string"
+     },
+     "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 50
+     }
+    },
+    "required": [
+     "handle"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "run_script",
+   "title": "Run a Python script against the API",
+   "description": "Run a short Python script that calls API tools as functions (e.g. acme.list_orders()) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins (len, sorted, isinstance, type, iter/next, …; no map/filter/getattr) and ops.* helpers. Tool results are whole dicts/lists inside scripts (no maxItems/maxBytes cuts); the script result limit applies to what you return. Use mode=\"dry_run\" to see planned writes without executing them. Get function signatures from search_tools.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "dry_run",
+       "execute"
+      ],
+      "default": "execute"
+     },
+     "inputs": {
+      "type": "object",
+      "description": "Values bound as global variables",
+      "default": {}
+     }
+    },
+    "required": [
+     "code"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+   }
+  }
+ ],
+ "ro_writes_disabled": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error",
+    "neurouter_whoami",
+    "neurouter_begin_task"
+   ],
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/error-id": "err_<id>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Writes are off in the ro environment (read-only); cancel_order was not called. (error_id=err_<id>; call neurouter_explain_error for how to fix)"
+   },
+   {
+    "type": "text",
+    "text": "Tip: call neurouter_begin_task(goal) so this work is tracked as one task."
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "writes_disabled",
+    "message": "Writes are off in the ro environment (read-only); cancel_order was not called.",
+    "error_id": "err_<id>"
+   }
+  },
+  "isError": true
+ },
+ "ro_call_tool": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"id\":\"order_2\",\"customerId\":\"usque\",\"status\":\"cancelled\",\"items\":[{\"sku\":\"trucido\",\"quantity\":47,\"unitPrice\":586.08},{\"sku\":\"adnuo\",\"quantity\":2,\"unitPrice\":373.86},{\"sku\":\"cauda\",\"quantity\":5,\"unitPrice\":232.73}],\"total\":848.26,\"currency\":\"sophismata\",\"shippingAddress\":{\"line1\":\"ver\",\"line2\":\"culpo\",\"city\":\"crur\",\"postalCode\":\"toties\",\"country\":\"deripio\"},\"note\":\"ubi\",\"createdAt\":\"2025-10-27T21:21:05.220Z\"}"
+   }
+  ],
+  "structuredContent": {
+   "id": "order_2",
+   "customerId": "usque",
+   "status": "cancelled",
+   "items": [
+    {
+     "sku": "trucido",
+     "quantity": 47,
+     "unitPrice": 586.08
+    },
+    {
+     "sku": "adnuo",
+     "quantity": 2,
+     "unitPrice": 373.86
+    },
+    {
+     "sku": "cauda",
+     "quantity": 5,
+     "unitPrice": 232.73
+    }
+   ],
+   "total": 848.26,
+   "currency": "sophismata",
+   "shippingAddress": {
+    "line1": "ver",
+    "line2": "culpo",
+    "city": "crur",
+    "postalCode": "toties",
+    "country": "deripio"
+   },
+   "note": "ubi",
+   "createdAt": "2025-10-27T21:21:05.220Z"
+  }
+ },
+ "ro_call_tool_unknown": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "search_tools",
+    "neurouter_explain_error",
+    "neurouter_whoami"
+   ],
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/error-id": "err_<id>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Tool not found or not permitted: get_invoice. Use search_tools to find tools you can call. (error_id=err_<id>; call neurouter_explain_error for how to fix)"
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "unknown_tool",
+    "message": "Tool not found or not permitted: get_invoice. Use search_tools to find tools you can call.",
+    "error_id": "err_<id>"
+   }
+  },
+  "isError": true
+ },
+ "ro_call_tool_invalid": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error"
+   ],
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/error-id": "err_<id>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "Invalid arguments for list_orders:\n- /limit must be integer (error_id=err_<id>; call neurouter_explain_error for how to fix)"
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "invalid_args",
+    "message": "Invalid arguments for list_orders:\n- /limit must be integer",
+    "error_id": "err_<id>"
+   }
+  },
+  "isError": true
+ },
+ "ro_call_tool_bad_shape": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error"
+   ]
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "call_tool needs { name: string, arguments?: object }"
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "invalid_args",
+    "message": "call_tool needs { name: string, arguments?: object }"
+   }
+  },
+  "isError": true
+ },
+ "ro_call_tool_ops": {
+  "_meta": {
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"server\":\"acme\",\"environment\":\"ro\",\"environment_kind\":\"dev\",\"principal\":{\"type\":\"api_key\",\"id\":\"<uuid>\",\"name\":\"test ro\"},\"scopes\":[\"tools:read\",\"tools:write\",\"code:run\"],\"writes\":{\"enabled\":false,\"tools\":[],\"confirm\":\"none\",\"client_can_confirm\":false},\"code_mode\":true,\"limits\":{\"rate_limit\":null,\"code\":{\"maxToolCalls\":200,\"wallTimeSec\":30,\"cpuTimeSec\":10,\"maxMemoryMb\":64,\"maxConcurrentCalls\":8,\"maxResultBytes\":1048576}},\"profile\":null}"
+   }
+  ],
+  "structuredContent": {
+   "server": "acme",
+   "environment": "ro",
+   "environment_kind": "dev",
+   "principal": {
+    "type": "api_key",
+    "id": "<uuid>",
+    "name": "test ro"
+   },
+   "scopes": [
+    "tools:read",
+    "tools:write",
+    "code:run"
+   ],
+   "writes": {
+    "enabled": false,
+    "tools": [],
+    "confirm": "none",
+    "client_can_confirm": false
+   },
+   "code_mode": true,
+   "limits": {
+    "rate_limit": null,
+    "code": {
+     "maxToolCalls": 200,
+     "wallTimeSec": 30,
+     "cpuTimeSec": 10,
+     "maxMemoryMb": 64,
+     "maxConcurrentCalls": 8,
+     "maxResultBytes": 1048576
+    }
+   },
+   "profile": null
+  }
+ },
+ "not_permitted": {
+  "_meta": {
+   "dev.neurouter/next-tools": [
+    "neurouter_explain_error",
+    "neurouter_whoami",
+    "neurouter_begin_task"
+   ],
+   "dev.neurouter/call-id": "<uuid>",
+   "dev.neurouter/task-id": "<uuid>",
+   "dev.neurouter/error-id": "err_<id>"
+  },
+  "content": [
+   {
+    "type": "text",
+    "text": "cancel_order changes data and your credential lacks the tools:write scope. (error_id=err_<id>; call neurouter_explain_error for how to fix)"
+   },
+   {
+    "type": "text",
+    "text": "Tip: call neurouter_begin_task(goal) so this work is tracked as one task."
+   }
+  ],
+  "structuredContent": {
+   "error": {
+    "code": "not_permitted",
+    "message": "cancel_order changes data and your credential lacks the tools:write scope.",
+    "error_id": "err_<id>"
+   }
+  },
+  "isError": true
+ }
+}

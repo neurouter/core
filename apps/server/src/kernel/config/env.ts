@@ -155,11 +155,11 @@ export const EnvFields = z
     /** Maintenance window (spec §11 M3): 503 on `/mcp` and on mutating `/api` calls. */
     NEUROUTER_MAINTENANCE: zBool.default(false),
     /**
-     * Per-tool `outputSchema` in tools/list: `none` (default; MCP makes it optional, and a declared schema
-     * obliges every structuredContent to conform) or `typed` (the shaped upstream schema; experimental,
-     * kept for the v2 `exposure.outputSchema` setting).
+     * Agent contract written to servers created from now on (contract-v2 D4): `2` (default; one envelope for
+     * every tool result) or `1`. Servers created before contract 2 keep `1` until switched (`exposure.contract`).
+     * The per-tool outputSchema setting is `exposure.outputSchema` (server/environment; replaces NEUROUTER_OUTPUT_SCHEMA).
      */
-    NEUROUTER_OUTPUT_SCHEMA: z.enum(['none', 'typed']).default('none'),
+    NEUROUTER_NEW_SERVER_CONTRACT: z.coerce.number().pipe(z.union([z.literal(1), z.literal(2)])).default(2),
   });
 
 const DB_URL = /^(sqlite:|postgres:\/\/|postgresql:\/\/)/;

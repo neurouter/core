@@ -13,6 +13,8 @@ import type { TaskTracker } from '../tasks/tracker.js';
 import { principalId, principalUserId, type RunContext } from '../pipeline/context.js';
 import { explain, type ErrorEvents } from '../pipeline/errors.js';
 import type { McpToolResult, Pipeline } from '../pipeline/pipeline.js';
+import { errorDraft, okDraft, type Draft } from '../envelope/draft.js';
+import { v1Result } from '../envelope/v1.js';
 import { writeEnabled } from '../pipeline/pipeline.js';
 
 const TEXT_CAP = 500;
@@ -148,13 +150,14 @@ export class OpsTools {
     return typeof r === 'string' ? r : JSON.stringify(r);
   }
 
-  async call(ctx: RunContext, op: OpsTool | typeof READ_RESULT, args: Record<string, unknown>): Promise<{ result: McpToolResult; value: unknown }> {
+  async call(ctx: RunContext, op: OpsTool | typeof READ_RESULT, args: Record<string, unknown>): Promise<{ result: McpToolResult; value: unknown; draft: Draft }> {
     const start = this.d.now();
     const auditId = newId();
     if (ctx.origin !== 'eval') this.d.metrics?.opsCalls.inc({ tool: op });
     const rl = await this.d.limiter.take([this.d.limiter.opsCheck(ctx.credentialKey)]);
     let value: Record<string, unknown>;
     let status: 'ok' | 'blocked' = 'ok';
+    let failed = false;
     if (!rl.allowed) {
       value = { recorded: false, reason: 'rate_limited', retry_after_ms: rl.retryAfterMs };
       status = 'blocked';
@@ -164,6 +167,7 @@ export class OpsTools {
       } catch (err) {
         this.d.log.warn({ err, op }, 'ops tool failed; returning recorded:false');
         value = { recorded: false };
+        failed = true;
       }
     }
     if (op !== 'begin_task' && op !== 'end_task') this.d.tracker.bump(ctx.taskId, { ops_count: 1, ...(op === 'log_decision' && value.recorded !== false ? { decision_count: 1 } : {}) });
@@ -180,7 +184,16 @@ export class OpsTools {
       latencyMs: this.d.now() - start,
     });
     const meta: Record<string, unknown> = { [META_CALL_ID]: auditId, ...(taskId ? { [META_TASK_ID]: taskId } : {}) };
-    return { value, result: { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, _meta: meta } };
+    return { value, result: v1Result(JSON.stringify(value), value, meta), draft: opsDraft(op, args, value, failed, rl.allowed ? undefined : rl.retryAfterMs, meta) };
+  }
+
+  /** A tool issue raised by Neurouter itself (e.g. a typed outputSchema mismatch); live traffic only. */
+  async recordToolIssue(ctx: RunContext, tool: string, problem: string, evidence: Record<string, unknown>): Promise<void> {
+    if (ctx.origin === 'eval') return;
+    const now = this.d.now();
+    await this.d.db.insertInto('issues').values({ id: newId(), tenant_id: ctx.tenantId, server_id: ctx.server.id, environment_id: ctx.environment.id, task_id: ctx.taskId, tool_name: tool.slice(0, 64), problem: await this.redactText(cap(problem)), evidence: toJsonColumn(evidence), related_audit_id: null, status: 'open', note: null, created_at: now, updated_at: now }).execute();
+    this.d.metrics?.issues.inc({ server: ctx.server.slug });
+    this.d.onInboxChanged?.(ctx.tenantId);
   }
 
   private owner(ctx: RunContext) {
@@ -338,6 +351,34 @@ export class OpsTools {
     await db.insertInto('need_groups').values({ id, tenant_id: ctx.tenantId, server_id: ctx.server.id, label: intent.slice(0, 200), intent_norm_hash: hash, count: 0, distinct_principals: 0, first_seen_at: now, last_seen_at: now, status: 'open', note: null, centroid: vec ? Buffer.from(new Uint8Array(vec.buffer)) : null }).execute();
     return id;
   }
+}
+
+/**
+ * Contract-2 form of an ops answer: data on success; `{recorded:false, reason}` answers become errors with a
+ * code (they never fail the task: the agent can carry on).
+ */
+function opsDraft(op: OpsTool | typeof READ_RESULT, args: Record<string, unknown>, value: Record<string, unknown>, failed: boolean, retryAfterMs: number | undefined, meta: Record<string, unknown>): Draft {
+  const name = opsMcpName(op);
+  if (retryAfterMs !== undefined) return errorDraft({ code: 'rate_limited', message: `Too many neurouter_* calls; retry in ${Math.max(1, Math.ceil(retryAfterMs / 1000))}s.`, retryAfterMs, name, args, next: [{ tool: name, args }] }, { meta });
+  if (failed) return errorDraft({ code: 'unavailable', message: `${name} could not record this; nothing else is affected.`, retry: 'yes', name, args, next: [{ tool: name, args }] }, { meta });
+  if (op === 'explain_error' && value.code === 'unknown') return errorDraft({ code: 'not_found', message: String(value.explanation ?? 'Unknown error id.'), name, args, next: [] }, { meta });
+  if (value.recorded === false) {
+    const reason = String(value.reason ?? 'not recorded');
+    if (op === READ_RESULT) return errorDraft({ code: 'not_found', message: 'Unknown or expired result handle (they last 1 hour); repeat the original call.', name, args, next: [] }, { meta });
+    if (reason === 'no open task') return errorDraft({ code: 'not_found', message: 'No open task to end; nothing changed.', name, args, next: [] }, { meta });
+    return errorDraft({ code: 'invalid_args', message: `${name}: ${reason}; nothing was recorded.`, name, args, next: [] }, { meta });
+  }
+  if (op === READ_RESULT) {
+    const items = Array.isArray(value.items) ? value.items : null;
+    const total = typeof value.total === 'number' ? value.total : 0;
+    const next = typeof value.next_offset === 'number' ? value.next_offset : null;
+    // bytes still behind the handle, estimated from this page (items) or exact (text characters)
+    const remaining = next === null ? 0 : items ? Math.round(((total - next) * Buffer.byteLength(JSON.stringify(items))) / Math.max(1, items.length)) : total - next;
+    const more = next !== null ? { items_omitted: items ? total - next : undefined, omitted_bytes: remaining, next: { tool: name, args: { ...args, offset: next } } } : null;
+    if (items) return okDraft(items, { page: { count: items.length, total, has_more: next !== null, next_cursor: null }, truncated: more && { ...(more.items_omitted !== undefined ? { items_omitted: more.items_omitted } : {}), omitted_bytes: more.omitted_bytes, next: more.next }, meta });
+    return okDraft(value.text ?? '', { truncated: more && { omitted_bytes: more.omitted_bytes, next: more.next }, meta });
+  }
+  return okDraft(value, { meta });
 }
 
 function cosine(a: Float32Array, b: Float32Array): number {
