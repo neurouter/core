@@ -51,6 +51,14 @@ mean of that over the multi-step attempts. Cached input (OpenAI `cached_tokens`,
 writes are counted as input. `--transcripts <file>` writes every attempt untrimmed (`--transcript-max-chars`
 to cap each item).
 
+Checks are outcome-based (0.2.2): expected values are computed at run time by running each task's reference
+calls on the same mock data, only the arguments the prompt asks for are checked, answers are compared by
+meaning (booleans, numbers, minor units, dates, ids), and call budgets are soft (over budget is reported as
+efficiency, not failure). A suite is accepted only when every task's reference solution passes its own
+checks (calibration; `--calibrate-with <model>` adds a model pass that flags disagreements for review).
+`--max-run-tokens` caps a run's spend. Details, score definitions and the 0.2.1 suite converter
+(`--migrate-suite`) and offline re-grade (`--regrade`): [packages/evals/README.md](packages/evals/README.md).
+
 ## Agent contract
 
 Tool results follow one of two contracts, chosen per session:
