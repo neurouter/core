@@ -64,7 +64,7 @@ describe('neurouter eval (in-process, stub provider)', () => {
     process.env.NEUROUTER_EVAL_LLM = 'stub';
     process.env.NEUROUTER_EXECUTOR_MODE = 'local';
     const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));
-    const r = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--generate', '--counts', '2,1,1,1', '--repeats', '1', '--modes', 'tool,code', '--min-score', '101', '--out', join(dir, 'r.json'), '--md', join(dir, 'r.md'), '--save-suite', join(dir, 's.json')]);
+    const r = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--generate', '--counts', '2,1,1,1', '--repeats', '1', '--modes', 'tool,code', '--min-score', '101', '--out', join(dir, 'r.json'), '--md', join(dir, 'r.md'), '--save-suite', join(dir, 's.json'), '--transcripts', join(dir, 't.json')]);
     delete process.env.NEUROUTER_EXECUTOR_MODE;
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/Headline: \d+\/100/);
@@ -73,6 +73,9 @@ describe('neurouter eval (in-process, stub provider)', () => {
     expect(report.run.provider).toBe('stub');
     expect(readFileSync(join(dir, 'r.md'), 'utf8')).toContain('stub provider');
     expect(existsSync(join(dir, 's.json'))).toBe(true);
+    const attempts = JSON.parse(readFileSync(join(dir, 't.json'), 'utf8')) as Array<{ mode: string; prompt: string; transcript: Array<{ kind: string }>; assertionResults: unknown[] }>;
+    expect(attempts).toHaveLength(10);
+    expect(attempts.every((a) => a.prompt && a.transcript[0]?.kind === 'user' && Array.isArray(a.assertionResults))).toBe(true);
     // the saved suite re-runs deterministically
     process.env.NEUROUTER_EXECUTOR_MODE = 'local';
     const again = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--suite', join(dir, 's.json'), '--repeats', '1', '--modes', 'tool,code', '--out', join(dir, 'r2.json')]);

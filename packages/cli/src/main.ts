@@ -76,6 +76,7 @@ export function buildProgram(): Command {
     .option('--min-score <n>', 'exit 1 when the headline is below')
     .option('--out <file>', 'write the JSON report')
     .option('--md <file>', 'write the Markdown report')
+    .option('--transcripts <file>', 'write every attempt (transcript, observed calls, assertion results) as JSON, for debugging')
     .option('--suggest', 'print fix suggestions', false)
     .option('--embeddings', 'enable local search embeddings', false)
     .action(cmdEval);

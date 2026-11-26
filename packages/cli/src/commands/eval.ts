@@ -20,6 +20,7 @@ interface EvalOpts {
   minScore?: string;
   out?: string;
   md?: string;
+  transcripts?: string;
   suggest?: boolean;
   embeddings?: boolean;
 }
@@ -97,6 +98,7 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     if (o.suggest) for (const x of report.suggestions) console.log(`\nSuggestion (${x.kind}, +${x.predictedDelta} predicted): ${x.rationale}\n${x.overlayPatch}`);
     if (o.out) writeFileSync(o.out, JSON.stringify(report, null, 2));
     if (o.md) writeFileSync(o.md, renderMarkdown(report));
+    if (o.transcripts) writeFileSync(o.transcripts, JSON.stringify(results.map((r) => ({ ...r, prompt: prompts[r.taskKey]?.prompt ?? null })), null, 2));
     if (o.minScore !== undefined && score.headline < Number(o.minScore)) {
       console.error(`headline ${score.headline} is below --min-score ${o.minScore}`);
       process.exitCode = 1;
