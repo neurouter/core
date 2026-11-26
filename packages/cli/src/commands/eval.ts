@@ -21,6 +21,7 @@ interface EvalOpts {
   out?: string;
   md?: string;
   transcripts?: string;
+  transcriptMaxChars?: string;
   suggest?: boolean;
   embeddings?: boolean;
 }
@@ -83,7 +84,10 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     }
     const modes = o.modes.split(',').map((m) => m.trim()) as Array<'tool' | 'code'>;
     console.error(`running ${tasks.length} tasks × ${modes.join('+')} × ${o.repeats} attempt(s)…`);
-    const run = await s.evals.createRun(tenant, { serverId, suiteId, environmentId: envRow.id, models: o.models ? o.models.split(',').map((m) => m.trim()) : null, modes, repeats: Number(o.repeats), trigger: 'cli', createdBy: null, wait: true });
+    // --transcripts writes what the agent saw and said, untrimmed (the console keeps 4,096 chars per item)
+    if (o.transcriptMaxChars !== undefined && !(Number(o.transcriptMaxChars) > 0)) throw new Error('--transcript-max-chars must be a positive number');
+    const transcriptMaxChars = o.transcriptMaxChars !== undefined ? Math.floor(Number(o.transcriptMaxChars)) : o.transcripts ? null : undefined;
+    const run = await s.evals.createRun(tenant, { serverId, suiteId, environmentId: envRow.id, models: o.models ? o.models.split(',').map((m) => m.trim()) : null, modes, repeats: Number(o.repeats), trigger: 'cli', createdBy: null, wait: true, ...(transcriptMaxChars !== undefined ? { transcriptMaxChars } : {}) });
     if (run.status !== 'succeeded') throw new Error(`eval run ${run.status}: ${run.error ?? ''}`);
     const score = s.evals.score(run)!;
     const results = await s.evals.taskResults(tenant, run.id);

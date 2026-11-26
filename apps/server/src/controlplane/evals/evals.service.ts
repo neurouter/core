@@ -93,6 +93,8 @@ export interface CreateRunInput {
   createdBy: string | null;
   /** Run in the background (job) or await completion (CLI). */
   wait?: boolean;
+  /** Characters kept per transcript item (null = untrimmed, CLI `--transcripts`); default 4,096. */
+  transcriptMaxChars?: number | null;
 }
 
 const gz = (v: unknown) => gzipSync(Buffer.from(JSON.stringify(v), 'utf8'));
@@ -326,7 +328,7 @@ export class EvalsService {
         created_at: now,
       })
       .execute();
-    const work = async () => this.executeRun(tenantId, id, { quick, createdBy: input.createdBy });
+    const work = async () => this.executeRun(tenantId, id, { quick, createdBy: input.createdBy, ...(input.transcriptMaxChars !== undefined ? { transcriptMaxChars: input.transcriptMaxChars } : {}) });
     if (input.wait) await work();
     else {
       const jobId = await this.d.jobs.start(tenantId, 'eval_run', { runId: id }, input.createdBy, work);
@@ -348,7 +350,7 @@ export class EvalsService {
     return this.run(tenantId, id);
   }
 
-  private async executeRun(tenantId: string, runId: string, opts: { quick: boolean; createdBy: string | null }): Promise<void> {
+  private async executeRun(tenantId: string, runId: string, opts: { quick: boolean; createdBy: string | null; transcriptMaxChars?: number | null }): Promise<void> {
     const ac = new AbortController();
     this.cancels.set(runId, ac);
     const db = this.d.db;
@@ -385,7 +387,7 @@ export class EvalsService {
         modes,
         repeats: run.repeats,
         judgeModel,
-        settings: { effort, fallbacks: fallbacks === 'default' },
+        settings: { effort, fallbacks: fallbacks === 'default', ...(opts.transcriptMaxChars !== undefined ? { transcriptMaxChars: opts.transcriptMaxChars } : {}) },
         signal: ac.signal,
         hasResult: (k) => existing.has(k),
         openSession: async (ctx) => {

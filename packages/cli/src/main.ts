@@ -79,7 +79,8 @@ export function buildProgram(): Command {
     .option('--min-score <n>', 'exit 1 when the headline is below')
     .option('--out <file>', 'write the JSON report')
     .option('--md <file>', 'write the Markdown report')
-    .option('--transcripts <file>', 'write every attempt (transcript, observed calls, assertion results) as JSON, for debugging')
+    .option('--transcripts <file>', 'write every attempt (full transcript, observed calls, assertion results) as JSON, for debugging')
+    .option('--transcript-max-chars <n>', 'with --transcripts: trim each transcript item (text, tool result) to n characters (default: untrimmed)')
     .option('--suggest', 'print fix suggestions', false)
     .option('--embeddings', 'enable local search embeddings', false)
     .action(async (o) => (await import('./commands/eval.js')).cmdEval(o));
