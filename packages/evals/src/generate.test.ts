@@ -67,5 +67,7 @@ describe('normalizeAssertion', () => {
     expect(normalizeAssertion({ answer_contains: 'octocat' })).toEqual({ type: 'answer_contains', anyOf: ['octocat'] });
     expect(normalizeAssertion({ type: 'no_writes' })).toEqual({ type: 'no_writes' });
     expect(normalizeAssertion({ bogus: 1 })).toEqual({ bogus: 1 });
+    expect(normalizeAssertion({ called: { tool: 'issues_get', argsMatch: { owner: 'octocat', issue_number: 1 }, minTimes: 1 } })).toEqual({ type: 'called', tool: 'issues_get', args: { owner: 'octocat', issue_number: 1 }, minTimes: 1 });
+    expect(normalizeAssertion({ type: 'called', tool: 'x', args: { a: 1 }, argsMatch: 'exact' })).toEqual({ type: 'called', tool: 'x', args: { a: 1 }, argsMatch: 'exact' });
   });
 });

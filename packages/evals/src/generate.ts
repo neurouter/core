@@ -154,9 +154,23 @@ export function normPrompt(p: string): string {
 
 /**
  * Models often write the DSL keyed by type (`{"called":{"tool":"x"}}`, `{"max_calls":1}`, `{"no_writes":true}`,
- * `{"framing":"…"}`) instead of `{"type":"called",…}`; rewrite that form before validation.
+ * `{"framing":"…"}`) instead of `{"type":"called",…}`, and put the arguments to match in `argsMatch`; rewrite those
+ * forms before validation.
  */
 export function normalizeAssertion(a: unknown): unknown {
+  const typed = normalizeKeyed(a);
+  // `called {tool,args?,argsMatch?}` is often read as "argsMatch: the arguments to match"
+  if (typed && typeof typed === 'object' && (typed as Record<string, unknown>).type === 'called') {
+    const c = typed as Record<string, unknown>;
+    if (c.argsMatch && typeof c.argsMatch === 'object' && !Array.isArray(c.argsMatch) && c.args === undefined) {
+      const { argsMatch, ...rest } = c;
+      return { ...rest, args: argsMatch };
+    }
+  }
+  return typed;
+}
+
+function normalizeKeyed(a: unknown): unknown {
   if (!a || typeof a !== 'object' || Array.isArray(a) || 'type' in a) return a;
   const entries = Object.entries(a as Record<string, unknown>);
   if (entries.length !== 1) return a;
