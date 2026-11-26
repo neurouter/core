@@ -1,4 +1,4 @@
-import { GoogleGenAI, type GoogleGenAIInteraction, type Interactions } from '@google/genai';
+import type { GoogleGenAI, GoogleGenAIInteraction, Interactions } from '@google/genai';
 import { LlmError, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmContentBlock, type LlmCreateOptions, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmTextBlock, type LlmToolResultBlock, type LlmToolUseBlock } from './types.js';
 
 type CreateParams = Parameters<GoogleGenAI['interactions']['create']>[0];
@@ -30,17 +30,23 @@ const THINKING_LEVEL = { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhi
  */
 export class GeminiLlmClient implements LlmClient {
   readonly provider = 'gemini' as const;
-  private readonly client: GeminiInteractionsApi;
+  private client?: Promise<GeminiInteractionsApi>;
 
-  constructor(opts: { apiKey: string; client?: GeminiInteractionsApi }) {
+  constructor(private readonly opts: { apiKey: string; client?: GeminiInteractionsApi }) {
     if (!opts.apiKey && !opts.client) throw new LlmKeyError('GEMINI_API_KEY is not configured');
-    this.client = opts.client ?? new GoogleGenAI({ apiKey: opts.apiKey });
+    if (opts.client) this.client = Promise.resolve(opts.client);
+  }
+
+  /** The SDK is imported on first use, not at boot (cold start). */
+  private sdk(): Promise<GeminiInteractionsApi> {
+    return (this.client ??= import('@google/genai').then(({ GoogleGenAI: G }) => new G({ apiKey: this.opts.apiKey }) as GeminiInteractionsApi));
   }
 
   async create(req: LlmRequest, opts: LlmCreateOptions = {}): Promise<LlmResponse> {
+    const client = await this.sdk();
     let res: GeminiInteraction;
     try {
-      res = await this.client.interactions.create(toGeminiRequest(req), opts.signal ? { signal: opts.signal } : undefined);
+      res = await client.interactions.create(toGeminiRequest(req), opts.signal ? { signal: opts.signal } : undefined);
     } catch (err) {
       throw mapGeminiError(err);
     }
