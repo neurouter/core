@@ -1,0 +1,247 @@
+# GitHub REST (api.github.com description, main @ 36dd877) — agent-ready overlay for the Neurouter launch demo.
+#
+# Provenance of every change (see README "Overlay edits"):
+#   [auto]    applied from `neurouter eval --suggest` on the BEFORE run (raw spec, tool mode, gpt-6-luna)
+#   [curated] ported from examples/github/curated.overlay.yaml (hand-written before this suite existed),
+#             WITHOUT its tool/argument renames, so the frozen eval suite runs unchanged
+#   [manual]  edits made for this demo
+#
+# Tool names are the raw generated names on purpose: eval assertions match tools by name.
+overlay: 1
+info:
+  title: GitHub REST, agent-ready
+  notes: Issues, comments, labels, milestones, pull requests, repositories and search (40 tools).
+
+# [manual] Hide the other ~1240 tools (Actions, Codespaces, Copilot, orgs admin, …). 40 visible tools keep
+# `discovery: auto` in full mode (tools listed directly) instead of search_tools + call_tool.
+defaults:
+  hidden: true
+
+tools:
+  # ------------------------------------------------------------------ issues
+  "operationId:issues/list-for-repo":
+    hidden: false
+    pinned: true                                                    # [curated]
+    # [auto] description
+    description: "List issues (and pull requests, which GitHub returns through its issues API) in a repository. By default, returns open items. For the newest-created items, set `sort` to `created` and `direction` to `desc`; for items updated most recently, use `sort: updated` and `direction: desc`. Use `state: all` to include both open and closed items."
+    args:
+      describe:                                                     # [curated]
+        labels: "Comma-separated label names, e.g. bug,ui"
+        state: "open, closed or all"
+        since: "Only issues updated at or after this ISO-8601 time"
+    response:
+      include: ["[].number", "[].title", "[].state", "[].user.login", "[].labels[].name", "[].comments", "[].created_at", "[].updated_at", "[].html_url", "[].pull_request.url"]  # [curated]
+      flatten: { "[].user.login": author }                          # [curated]
+      maxItems: 20                                                  # [auto]
+      maxBytes: 8192                                                # [auto]
+    examples:                                                       # [curated]
+      - title: Open bugs
+        arguments: { owner: octocat, repo: hello-world, labels: bug }
+  "operationId:issues/get":
+    hidden: false
+    pinned: true                                                    # [curated]
+    # [auto] description
+    description: "Fetch an existing issue's details by its repository and issue number, including its title, body, labels, assignees, and state. Use this to inspect an issue before deciding how to handle it; it does not fetch comments or make changes. For comments, use `issues_list_comments`; to edit or close the issue, use `issues_update`. Prefer this over repository or file tools when the request identifies an issue."
+    response:
+      exclude: ["reactions", "performed_via_github_app", "user.gravatar_id"]  # [curated]
+      maxBytes: 8192                                                # [auto] (its maxItems: 20 has no effect on an object and is omitted)
+    examples:                                                       # [curated]
+      - arguments: { owner: octocat, repo: hello-world, issue_number: 1 }
+  "operationId:issues/create":
+    hidden: false
+    description: Create an issue. Only title is required; labels and assignees must already exist in the repository.  # [curated]
+    tags: [external-write]
+  "operationId:issues/update":
+    hidden: false
+    description: Update an issue's title, body, state (open/closed), labels, assignees or milestone. Send only the fields to change.  # [curated]
+  "operationId:issues/list-comments":
+    hidden: false
+    description: List the comments on one issue or pull request, oldest first.  # [curated]
+    response:
+      include: ["[].id", "[].user.login", "[].body", "[].created_at", "[].html_url"]  # [curated]
+      flatten: { "[].user.login": author }                          # [curated]
+      maxItems: 20                                                  # [auto]
+      maxBytes: 8192                                                # [auto]
+  "operationId:issues/list-comments-for-repo":
+    hidden: false
+    description: List issue comments across a whole repository, for finding recent discussion.  # [curated]
+    response:
+      include: ["[].id", "[].user.login", "[].body", "[].created_at", "[].issue_url"]
+      maxItems: 50
+  "operationId:issues/create-comment":
+    hidden: false
+    description: Add a comment to an issue or pull request (pull requests share issue numbers).  # [curated]
+    tags: [external-write]
+  "operationId:issues/get-comment":
+    hidden: false
+    description: Get one issue comment by its id.                   # [curated]
+  "operationId:issues/update-comment":
+    hidden: false
+    description: Replace the body of an issue comment.              # [curated]
+  # [manual] issues/delete-comment is not shown (destructive; keeps the toolset at 40)
+
+  # ------------------------------------------------------------------ labels
+  "operationId:issues/list-labels-for-repo":
+    hidden: false
+    description: List the labels defined in a repository (use the names when labelling issues).  # [curated]
+    response:
+      include: ["[].name", "[].color", "[].description"]
+      maxItems: 100
+  "operationId:issues/get-label":
+    hidden: false
+    description: Get one repository label by name.                  # [curated]
+  "operationId:issues/create-label":
+    hidden: false
+    description: Create a repository label with a name, a hex color (without #) and an optional description.  # [curated]
+  # [manual] issues/delete-label is not shown (destructive; keeps the toolset at 40)
+  "operationId:issues/list-labels-on-issue":
+    hidden: false
+    description: List the labels on one issue.                      # [curated]
+    response:
+      include: ["[].name"]
+  "operationId:issues/add-labels":
+    hidden: false
+    description: Add labels to an issue, keeping the existing ones. Send body={"labels":["bug"]}.  # [curated]
+  "operationId:issues/set-labels":
+    hidden: false
+    description: Replace all labels on an issue. Send body={"labels":[...]}; an empty list removes all labels.  # [curated]
+  "operationId:issues/remove-label":
+    hidden: false
+    description: Remove one label from an issue.                    # [curated]
+
+  # ------------------------------------------------------------------ assignees & milestones
+  "operationId:issues/list-assignees":
+    hidden: false
+    # [auto] description
+    description: "List the users who are eligible to be assigned to issues in a specific repository. This returns the repository's assignable users, not the users currently assigned to a particular issue. Call once with the owner and repository; use pagination only when you need additional results beyond the returned page."
+    response:
+      include: ["[].login"]                                         # [curated]
+  "operationId:issues/add-assignees":
+    hidden: false
+    description: Add assignees (logins) to an issue.                # [curated]
+  "operationId:issues/list-milestones":
+    hidden: false
+    description: List milestones in a repository with their due dates and open/closed issue counts.  # [curated]
+    args:
+      describe:
+        state: "One of \"open\", \"closed\", \"all\", e.g. \"all\"."  # [auto]
+    response:
+      include: ["[].number", "[].title", "[].state", "[].due_on", "[].open_issues", "[].closed_issues"]  # [curated]
+      maxItems: 20                                                  # [auto]
+      maxBytes: 8192                                                # [auto]
+    examples:                                                       # [auto]
+      - title: Look up the v1.0 milestone in octocat/Hello-World.
+        arguments: { owner: octocat, repo: Hello-World, state: all }
+  # [manual] shown: needed to read one milestone after finding its number (not in the curated set)
+  "operationId:issues/get-milestone":
+    hidden: false
+    description: Get one milestone by its number, with due date, state and open/closed issue counts.  # [manual]
+  "operationId:issues/create-milestone":
+    hidden: false
+    description: Create a milestone with a title and an optional ISO-8601 due date.  # [curated]
+
+  # ------------------------------------------------------------------ pull requests
+  "operationId:pulls/list":
+    hidden: false
+    pinned: true                                                    # [curated]
+    description: List pull requests in a repository. Use state=open for active work; filter by base branch with base.  # [curated]
+    response:
+      include: ["[].number", "[].title", "[].state", "[].draft", "[].user.login", "[].head.ref", "[].base.ref", "[].created_at", "[].html_url"]  # [curated]
+      flatten: { "[].user.login": author }                          # [curated]
+      maxItems: 20                                                  # [auto]
+      maxBytes: 8192                                                # [auto]
+  "operationId:pulls/get":
+    hidden: false
+    description: Get one pull request by number, including mergeability, head and base branches.  # [curated]
+  "operationId:pulls/create":
+    hidden: false
+    description: Open a pull request from head (branch) into base (branch).  # [curated]
+    tags: [external-write]
+  "operationId:pulls/update":
+    hidden: false
+    description: Update a pull request's title, body, state or base branch.  # [curated]
+  "operationId:pulls/list-commits":
+    hidden: false
+    description: List the commits in a pull request.                # [curated]
+    response:
+      include: ["[].sha", "[].commit.message", "[].commit.author.name"]
+      maxItems: 100
+  "operationId:pulls/list-files":
+    hidden: false
+    description: List the files changed in a pull request with additions and deletions.  # [curated]
+    response:
+      include: ["[].filename", "[].status", "[].additions", "[].deletions"]
+      maxItems: 100
+  "operationId:pulls/check-if-merged":
+    hidden: false
+    description: Check whether a pull request has been merged.      # [curated]
+  "operationId:pulls/merge":
+    hidden: false
+    description: Merge a pull request. Writes to the base branch.   # [curated]
+    risk: { destructive: true }
+  "operationId:pulls/list-reviews":
+    hidden: false
+    description: List the reviews on a pull request (approved, changes requested, commented).  # [curated]
+    response:
+      include: ["[].id", "[].user.login", "[].state", "[].submitted_at"]
+  "operationId:pulls/create-review":
+    hidden: false
+    description: Submit a review on a pull request with event APPROVE, REQUEST_CHANGES or COMMENT.  # [curated]
+  "operationId:pulls/request-reviewers":
+    hidden: false
+    description: Request reviews from users (logins) or teams on a pull request.  # [curated]
+  "operationId:pulls/list-review-comments":
+    hidden: false
+    description: List inline review comments on a pull request.     # [curated]
+    response:
+      include: ["[].id", "[].user.login", "[].body", "[].path", "[].line"]
+      maxItems: 50
+
+  # ------------------------------------------------------------------ repositories & search
+  "operationId:repos/get":
+    hidden: false
+    description: Get a repository's metadata (default branch, visibility, open issue count, topics).  # [curated]
+    response:
+      include: ["full_name", "description", "default_branch", "visibility", "open_issues_count", "stargazers_count", "topics", "html_url", "pushed_at"]
+  "operationId:repos/list-branches":
+    hidden: false
+    # [auto] description (two suggestions for this tool; the first one is used)
+    description: "List branch names and protection status in a repository. Use this to check whether a named branch exists; it does not return commit history. To show commits from a branch, use repos_list_commits with that branch in `sha`."
+    response:
+      include: ["[].name", "[].protected"]                          # [curated]
+      maxItems: 20                                                  # [auto]
+      maxBytes: 8192                                                # [auto]
+  "operationId:repos/get-branch":
+    hidden: false
+    description: Get one branch with its latest commit.             # [curated]
+  "operationId:repos/list-commits":
+    hidden: false
+    # [auto] description: the two suggestions for this tool, merged into one text [manual merge]
+    description: "List commits in a repository, newest first. To show recent commits from a branch, pass that branch name in `sha`; omit `sha` to use the default branch. Filter by path, author, committer, or date range as needed. Use `per_page` to request the desired number of commits in one response and `page` only to retrieve another page. Use repos_list_branches to list or check branch names, not to retrieve commits."
+    response:
+      include: ["[].sha", "[].commit.message", "[].commit.author.name", "[].commit.author.date"]  # [curated]
+      maxItems: 20                                                  # [auto]
+      maxBytes: 8192                                                # [auto]
+  "operationId:repos/list-tags":
+    hidden: false
+    description: List tags in a repository.                         # [curated]
+    response:
+      include: ["[].name", "[].commit.sha"]
+  # [manual] shown: the README read (not in the curated set)
+  "operationId:repos/get-readme":
+    hidden: false
+    # [auto] description
+    description: "Fetch the preferred README file for a repository. Returns raw contents by default; omit `ref` to use the repository's default branch. Use this for the README specifically, not for listing files or reading an arbitrary repository path."
+  "operationId:search/issues-and-pull-requests":
+    hidden: false
+    pinned: true                                                    # [curated]
+    # [auto] description
+    description: "Search issue and pull-request titles, bodies, and comments using keywords and GitHub qualifiers such as `repo:OWNER/REPO`. Use this first to identify the matching issue and its issue number; do not guess a number or use repository listing as a substitute for targeted search. Results can include pull requests."
+    response:
+      include: ["total_count", "items[].number", "items[].title", "items[].state", "items[].html_url"]  # [curated]
+      maxItems: 20                                                  # [auto]
+      maxBytes: 8192                                                # [auto]
+
+# Not applied: two [auto] composite sketches (do_fetch_return_readme, do_actual_latest_three). Their rationale
+# describes mock-data artifacts (synthetic records), not a missing capability, and both just wrap one tool.
+# The curated composite `triage_stale_issues` and profile `triage` are not ported (they use renamed tools).

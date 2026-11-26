@@ -1,4 +1,4 @@
-import { Assertion, EvalCategory, type ReferenceCall } from '@neurouter/shared';
+import { Assertion, ASSERTION_TYPES, EvalCategory, type ReferenceCall } from '@neurouter/shared';
 import { GENERATOR_MARKER, GENERATOR_PROMPT_VERSION, GENERATOR_SYSTEM, markerMessage } from './prompts.js';
 import { parseJsonText, textOf, type LlmClient } from './llm/types.js';
 import type { EvalTask, GeneratedTask, GeneratorCategoryInput, GenTool } from './types.js';
@@ -152,6 +152,39 @@ export function normPrompt(p: string): string {
   return p.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+/**
+ * Models often write the DSL keyed by type (`{"called":{"tool":"x"}}`, `{"max_calls":1}`, `{"no_writes":true}`,
+ * `{"framing":"…"}`) instead of `{"type":"called",…}`, and put the arguments to match in `argsMatch`; rewrite those
+ * forms before validation.
+ */
+export function normalizeAssertion(a: unknown): unknown {
+  const typed = normalizeKeyed(a);
+  // `called {tool,args?,argsMatch?}` is often read as "argsMatch: the arguments to match"
+  if (typed && typeof typed === 'object' && (typed as Record<string, unknown>).type === 'called') {
+    const c = typed as Record<string, unknown>;
+    if (c.argsMatch && typeof c.argsMatch === 'object' && !Array.isArray(c.argsMatch) && c.args === undefined) {
+      const { argsMatch, ...rest } = c;
+      return { ...rest, args: argsMatch };
+    }
+  }
+  return typed;
+}
+
+function normalizeKeyed(a: unknown): unknown {
+  if (!a || typeof a !== 'object' || Array.isArray(a) || 'type' in a) return a;
+  const entries = Object.entries(a as Record<string, unknown>);
+  if (entries.length !== 1) return a;
+  const [type, v] = entries[0]!;
+  if (!(ASSERTION_TYPES as readonly string[]).includes(type)) return a;
+  if (v && typeof v === 'object' && !Array.isArray(v)) return { type, ...(v as Record<string, unknown>) };
+  if (type === 'max_calls' && typeof v === 'number') return { type, n: v };
+  if (type === 'answer_matches' && typeof v === 'string') return { type, regex: v };
+  if (type === 'judge' && typeof v === 'string') return { type, criterion: v };
+  if (type === 'answer_contains' && (typeof v === 'string' || Array.isArray(v))) return { type, anyOf: Array.isArray(v) ? v : [v] };
+  if (type === 'called' || type === 'not_called') return typeof v === 'string' ? { type, tool: v } : a;
+  return { type };
+}
+
 /** Deterministic validation (§15.2 step 4). */
 export async function validateGenerated(
   g: GeneratedTask,
@@ -164,12 +197,20 @@ export async function validateGenerated(
   if (typeof g.prompt !== 'string' || !g.prompt.trim()) errors.push('empty prompt');
   const assertions: Assertion[] = [];
   for (const a of Array.isArray(g.assertions) ? g.assertions : []) {
-    const p = Assertion.safeParse(a);
+    const p = Assertion.safeParse(normalizeAssertion(a));
     if (p.success) assertions.push(p.data);
     else errors.push(`invalid assertion ${JSON.stringify(a).slice(0, 120)}`);
   }
-  const refs: ReferenceCall[] = Array.isArray(g.reference_calls) ? g.reference_calls.filter((r) => r && typeof r.tool === 'string').map((r) => ({ tool: r.tool, arguments: r.arguments && typeof r.arguments === 'object' ? r.arguments : {} })) : [];
   const visible = new Set(opts.tools.map((t) => t.name));
+  // models sometimes use the code-mode name (`<namespace>.<function>`); map it back to the tool name
+  const byPy = new Map(opts.tools.map((t) => [t.pyName, t.name]));
+  const canon = (t: string): string => {
+    if (visible.has(t) || !t.includes('.')) return t;
+    const tail = t.slice(t.lastIndexOf('.') + 1);
+    return byPy.get(t) ?? (visible.has(tail) ? tail : t);
+  };
+  for (const a of assertions) if (a.type === 'called' || a.type === 'not_called') a.tool = canon(a.tool);
+  const refs: ReferenceCall[] = Array.isArray(g.reference_calls) ? g.reference_calls.filter((r) => r && typeof r.tool === 'string').map((r) => ({ tool: canon(r.tool), arguments: r.arguments && typeof r.arguments === 'object' ? r.arguments : {} })) : [];
   const isKnown = (t: string) => visible.has(t) || t.startsWith('neurouter_') || t === 'search_tools' || t === 'call_tool' || t === 'run_script';
   for (const a of assertions) if ((a.type === 'called' || a.type === 'not_called') && !isKnown(a.tool)) errors.push(`unknown tool ${a.tool}`);
   for (const r of refs) if (!visible.has(r.tool)) errors.push(`unknown reference tool ${r.tool}`);

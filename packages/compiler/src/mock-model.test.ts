@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handleMockRequest } from './mock/handler.js';
 import type { OpenApiMockModel } from './mock/model.js';
+import { generateValue, seededFaker } from './mock/generate.js';
 import { MemoryMockStateStore, MOCK_MAX_ITEMS, MockStore, sampleEntities, type MockNs } from './mock/store.js';
 import { compileFile, compileText, COUNTRIES, GITHUB_SUBSET, NOTES_SPEC, PETSTORE } from './test/fixtures.js';
 
@@ -189,5 +190,13 @@ describe('MemoryMockStateStore (async MockStateStore over MockStore)', () => {
     const big = await handleMockRequest(m, s, n, { method: 'PATCH', path: '/projects/p/notes/2', body: { title: 'x'.repeat(70_000) } });
     expect(big).toMatchObject({ status: 413, body: { code: 'mock_item_too_large' } });
     expect(((await get(m, s, n, '/projects/p/notes/2')).body as { title: string }).title).not.toHaveLength(70_000);
+  });
+});
+
+describe('mock string generation', () => {
+  it('honours a minLength above the 24-character cap (GitHub commit SHAs: minLength 40, maxLength 64)', () => {
+    const ctx = { faker: seededFaker(1), defs: {}, depth: 0, index: 2 };
+    const v = generateValue({ type: 'string', minLength: 40, maxLength: 64, pattern: '^([0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?)$' }, 'commit_sha', ctx) as string;
+    expect(v.length).toBeGreaterThanOrEqual(40);
   });
 });
