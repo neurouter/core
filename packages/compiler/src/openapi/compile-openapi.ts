@@ -4,7 +4,7 @@
 import type { Diagnostic, HttpBinding, HttpParam, JsonSchema, ToolDef, ToolExample } from '@neurouter/shared';
 import { nameFromMethodPath, snakeCase, toToolName, uniquify } from '../naming.js';
 import { escapePointer, isObj, type Obj } from '../util.js';
-import { SchemaResolver } from './schema.js';
+import { OUTPUT_SCHEMA_LIMITS, SchemaResolver } from './schema.js';
 
 const METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head'] as const;
 const SKIPPED = ['options', 'trace'];
@@ -106,6 +106,10 @@ export function compileOpenApi(doc: Obj, opts: { maxTools: number }): OpenApiCom
 
   const drafts: Array<Omit<ToolDef, 'name' | 'pySignature' | 'defHash'> & { baseName: string }> = [];
   let operationCount = 0;
+  // schema budgets (reported once, not per tool)
+  const trimmedInputs: string[] = [];
+  const trimmedOutputs: string[] = [];
+  const droppedOutputs: string[] = [];
   const paths = isObj(doc.paths) ? doc.paths : {};
 
   for (const [path, rawItem] of Object.entries(paths)) {
@@ -153,7 +157,8 @@ export function compileOpenApi(doc: Obj, opts: { maxTools: number }): OpenApiCom
         const where = p.in as HttpParam['in'];
         let arg = snakeCase(name) || 'param';
         if ((snakeCounts.get(arg) ?? 0) > 1) arg = `${where}_${arg}`;
-        const { schema, defs } = resolver.convert(p.schema ?? (isObj(p.content) ? (Object.values(p.content)[0] as Obj | undefined)?.schema : undefined), { drop: 'readOnly' });
+        const { schema, defs, omitted } = resolver.convert(p.schema ?? (isObj(p.content) ? (Object.values(p.content)[0] as Obj | undefined)?.schema : undefined), { drop: 'readOnly' });
+        if (omitted.length) trimmedInputs.push(`${METHOD} ${path}`);
         const prop: Obj = { ...schema };
         if (typeof p.description === 'string' && p.description.trim()) prop.description = cleanDescription(undefined, p.description, '').text;
         if (p.deprecated === true) prop.deprecated = true;
@@ -179,7 +184,8 @@ export function compileOpenApi(doc: Obj, opts: { maxTools: number }): OpenApiCom
           diagnostics.push({ severity: 'warning', code: 'body_unsupported', message: `${METHOD} ${path}: request body types ${Object.keys(rb.content).join(', ')} are not supported; the tool sends no body`, pointer: `${pointer}/requestBody` });
         } else {
           const contentType = (picked.type.endsWith('+json') ? 'application/json' : picked.type) as NonNullable<HttpBinding['body']>['contentType'];
-          const { schema, defs } = resolver.convert(picked.media.schema, { drop: 'readOnly' });
+          const { schema, defs, omitted } = resolver.convert(picked.media.schema, { drop: 'readOnly' });
+          if (omitted.length) trimmedInputs.push(`${METHOD} ${path}`);
           const bodyRequired = rb.required === true;
           Object.assign(rootDefs, defs);
           const bodyProps = isObj(schema.properties) ? (schema.properties as Record<string, JsonSchema>) : null;
@@ -228,12 +234,17 @@ export function compileOpenApi(doc: Obj, opts: { maxTools: number }): OpenApiCom
         const media = pickMedia(res.content, ['application/json', '+json']);
         if (media) {
           responseContentType = media.type;
-          const { schema, defs } = resolver.convert(media.media.schema, { drop: 'writeOnly' });
+          const { schema, defs, omitted, rootBytes } = resolver.convert(media.media.schema, { drop: 'writeOnly', limits: OUTPUT_SCHEMA_LIMITS });
           let out: Obj = schema;
           if (schema.type === 'array') out = { type: 'object', properties: { items: schema }, 'x-neurouter-wrapped': 'items' };
           else if (!(schema.type === 'object' || isObj(schema.properties))) out = { type: 'object', properties: { data: schema }, 'x-neurouter-wrapped': 'data' };
           if (Object.keys(defs).length) out = { ...out, $defs: defs };
-          outputSchema = out;
+          // a root that alone exceeds the budget: no output schema (clients accept any structured result)
+          if (rootBytes > OUTPUT_SCHEMA_LIMITS.maxBytes) droppedOutputs.push(`${METHOD} ${path}`);
+          else {
+            if (omitted.length) trimmedOutputs.push(`${METHOD} ${path}`);
+            outputSchema = out;
+          }
         } else if (isObj(res.content)) {
           responseContentType = Object.keys(res.content)[0] ?? null;
         }
@@ -285,6 +296,14 @@ export function compileOpenApi(doc: Obj, opts: { maxTools: number }): OpenApiCom
       });
     }
   }
+
+  const listed = (xs: string[]) => `${xs.slice(0, 5).join(', ')}${xs.length > 5 ? ` and ${xs.length - 5} more` : ''}`;
+  const kb = (n: number) => `${Math.round(n / 1024)} KB`;
+  if (trimmedOutputs.length)
+    diagnostics.push({ severity: 'info', code: 'output_schema_trimmed', message: `${trimmedOutputs.length} output schema(s) reference more components than fit in ${kb(OUTPUT_SCHEMA_LIMITS.maxBytes)}; the farthest are left open (any value): ${listed(trimmedOutputs)}` });
+  if (droppedOutputs.length)
+    diagnostics.push({ severity: 'info', code: 'output_schema_omitted', message: `${droppedOutputs.length} response schema(s) are larger than ${kb(OUTPUT_SCHEMA_LIMITS.maxBytes)} on their own and are not published as outputSchema: ${listed(droppedOutputs)}` });
+  if (trimmedInputs.length) diagnostics.push({ severity: 'warning', code: 'input_schema_trimmed', message: `${trimmedInputs.length} input schema(s) are too large; deeply nested parts accept any value: ${listed(trimmedInputs)}` });
 
   if (drafts.length > opts.maxTools) {
     diagnostics.push({ severity: 'error', code: 'too_many_tools', message: `The spec has ${drafts.length} operations; the limit is ${opts.maxTools}. Only the first ${opts.maxTools} are compiled.` });

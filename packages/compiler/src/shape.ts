@@ -4,6 +4,7 @@
  */
 import type { ResponseShaping } from '@neurouter/shared';
 import { deleteAt, flattenAt, includePaths, parsePath, replaceAt } from './overlay/paths.js';
+import { defRefName, defsOf, pruneDefs } from './openapi/schema.js';
 import { clone, isObj, jsonBytes } from './util.js';
 
 export const REDACTED_VALUE = { $redacted: 'overlay' } as const;
@@ -104,23 +105,46 @@ export function wrapStructured(value: unknown): Record<string, unknown> {
 type Schema = Record<string, unknown>;
 type Seg = ReturnType<typeof parsePath>[number];
 
-function childSchema(s: Schema | undefined, seg: Seg): Schema | undefined {
-  if (!isObj(s)) return undefined;
-  if (seg.kind === 'each') return isObj(s.items) ? (s.items as Schema) : undefined;
-  return isObj(s.properties) ? ((s.properties as Record<string, Schema>)[seg.key] ?? undefined) : undefined;
+/**
+ * Output schemas may reference shared components (`#/$defs/…`). Shaping edits the schema along the
+ * shaped paths, so a reference on such a path is replaced in place by a copy of its definition
+ * (the root is a private clone), and the other uses of the component stay intact.
+ */
+function inlineRef(s: Schema, defs: Schema): Schema {
+  for (let i = 0; i < 16; i++) {
+    const n = defRefName(s.$ref);
+    if (n === null || !isObj(defs[n])) return s;
+    const { $ref: _r, ...rest } = s;
+    const copy = clone(defs[n] as Schema);
+    for (const k of Object.keys(s)) delete s[k];
+    Object.assign(s, copy, rest);
+    if (!s['x-schema-name'] && !s.title) s['x-schema-name'] = n;
+  }
+  return s;
 }
 
-function projectSchema(s: Schema, paths: Seg[][]): Schema {
+function childSchema(s: Schema | undefined, seg: Seg, defs: Schema): Schema | undefined {
+  if (!isObj(s)) return undefined;
+  inlineRef(s, defs);
+  let child: unknown;
+  if (seg.kind === 'each') child = s.items;
+  else child = isObj(s.properties) ? (s.properties as Record<string, Schema>)[seg.key] : undefined;
+  if (!isObj(child)) return undefined;
+  return inlineRef(child as Schema, defs);
+}
+
+function projectSchema(s: Schema, paths: Seg[][], defs: Schema): Schema {
+  inlineRef(s, defs);
   if (paths.some((p) => p.length === 0)) return s;
   const each = paths.filter((p) => p[0]!.kind === 'each').map((p) => p.slice(1));
   const keys = new Map<string, Seg[][]>();
   for (const p of paths) if (p[0]!.kind === 'key') keys.set((p[0] as { key: string }).key, [...(keys.get((p[0] as { key: string }).key) ?? []), p.slice(1)]);
-  if (each.length && isObj(s.items)) return { ...s, items: projectSchema(s.items as Schema, each) };
+  if (each.length && isObj(s.items)) return { ...s, items: projectSchema(s.items as Schema, each, defs) };
   if (keys.size && isObj(s.properties)) {
     const props: Record<string, Schema> = {};
     for (const [k, sub] of keys) {
       const child = (s.properties as Record<string, Schema>)[k];
-      if (child) props[k] = projectSchema(child, sub);
+      if (child) props[k] = projectSchema(child, sub, defs);
     }
     const req = Array.isArray(s.required) ? (s.required as string[]).filter((r) => r in props) : [];
     const out: Schema = { ...s, properties: props };
@@ -128,14 +152,15 @@ function projectSchema(s: Schema, paths: Seg[][]): Schema {
     else delete out.required;
     return out;
   }
-  if (keys.size && isObj(s.items)) return { ...s, items: projectSchema(s.items as Schema, paths) };
+  if (keys.size && isObj(s.items)) return { ...s, items: projectSchema(s.items as Schema, paths, defs) };
   return s;
 }
 
-function removeSchemaPath(s: Schema, segs: Seg[]): void {
+function removeSchemaPath(s: Schema, segs: Seg[], defs: Schema): void {
   let cur: Schema | undefined = s;
-  for (let i = 0; i < segs.length - 1; i++) cur = childSchema(cur, segs[i]!);
+  for (let i = 0; i < segs.length - 1; i++) cur = childSchema(cur, segs[i]!, defs);
   const last = segs[segs.length - 1];
+  if (cur) inlineRef(cur, defs);
   if (cur && last?.kind === 'key' && isObj(cur.properties)) {
     delete (cur.properties as Record<string, unknown>)[last.key];
     if (Array.isArray(cur.required)) cur.required = (cur.required as string[]).filter((r) => r !== last.key);
@@ -146,26 +171,27 @@ function removeSchemaPath(s: Schema, segs: Seg[]): void {
 export function shapeOutputSchema(schema: Record<string, unknown> | undefined, shaping: ResponseShaping | undefined): Record<string, unknown> | undefined {
   if (!schema || !shaping || (!shaping.include?.length && !shaping.exclude?.length && !shaping.flatten)) return schema;
   const wrapped = typeof schema['x-neurouter-wrapped'] === 'string' ? (schema['x-neurouter-wrapped'] as string) : null;
+  const defs = defsOf(schema) as Schema;
   let root: Schema = clone(wrapped && isObj(schema.properties) ? ((schema.properties as Record<string, Schema>)[wrapped] as Schema) : schema);
   try {
-    if (shaping.include?.length) root = projectSchema(root, shaping.include.map(parsePath));
-    for (const p of shaping.exclude ?? []) removeSchemaPath(root, parsePath(p));
+    if (shaping.include?.length) root = projectSchema(root, shaping.include.map(parsePath), defs);
+    for (const p of shaping.exclude ?? []) removeSchemaPath(root, parsePath(p), defs);
     for (const [p, target] of Object.entries(shaping.flatten ?? {})) {
       const segs = parsePath(p);
       let lastEach = -1;
       segs.forEach((s, i) => (s.kind === 'each' ? (lastEach = i) : null));
       let container: Schema | undefined = root;
-      for (const s of segs.slice(0, lastEach + 1)) container = childSchema(container, s);
+      for (const s of segs.slice(0, lastEach + 1)) container = childSchema(container, s, defs);
       let leaf: Schema | undefined = container;
-      for (const s of segs.slice(lastEach + 1)) leaf = childSchema(leaf, s);
+      for (const s of segs.slice(lastEach + 1)) leaf = childSchema(leaf, s, defs);
       if (container && leaf && isObj(container.properties)) {
         const rel = segs.slice(lastEach + 1);
-        removeSchemaPath(container, rel);
+        removeSchemaPath(container, rel, defs);
         // prune parents left without properties (mirrors flattenAt on values)
         for (let k = rel.length - 1; k >= 1; k--) {
           let parent: Schema | undefined = container;
-          for (const s of rel.slice(0, k)) parent = childSchema(parent, s);
-          if (parent && isObj(parent.properties) && Object.keys(parent.properties).length === 0) removeSchemaPath(container, rel.slice(0, k));
+          for (const s of rel.slice(0, k)) parent = childSchema(parent, s, defs);
+          if (parent && isObj(parent.properties) && Object.keys(parent.properties).length === 0) removeSchemaPath(container, rel.slice(0, k), defs);
           else break;
         }
         (container.properties as Record<string, Schema>)[target] = leaf;
@@ -174,6 +200,6 @@ export function shapeOutputSchema(schema: Record<string, unknown> | undefined, s
   } catch {
     return schema;
   }
-  if (wrapped) return { ...schema, properties: { [wrapped]: root } };
-  return root;
+  if (wrapped) return pruneDefs({ ...schema, properties: { [wrapped]: root } });
+  return pruneDefs(root);
 }

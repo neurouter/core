@@ -4,6 +4,7 @@
  * path params before the collection segment. Plain JSON so it can be stored with a build.
  */
 import type { HttpBinding, JsonSchema, ToolDef } from '@neurouter/shared';
+import { defRefName, defsOf, derefSchema, withDefs } from '../openapi/schema.js';
 import { isObj, type Obj } from '../util.js';
 
 export type MockOpKind = 'list' | 'create' | 'read' | 'replace' | 'update' | 'delete' | 'action';
@@ -62,17 +63,32 @@ export type MockModel = OpenApiMockModel | GraphqlMockModel;
 const isParamSeg = (s: string) => /^\{.+\}$/.test(s);
 const paramName = (s: string) => s.slice(1, -1);
 
+/**
+ * The response schema without the MCP wrapper, with `#/$defs` references followed at the top and the
+ * root's `$defs` attached (so the generator can still resolve nested references).
+ */
 function unwrapOutput(o: JsonSchema | undefined): JsonSchema | null {
   if (!isObj(o)) return null;
+  const defs = defsOf(o);
   const w = o['x-neurouter-wrapped'];
-  if (typeof w === 'string' && isObj(o.properties)) return ((o.properties as Obj)[w] as JsonSchema) ?? null;
+  if (typeof w === 'string' && isObj(o.properties)) {
+    const inner = (o.properties as Obj)[w];
+    return isObj(inner) ? (withDefs(derefSchema(inner, defs), defs) as JsonSchema) : null;
+  }
   return o;
+}
+
+/** Array items of a schema, dereferenced, carrying the root's `$defs`. */
+function itemsOf(s: JsonSchema | null): JsonSchema | null {
+  if (!isObj(s) || !isObj(s.items)) return null;
+  const defs = defsOf(s);
+  return withDefs(derefSchema(s.items, defs), defs) as JsonSchema;
 }
 
 function schemaKey(s: JsonSchema | null | undefined): string | null {
   if (!isObj(s)) return null;
   if (typeof s['x-schema-name'] === 'string') return s['x-schema-name'] as string;
-  return null;
+  return defRefName(s.$ref);
 }
 
 function singular(word: string): string {
@@ -112,7 +128,11 @@ function bodySchema(t: ToolDef): JsonSchema | null {
   const b = t.binding as HttpBinding;
   if (!b.body) return null;
   const props = isObj(t.inputSchema.properties) ? (t.inputSchema.properties as Record<string, JsonSchema>) : {};
-  if (b.body.arg) return props[b.body.arg] ?? null;
+  if (b.body.arg) {
+    const defs = defsOf(t.inputSchema);
+    const s = props[b.body.arg];
+    return s ? (withDefs(derefSchema(s, defs), defs) as JsonSchema) : null;
+  }
   const names = b.body.properties ?? [];
   return { type: 'object', properties: Object.fromEntries(names.filter((n) => n in props).map((n) => [n, props[n]!])), required: ((t.inputSchema.required as string[]) ?? []).filter((r) => names.includes(r)) };
 }
@@ -154,7 +174,7 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
     const read = ts.find((t) => (t.binding as HttpBinding).method === 'GET');
     const listT = byPath.get(collection)?.find((t) => (t.binding as HttpBinding).method === 'GET');
     const listOut = unwrapOutput(listT?.outputSchema);
-    const item = unwrapOutput(read?.outputSchema) ?? (isObj(listOut) && listOut.type === 'array' ? (listOut.items as JsonSchema) : null);
+    const item = unwrapOutput(read?.outputSchema) ?? (isObj(listOut) && listOut.type === 'array' ? itemsOf(listOut) : null);
     ensureResource(collection, item, paramName(last));
   }
   // pass 2: collection paths with GET array (unless it lists a known resource's items: a list alias)
@@ -169,7 +189,7 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
     if (isObj(out) && out.type === 'array') {
       const k = schemaKey(out.items as JsonSchema);
       if (k && pass1Schemas.has(k) && !ts.some((t) => (t.binding as HttpBinding).method === 'POST')) continue;
-      ensureResource(path, (out.items as JsonSchema) ?? null, null);
+      ensureResource(path, itemsOf(out), null);
     }
   }
   const bySchemaName = new Map<string, string>();
@@ -245,7 +265,8 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
         }
       }
       if (isObj(out) && out.type !== 'array' && isObj(out.properties)) {
-        const arrProp = Object.entries(out.properties as Obj).find(([, v]) => isObj(v) && v.type === 'array');
+        const outDefs = defsOf(out);
+        const arrProp = Object.entries(out.properties as Obj).find(([, v]) => isObj(v) && derefSchema(v, outDefs).type === 'array');
         if (arrProp) base.listWrapper = { arrayProp: arrProp[0], schema: out };
       }
     }

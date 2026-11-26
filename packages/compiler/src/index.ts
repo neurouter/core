@@ -1,7 +1,7 @@
 export { COMPILER_VERSION } from './version.js';
 export { compile, detectSpec, buildHash, finalize, agentDefinition, type CompileResult, type DetectedSpec } from './compile.js';
 export { compileOpenApi, cleanDescription, type OpenApiCompileOutput } from './openapi/compile-openapi.js';
-export { SchemaResolver, schemaDepth, countFields } from './openapi/schema.js';
+export { SchemaResolver, schemaDepth, countFields, defsOf, derefSchema, defRefName, withDefs, pruneDefs, INPUT_SCHEMA_LIMITS, OUTPUT_SCHEMA_LIMITS, OMITTED_KEY, type SchemaLimits, type ConvertResult } from './openapi/schema.js';
 export { GRAPHQL_ACCEPT, GRAPHQL_INTROSPECTION_QUERY, readIntrospectionResponse, type IntrospectionOutcome } from './graphql/introspection.js';
 export { compileGraphql, loadGraphqlSchema, selectionFor, buildDocument, documentWithSelection, type GraphqlCompileOutput } from './graphql/compile-graphql.js';
 export { snakeCase, toToolName, nameFromMethodPath, uniquify, pyNamespace, pyIdent, isVerb, PY_KEYWORDS } from './naming.js';
