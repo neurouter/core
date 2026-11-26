@@ -1,0 +1,84 @@
+"""
+Countries API (modelled on trevorblades/countries): continents, countries, languages and states.
+"""
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+"""A continent such as Europe or Asia."""
+type Continent {
+  code: ID!
+  name: String!
+  countries: [Country!]!
+}
+
+"""A country with its ISO code, capital, currency and languages."""
+type Country {
+  code: ID!
+  name: String!
+  native: String!
+  phone: String!
+  capital: String
+  currency: String
+  emoji: String!
+  continent: Continent!
+  languages: [Language!]!
+  states: [State!]!
+  awsRegion: String!
+}
+
+"""A spoken language."""
+type Language {
+  code: ID!
+  name: String!
+  native: String!
+  rtl: Boolean!
+}
+
+"""A state, province or region of a country."""
+type State {
+  code: String
+  name: String!
+  country: Country!
+}
+
+input StringQueryOperatorInput {
+  eq: String
+  ne: String
+  in: [String!]
+  nin: [String!]
+  regex: String
+  glob: String
+}
+
+input CountryFilterInput {
+  code: StringQueryOperatorInput
+  currency: StringQueryOperatorInput
+  continent: StringQueryOperatorInput
+  name: StringQueryOperatorInput
+}
+
+input ContinentFilterInput {
+  code: StringQueryOperatorInput
+}
+
+type Query {
+  """List continents, optionally filtered by continent code."""
+  continents(filter: ContinentFilterInput = {}): [Continent!]!
+  """Get one continent by its two-letter code (e.g. EU)."""
+  continent(code: ID!): Continent
+  """List countries, optionally filtered by code, currency, continent or name."""
+  countries(filter: CountryFilterInput = {}): [Country!]!
+  """Get one country by its ISO 3166-1 alpha-2 code (e.g. FI)."""
+  country(code: ID!): Country
+  """List languages."""
+  languages: [Language!]!
+  """Get one language by its ISO 639-1 code (e.g. fi)."""
+  language(code: ID!): Language
+}
+
+type Mutation {
+  """Suggest a correction to a country's capital (stored for review)."""
+  suggestCapital(code: ID!, capital: String!): Country
+}

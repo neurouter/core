@@ -1,0 +1,44 @@
+{
+  "name": "neurouter-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Neurouter: turn an OpenAPI or GraphQL API into a governed MCP server with code mode, ops tools and evals",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/shared",
+    "packages/compiler",
+    "packages/evals",
+    "apps/executor",
+    "apps/server",
+    "apps/web",
+    "packages/cli"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "npm run dev -w @neurouter/server",
+    "build": "tsc -b && npm run build --if-present -w @neurouter/web",
+    "start": "npm run start -w @neurouter/server",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b && npm run typecheck:tests --workspaces --if-present",
+    "lint": "eslint .",
+    "db:migrate": "npm run db:migrate -w @neurouter/server --",
+    "keys": "npm run keys -w @neurouter/server --",
+    "neurouter": "tsx --conditions=@neurouter/source packages/cli/src/main.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "@vitest/coverage-v8": "5.1.1",
+    "eslint": "10.15.0",
+    "globals": "17.14.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.74.0",
+    "vitest": "5.1.1"
+  }
+}

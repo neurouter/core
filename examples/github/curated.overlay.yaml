@@ -1,0 +1,282 @@
+# Curated GitHub toolset for the launch demo (raw → curated). Works on the full GitHub REST
+# description and on examples/github/github-subset.json.
+overlay: 1
+info:
+  title: GitHub curated
+  notes: Issues, comments, labels, milestones, pull requests and repositories (≈ 40 tools).
+
+# Hide everything that is not explicitly shown below.
+defaults:
+  hidden: true
+
+tools:
+  # ------------------------------------------------------------------ issues
+  "operationId:issues/list-for-repo":
+    name: list_issues
+    hidden: false
+    pinned: true
+    description: |
+      List issues in a repository, newest first. Use state=open for active work. Pull requests also
+      appear in this list; they carry a pull_request field.
+    args:
+      rename: { per_page: limit }
+      defaults: { per_page: 30, state: open }
+      describe:
+        labels: "Comma-separated label names, e.g. bug,ui"
+        state: "open, closed or all"
+        since: "Only issues updated at or after this ISO-8601 time"
+    response:
+      include: ["[].number", "[].title", "[].state", "[].user.login", "[].labels[].name", "[].comments", "[].created_at", "[].updated_at", "[].html_url", "[].pull_request.url"]
+      flatten: { "[].user.login": author }
+      maxItems: 50
+    examples:
+      - title: Open bugs
+        arguments: { owner: octocat, repo: hello-world, labels: bug }
+    tags: [read-sensitive]
+  "operationId:issues/get":
+    name: get_issue
+    hidden: false
+    pinned: true
+    description: Get one issue by its number, including body, labels, assignees and state.
+    response:
+      exclude: ["reactions", "performed_via_github_app", "user.gravatar_id"]
+    examples:
+      - arguments: { owner: octocat, repo: hello-world, issue_number: 1 }
+  "operationId:issues/create":
+    name: create_issue
+    hidden: false
+    pinned: true
+    description: Create an issue. Only title is required; labels and assignees must already exist in the repository.
+    tags: [external-write]
+    examples:
+      - arguments: { owner: octocat, repo: hello-world, title: Crash on save, labels: [bug] }
+  "operationId:issues/update":
+    name: update_issue
+    hidden: false
+    description: Update an issue's title, body, state (open/closed), labels, assignees or milestone. Send only the fields to change.
+  "operationId:issues/list-comments":
+    name: list_issue_comments
+    hidden: false
+    description: List the comments on one issue or pull request, oldest first.
+    args:
+      rename: { per_page: limit }
+      defaults: { per_page: 30 }
+    response:
+      include: ["[].id", "[].user.login", "[].body", "[].created_at", "[].html_url"]
+      flatten: { "[].user.login": author }
+      maxItems: 50
+  "operationId:issues/list-comments-for-repo":
+    name: list_repo_comments
+    hidden: false
+    description: List issue comments across a whole repository, for finding recent discussion.
+    response:
+      include: ["[].id", "[].user.login", "[].body", "[].created_at", "[].issue_url"]
+      maxItems: 50
+  "operationId:issues/create-comment":
+    name: add_issue_comment
+    hidden: false
+    description: Add a comment to an issue or pull request (pull requests share issue numbers).
+    tags: [external-write]
+  "operationId:issues/get-comment":
+    name: get_comment
+    hidden: false
+    description: Get one issue comment by its id.
+  "operationId:issues/update-comment":
+    name: update_comment
+    hidden: false
+    description: Replace the body of an issue comment.
+  "operationId:issues/delete-comment":
+    name: delete_comment
+    hidden: false
+    description: Delete an issue comment. This cannot be undone.
+  # ------------------------------------------------------------------ labels
+  "operationId:issues/list-labels-for-repo":
+    name: list_labels
+    hidden: false
+    description: List the labels defined in a repository (use the names when labelling issues).
+    response:
+      include: ["[].name", "[].color", "[].description"]
+      maxItems: 100
+  "operationId:issues/get-label":
+    name: get_label
+    hidden: false
+    description: Get one repository label by name.
+  "operationId:issues/create-label":
+    name: create_label
+    hidden: false
+    description: Create a repository label with a name, a hex color (without #) and an optional description.
+  "operationId:issues/delete-label":
+    name: delete_label
+    hidden: false
+    description: Delete a repository label. Issues lose the label.
+  "operationId:issues/list-labels-on-issue":
+    name: list_issue_labels
+    hidden: false
+    description: List the labels on one issue.
+    response:
+      include: ["[].name"]
+  "operationId:issues/add-labels":
+    name: add_labels
+    hidden: false
+    description: Add labels to an issue, keeping the existing ones. Send body={"labels":["bug"]}.
+  "operationId:issues/set-labels":
+    name: set_labels
+    hidden: false
+    description: Replace all labels on an issue. Send body={"labels":[...]}; an empty list removes all labels.
+  "operationId:issues/remove-label":
+    name: remove_label
+    hidden: false
+    description: Remove one label from an issue.
+  # ------------------------------------------------------------------ assignees & milestones
+  "operationId:issues/list-assignees":
+    name: list_assignees
+    hidden: false
+    description: List the users who can be assigned to issues in a repository.
+    response:
+      include: ["[].login"]
+  "operationId:issues/add-assignees":
+    name: add_assignees
+    hidden: false
+    description: Add assignees (logins) to an issue.
+  "operationId:issues/list-milestones":
+    name: list_milestones
+    hidden: false
+    description: List milestones in a repository with their due dates and open/closed issue counts.
+    response:
+      include: ["[].number", "[].title", "[].state", "[].due_on", "[].open_issues", "[].closed_issues"]
+  "operationId:issues/create-milestone":
+    name: create_milestone
+    hidden: false
+    description: Create a milestone with a title and an optional ISO-8601 due date.
+  # ------------------------------------------------------------------ pull requests
+  "operationId:pulls/list":
+    name: list_pull_requests
+    hidden: false
+    pinned: true
+    description: List pull requests in a repository. Use state=open for active work; filter by base branch with base.
+    args:
+      rename: { per_page: limit }
+      defaults: { per_page: 30, state: open }
+    response:
+      include: ["[].number", "[].title", "[].state", "[].draft", "[].user.login", "[].head.ref", "[].base.ref", "[].created_at", "[].html_url"]
+      flatten: { "[].user.login": author }
+      maxItems: 50
+  "operationId:pulls/get":
+    name: get_pull_request
+    hidden: false
+    description: Get one pull request by number, including mergeability, head and base branches.
+  "operationId:pulls/create":
+    name: create_pull_request
+    hidden: false
+    description: Open a pull request from head (branch) into base (branch).
+    tags: [external-write]
+  "operationId:pulls/update":
+    name: update_pull_request
+    hidden: false
+    description: Update a pull request's title, body, state or base branch.
+  "operationId:pulls/list-commits":
+    name: list_pull_request_commits
+    hidden: false
+    description: List the commits in a pull request.
+    response:
+      include: ["[].sha", "[].commit.message", "[].commit.author.name"]
+      maxItems: 100
+  "operationId:pulls/list-files":
+    name: list_pull_request_files
+    hidden: false
+    description: List the files changed in a pull request with additions and deletions.
+    response:
+      include: ["[].filename", "[].status", "[].additions", "[].deletions"]
+      maxItems: 100
+  "operationId:pulls/check-if-merged":
+    name: check_pull_request_merged
+    hidden: false
+    description: Check whether a pull request has been merged.
+  "operationId:pulls/merge":
+    name: merge_pull_request
+    hidden: false
+    description: Merge a pull request. Writes to the base branch.
+    risk: { destructive: true }
+  "operationId:pulls/list-reviews":
+    name: list_reviews
+    hidden: false
+    description: List the reviews on a pull request (approved, changes requested, commented).
+    response:
+      include: ["[].id", "[].user.login", "[].state", "[].submitted_at"]
+  "operationId:pulls/create-review":
+    name: create_review
+    hidden: false
+    description: Submit a review on a pull request with event APPROVE, REQUEST_CHANGES or COMMENT.
+  "operationId:pulls/request-reviewers":
+    name: request_reviewers
+    hidden: false
+    description: Request reviews from users (logins) or teams on a pull request.
+  "operationId:pulls/list-review-comments":
+    name: list_review_comments
+    hidden: false
+    description: List inline review comments on a pull request.
+    response:
+      include: ["[].id", "[].user.login", "[].body", "[].path", "[].line"]
+      maxItems: 50
+  # ------------------------------------------------------------------ repositories & search
+  "operationId:repos/get":
+    name: get_repository
+    hidden: false
+    description: Get a repository's metadata (default branch, visibility, open issue count, topics).
+    response:
+      include: ["full_name", "description", "default_branch", "visibility", "open_issues_count", "stargazers_count", "topics", "html_url", "pushed_at"]
+  "operationId:repos/list-branches":
+    name: list_branches
+    hidden: false
+    description: List branches in a repository.
+    response:
+      include: ["[].name", "[].protected"]
+      maxItems: 100
+  "operationId:repos/get-branch":
+    name: get_branch
+    hidden: false
+    description: Get one branch with its latest commit.
+  "operationId:repos/list-commits":
+    name: list_commits
+    hidden: false
+    description: List commits on a branch (sha) or touching a path, newest first.
+    response:
+      include: ["[].sha", "[].commit.message", "[].commit.author.name", "[].commit.author.date"]
+      maxItems: 50
+  "operationId:repos/list-tags":
+    name: list_tags
+    hidden: false
+    description: List tags in a repository.
+    response:
+      include: ["[].name", "[].commit.sha"]
+  "operationId:search/issues-and-pull-requests":
+    name: search_issues
+    hidden: false
+    pinned: true
+    description: Search issues and pull requests with GitHub search syntax, e.g. q="repo:octocat/hello-world is:open label:bug".
+    response:
+      include: ["total_count", "items[].number", "items[].title", "items[].state", "items[].html_url"]
+      maxItems: 30
+
+composites:
+  triage_stale_issues:
+    title: Triage stale issues
+    description: Label open issues with no activity for N days as stale. Returns the numbers labelled.
+    inputSchema:
+      type: object
+      properties:
+        owner: { type: string, description: Repository owner }
+        repo: { type: string, description: Repository name }
+        days: { type: integer, default: 30, description: Days without activity }
+      required: [owner, repo]
+    write: true
+    script: |
+      issues = github.list_issues(owner=owner, repo=repo, state="open", limit=100)
+      stale = [i for i in issues if ops.days_since(i["updated_at"]) > days]
+      for i in stale:
+          github.add_labels(owner=owner, repo=repo, issue_number=i["number"], body={"labels": ["stale"]})
+      return {"labelled": [i["number"] for i in stale]}
+
+profiles:
+  triage:
+    tools: [list_issues, get_issue, create_issue, add_labels, list_labels, triage_stale_issues]

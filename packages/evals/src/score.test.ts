@@ -1,0 +1,73 @@
+import { describe, expect, it } from 'vitest';
+import { preliminaryScore, recommend, scoreCell, scoreRun } from './score.js';
+import { result, task } from './test/fixtures.js';
+import type { CellScore } from './types.js';
+
+const tasks = [
+  task({ key: 's1', category: 'single', referenceCalls: [{ tool: 'a', arguments: {} }] }),
+  task({ key: 'm1', category: 'multi', referenceCalls: [{ tool: 'a', arguments: {} }, { tool: 'b', arguments: {} }] }),
+  task({ key: 'i1', category: 'impossible' }),
+];
+
+describe('scoreCell', () => {
+  it('applies the §15.6 formula with renormalization when correctness is absent', () => {
+    const results = [
+      result({ taskKey: 's1', attempt: 1, passed: true, toolCalls: 1 }),
+      result({ taskKey: 's1', attempt: 2, passed: false, framingPassed: false }),
+      result({ taskKey: 'm1', category: 'multi', attempt: 1, passed: true, toolCalls: 3 }),
+      result({ taskKey: 'm1', category: 'multi', attempt: 2, passed: true, toolCalls: 2 }),
+      result({ taskKey: 'i1', category: 'impossible', attempt: 1, passed: true, toolCalls: 0 }),
+      result({ taskKey: 'i1', category: 'impossible', attempt: 2, passed: true, toolCalls: 0 }),
+    ];
+    const c = scoreCell({ tasks, results, models: ['m'], modes: ['tool'], lintScore: 80 }, 'm', 'tool');
+    const by = Object.fromEntries(c.components.map((x) => [x.key, x.score]));
+    expect(by.success).toBeCloseTo(0.75); // (0.5 + 1) / 2
+    expect(by.impossible).toBe(1);
+    // passed: s1 (2/2=1), m1 (3/4, 3/3=1), i1 (1/1 ×2) → mean(1, .75, 1, 1, 1)
+    expect(by.efficiency).toBeCloseTo(0.95);
+    expect(by.framing).toBeCloseTo(5 / 6);
+    expect(by.quality).toBe(0.8);
+    expect(by.stability).toBeCloseTo(2 / 3);
+    expect(by.correctness).toBeUndefined();
+    const expected = (0.45 * 0.75 + 0.1 * 1 + 0.1 * 0.95 + 0.05 * (5 / 6) + 0.2 * 0.8 + 0.1 * (2 / 3)) / 1.0;
+    expect(c.score).toBe(Math.round(100 * expected));
+    expect(c.flakyTasks).toBe(1);
+    const withCorr = scoreCell({ tasks, results, models: ['m'], modes: ['tool'], lintScore: 80, correctness: 0.5 }, 'm', 'tool');
+    expect(withCorr.score).toBe(Math.round((100 * (expected + 0.1 * 0.5)) / 1.1));
+  });
+
+  it('excludes fallback-served attempts; >20% excluded → degraded confidence', () => {
+    const results = [result({ taskKey: 's1', passed: true }), result({ taskKey: 's1', attempt: 2, passed: false, fallbackUsed: true }), result({ taskKey: 's1', attempt: 3, passed: false, fallbackUsed: true })];
+    const s = scoreRun({ tasks: [tasks[0]!], results, models: ['m'], modes: ['tool'], lintScore: 100 });
+    expect(s.cells[0]!.excludedFallback).toBe(2);
+    expect(s.cells[0]!.components.find((x) => x.key === 'success')!.score).toBe(1);
+    expect(s.confidence).toBe('degraded');
+  });
+});
+
+const cell = (mode: 'tool' | 'code', score: number, multi: number, tokens = 1000): CellScore => ({ model: 'm', mode, score, components: [], successRate: multi, categorySuccess: { multi, single: mode === 'tool' ? 1 : 0.9 }, avgTokens: tokens, avgCalls: 1, avgLatencyMs: 1, avgTokensMulti: tokens, flakyTasks: 0, attempts: 1, excludedFallback: 0, best: false });
+
+describe('recommend', () => {
+  it('picks the higher cell', () => expect(recommend([cell('tool', 60, 0.5), cell('code', 80, 0.9, 500)]).mode).toBe('code'));
+  it('ties (< 3 pts) go to tool unless code multi success is ≥ 10 pts higher', () => {
+    expect(recommend([cell('tool', 70, 0.5), cell('code', 72, 0.55)]).mode).toBe('tool');
+    expect(recommend([cell('tool', 70, 0.5), cell('code', 71, 0.6)]).mode).toBe('code');
+  });
+  it('generates the recommendation text', () => {
+    const r = recommend([cell('tool', 60, 0.5, 2000), cell('code', 80, 0.9, 1000)]);
+    expect(r.text).toBe('code mode: +40 pts success, −50% tokens on multi-step tasks; tool mode is better for single lookups');
+  });
+  it('single mode measured', () => expect(recommend([cell('tool', 60, 0.5)]).mode).toBe('tool'));
+});
+
+describe('scoreRun', () => {
+  it('headline = best mode of the primary model; bands', () => {
+    const results = [result({ taskKey: 's1', mode: 'tool', passed: false }), result({ taskKey: 's1', mode: 'code', passed: true }), result({ taskKey: 's1', model: 'other', mode: 'tool', passed: true })];
+    const s = scoreRun({ tasks: [tasks[0]!], results, models: ['m', 'other'], modes: ['tool', 'code'], lintScore: 90 });
+    expect(s.headline).toBe(s.modeScores.code);
+    expect(s.cells.filter((c) => c.best).map((c) => `${c.model}/${c.mode}`)).toEqual(['m/code', 'other/tool']);
+    expect(s.band).toBe(s.headline >= 90 ? 'excellent' : s.headline >= 75 ? 'ready' : s.headline >= 50 ? 'needs_work' : 'not_ready');
+    expect(s.confidence).toBe('measured');
+  });
+  it('preliminary score = lint', () => expect(preliminaryScore({ score: 48.6 })).toEqual({ score: 49, band: 'not_ready', confidence: 'preliminary' }));
+});

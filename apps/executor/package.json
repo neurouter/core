@@ -1,0 +1,33 @@
+{
+  "name": "@neurouter/executor",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@neurouter/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "neurouter-executor": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+    "typecheck:tests": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "dev": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@pydantic/monty": "1.7.0",
+    "zod": "4.6.7"
+  }
+}

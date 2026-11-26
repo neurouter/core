@@ -1,0 +1,31 @@
+# Default local config: the Swagger Petstore (OpenAPI 3.0) against the in-process mock.
+#   npx neurouter serve --config neurouter.example.yaml
+# MCP endpoint: http://localhost:3000/mcp/petstore/dev   (create a key: npx neurouter keys create --server petstore --env dev)
+version: 1
+instance:
+  name: Neurouter (local)
+settings:
+  codeMode: { enabled: true }
+servers:
+  - slug: petstore
+    name: Swagger Petstore
+    description: Pets, orders and users of the classic Petstore sample API
+    spec:
+      path: ./examples/petstore/openapi.yaml
+    exposure:
+      mode: auto
+      discovery: auto
+    publicReport: true
+    environments:
+      - slug: dev
+        kind: dev
+        baseUrl: "mock:"
+        writes: { enabled: true }
+        codeMode: true
+      - slug: prod
+        kind: prod
+        baseUrl: "mock:"
+        writes:
+          enabled: true
+          confirm: elicit
+        codeMode: true

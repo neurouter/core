@@ -1,0 +1,124 @@
+import type { FastifyInstance } from 'fastify';
+import pg from 'pg';
+import { buildApp } from './app.js';
+import { createServices, initServices, type ServiceInputs, type Services } from './deps.js';
+import { registerJobs } from './jobs.js';
+import { ConfigError, loadConfig, loadDotenv, type Config } from './kernel/config/load.js';
+import { MemoryCoordination } from './kernel/coordination/memory.js';
+import { PostgresCoordination } from './kernel/coordination/postgres.js';
+import type { CoordinationStore } from './kernel/coordination/types.js';
+import { createDatabases, migrateAll } from './kernel/db/index.js';
+import { redactDatabaseUrl } from './kernel/db/url.js';
+import { JobScheduler } from './kernel/jobs/scheduler.js';
+import { systemClock } from './kernel/lib/clock.js';
+import { createLogger } from './kernel/lib/logger.js';
+import { SERVER_VERSION } from './version.js';
+import { routePlugins } from './routes.js';
+
+export { ConfigError };
+
+export interface StartOptions {
+  /** Environment source (default `process.env`, with `.env` loaded outside production). */
+  env?: Record<string, string | undefined>;
+  /** Listen (default true); false = build only (tests, `inject`). */
+  listen?: boolean;
+  /** Overrides for service construction (tests). */
+  services?: Partial<Pick<ServiceInputs, 'upstreamFetch' | 'outboundFetch' | 'embedder' | 'executor' | 'defaultMetrics'>>;
+  /** Start the background job scheduler (default true when listening). */
+  jobs?: boolean;
+  loadDotenv?: boolean;
+}
+
+export interface RunningServer {
+  app: FastifyInstance;
+  services: Services;
+  config: Config;
+  /** Base URL actually listened on (with the real port). */
+  url: string;
+  close(): Promise<void>;
+}
+
+/**
+ * Boot sequence (ADAPT Hub main.ts): config → databases → migrations → coordination → services →
+ * neurouter.yaml reconcile → app → listen → jobs. Shared by `main.ts`, `npx neurouter serve` and
+ * the in-process `npx neurouter eval`.
+ */
+export async function startServer(opts: StartOptions = {}): Promise<RunningServer> {
+  if (opts.loadDotenv !== false && !opts.env) loadDotenv();
+  const config = loadConfig(opts.env ?? process.env);
+  const logger = createLogger({ level: config.env.LOG_LEVEL, pretty: config.env.LOG_PRETTY, instanceId: config.instanceId });
+  for (const w of config.warnings) logger.warn(w);
+  const dbs = createDatabases({ databaseUrl: config.databaseUrl, auditDatabaseUrl: config.auditDatabaseUrl, poolMax: config.env.DB_POOL_MAX, auditPoolMax: config.env.AUDIT_DB_POOL_MAX, onWarn: (msg, err) => logger.warn({ err }, msg) });
+  logger.info({ dialect: dbs.main.dialect, database: redactDatabaseUrl(config.databaseUrl) }, 'database configured');
+  if (config.env.MIGRATE_ON_START) {
+    const applied = await migrateAll(dbs, { embeddingDims: config.env.EMBEDDINGS_DIMS });
+    if (applied.main.length + applied.audit.length) logger.info({ main: applied.main, audit: applied.audit }, 'migrations applied');
+  }
+  let coordination: CoordinationStore = new MemoryCoordination(systemClock);
+  if (config.env.COORDINATION_BACKEND === 'postgres' || (config.env.COORDINATION_BACKEND === 'auto' && dbs.main.dialect === 'postgres')) {
+    if (dbs.main.dialect !== 'postgres') throw new Error('COORDINATION_BACKEND=postgres requires a Postgres DATABASE_URL');
+    const pgc = new PostgresCoordination(dbs.main.db, systemClock, () => new pg.Client({ connectionString: config.databaseUrl, application_name: 'neurouter-listen' }), logger);
+    await pgc.start();
+    coordination = pgc;
+  }
+  // auth.externalAs comes from neurouter.yaml (pre-parsed so the authenticator can be built with it)
+  if (config.env.NEUROUTER_CONFIG && config.env.NEUROUTER_CONFIG_MODE !== 'console') {
+    try {
+      const { readFileSync } = await import('node:fs');
+      const { parseConfigYaml } = await import('./controlplane/config-sync/reconcile.js');
+      const p = parseConfigYaml(readFileSync(config.env.NEUROUTER_CONFIG, 'utf8'));
+      const ext = p.config?.auth?.externalAs;
+      if (ext) config.externalAs = { issuer: ext.issuer, ...(ext.jwksUri ? { jwksUri: ext.jwksUri } : {}), audience: ext.audience ?? 'auto', requiredScopes: ext.requiredScopes ?? [] };
+    } catch {
+      // reported by the reconcile below
+    }
+  }
+  const services = createServices({ config, logger, dbs, clock: systemClock, coordination, version: SERVER_VERSION, ...(opts.services ?? {}) });
+  await initServices(services);
+  if (config.env.NEUROUTER_CONFIG && config.env.NEUROUTER_CONFIG_MODE !== 'console') {
+    const r = await services.configSync.loadFile(config.env.NEUROUTER_CONFIG);
+    if (r.ok) logger.info({ path: config.env.NEUROUTER_CONFIG, servers: r.servers, environments: r.environments }, 'neurouter.yaml applied');
+    else for (const d of r.diagnostics) logger.error({ line: d.line, code: d.code }, `neurouter.yaml: ${d.message}`);
+  }
+  const app = await buildApp({
+    config,
+    logger,
+    dbs,
+    auditStore: services.auditStore,
+    clock: systemClock,
+    version: SERVER_VERSION,
+    metrics: services.metrics,
+    readinessInfo: {
+      executor: async () => (services.executorHealth.healthy ? { ok: true, detail: services.executorHealth.last?.montyVersion ?? '' } : { ok: false, error: config.env.NEUROUTER_EXECUTOR_MODE === 'off' ? 'code mode off' : (services.executorHealth.last?.detail ?? 'executor unavailable') }),
+      embedder: async () => ({ ok: services.embedder.status() !== 'error', detail: services.embedder.status() }),
+    },
+    plugins: routePlugins(services),
+  });
+  const listen = opts.listen ?? true;
+  let url = config.publicUrl;
+  if (listen) {
+    const addr = await app.listen({ host: config.env.HOST, port: config.env.PORT });
+    url = addr.replace('[::1]', 'localhost').replace('0.0.0.0', 'localhost');
+  } else await app.ready();
+  const scheduler = new JobScheduler(coordination, config.instanceId, logger);
+  registerJobs(scheduler, services);
+  if (opts.jobs ?? listen) scheduler.start();
+  if (services.embedder.status() === 'idle') services.embedder.warmUp();
+  logger.info({ publicUrl: config.publicUrl, version: SERVER_VERSION }, 'neurouter server ready');
+  let closed = false;
+  return {
+    app,
+    services,
+    config,
+    url,
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      await app.close();
+      await scheduler.stop();
+      await services.shutdown();
+      await coordination.close();
+      await dbs.close();
+    },
+  };
+}
