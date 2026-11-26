@@ -80,7 +80,7 @@ export function pyIdent(name: string): string {
 }
 
 const VERBS = new Set(
-  'get list create update delete remove add set find search upload download login logout log place check fetch read write put patch post replace start stop run cancel close open merge move copy rename archive unarchive restore enable disable lock unlock approve reject request submit send mark star unstar follow unfollow watch block unblock transfer sync generate render compare review dismiss revoke rotate reset test verify validate count export import invite accept decline assign unassign label unlabel publish unpublish pin unpin subscribe unsubscribe register deregister rerun retry resolve reopen convert redeliver ping list_all query mutate edit apply calculate compute triage show describe return retrieve lookup look summarize'.split(
+  'get list create update delete remove add set find search upload download change refund track charge ship deliver pay capture authorize login logout log place check fetch read write put patch post replace start stop run cancel close open merge move copy rename archive unarchive restore enable disable lock unlock approve reject request submit send mark star unstar follow unfollow watch block unblock transfer sync generate render compare review dismiss revoke rotate reset test verify validate count export import invite accept decline assign unassign label unlabel publish unpublish pin unpin subscribe unsubscribe register deregister rerun retry resolve reopen convert redeliver ping list_all query mutate edit apply calculate compute triage show describe return retrieve lookup look summarize'.split(
     ' ',
   ),
 );

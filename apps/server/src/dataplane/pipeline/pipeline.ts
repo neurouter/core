@@ -41,7 +41,7 @@ import type { ArgValidator } from './arg-validate.js';
 import { principalUserId, traceIdOf, type RunContext } from './context.js';
 import { errorResult, type ErrorEvents } from './errors.js';
 import { evaluatePolicies } from './policy.js';
-import { writePlan, type ConfirmProblem, type ConfirmTokens } from './confirm-token.js';
+import { readBackView, writePlan, type ConfirmProblem, type ConfirmTokens, type WritePlan } from './confirm-token.js';
 
 export interface PolicyStep {
   step: PolicyStepName;
@@ -76,7 +76,7 @@ export interface InvokeOptions {
   /** Collect planned writes (dry-run scripts). */
   planned?: PlannedChange[];
   /** contract 2, scripts (`ops.pages`): start at this upstream page position */
-  position?: Exclude<CursorPayload, { k: 'r' }>;
+  position?: CursorPayload;
 }
 
 export interface ToolOutcome {
@@ -381,7 +381,7 @@ export class Pipeline {
     // 8a contract 2: `dry_run: true` returns the plan; outside prod a destructive tool's plan carries the confirmed call
     if (own?.dryRun && tool.risk.write) {
       step('dry_run', 'pass', 'dry_run argument');
-      const p = writePlan(tool, agentArgs);
+      const p = await this.labelled(ctx, tool, agentArgs, writePlan(tool, agentArgs));
       const value = { plan: p, ...(tokenGate && confirmName ? { next: { tool: tool.name, args: { ...bound, [confirmName]: this.d.confirms!.mint(binding) } } } : {}) };
       record('dry_run', 'ok', { output: value });
       return { ok: true, unknown: false, decision: 'dry_run', status: 'ok', value, result: v1Result(compactJson(value), value, { ...metaBase(), [META_DRY_RUN]: true }), auditId, tool, draft: okDraft(value, { flags: ['dry_run'], write: true, meta: metaBase() }) };
@@ -400,8 +400,8 @@ export class Pipeline {
 
     // 9a contract 2 (D5), outside prod: a destructive call needs a confirm token from its own plan; script runs
     // need the call in the plan approved with a token (run_script answers the token round itself)
-    const confirmationRequired = (problem: ConfirmProblem | 'script' | null): ToolOutcome => {
-      const p = writePlan(tool!, agentArgs);
+    const confirmationRequired = async (problem: ConfirmProblem | 'script' | null): Promise<ToolOutcome> => {
+      const p = problem === 'script' ? writePlan(tool!, agentArgs) : await this.labelled(ctx, tool!, agentArgs, writePlan(tool!, agentArgs));
       const why = problem === 'expired' ? 'The confirm token expired (5 minutes). ' : problem === 'used' ? 'The confirm token was already used. ' : problem === 'mismatch' || problem === 'malformed' ? 'The confirm token is for another call. ' : '';
       const script = problem === 'script';
       const token = script ? null : this.d.confirms!.mint(binding);
@@ -449,7 +449,7 @@ export class Pipeline {
               meta: { [META_PLANNED_CHANGES]: [change] },
               audit: { output: { planned: [change] } },
               spec: { text: `${tool.name} needs your user's approval in ${where} and this client cannot ask; nothing changed. Show data.plan to the user.`, ...(ctx.contract === 2 && ctx.bundle.server.opsTools.end_task ? { next: [{ tool: 'neurouter_report', args: { kind: 'blocked', text: `needs approval for ${tool.name} in ${where}` } }] } : {}) },
-              data: { plan: ctx.contract === 2 ? writePlan(tool, agentArgs) : { tool: change.tool, method: change.method, path: change.path, args: change.arguments } },
+              data: { plan: ctx.contract === 2 ? await this.labelled(ctx, tool, agentArgs, writePlan(tool, agentArgs)) : { tool: change.tool, method: change.method, path: change.path, args: change.arguments } },
             });
           }
           return fail('denied_confirmation', 'blocked', 'confirmation_unsupported', `This client cannot ask the user to confirm writes in ${where}; ${tool.name} was not called.`, {}, { spec: { text: `This client cannot ask the user to confirm writes in ${where}; ${tool.name} was not called. Nothing changed.` } });
@@ -465,6 +465,9 @@ export class Pipeline {
 
     // contract 2: the rest of a list Neurouter cut is served from the stored result (no upstream call)
     if (position?.k === 'r') return this.storedPage(ctx, tool, rawArgs, agentArgs, position, plan!, own?.fields, { record, fail, metaBase, step, decision });
+
+    // contract 2, overlay readBack: the target as it is before the write (read through the pipeline, its own audit row)
+    const before = tool.risk.write && tool.readBack && !ctx.dryRun ? await this.readBack(ctx, tool, agentArgs) : null;
 
     // 10–11 routing, credentials, request build, invoke
     if (tool.kind === 'composite') {
@@ -592,6 +595,15 @@ export class Pipeline {
     if (Object.keys(keep).length) meta[META_UPSTREAM_HEADERS] = keep;
     if (upstream.headers['retry-after']) meta[META_RETRY_AFTER_MS] = Number(upstream.headers['retry-after']) * 1000;
 
+    // contract 2, overlay readBack: data = {before, after, response} (the values an agent verifies), wrote = the label
+    let wroteLabel: string | undefined;
+    if (before) {
+      const after = await this.readBack(ctx, tool, agentArgs);
+      const keys = Object.keys(before.values);
+      value = { before: before.values, after: after ? Object.fromEntries(keys.map((k) => [k, after.values[k] ?? null])) : null, response: value };
+      wroteLabel = (after ?? before).label;
+    }
+
     // 13 record
     record(decision, 'ok', { ...upstreamMeta, output: value });
     try {
@@ -601,7 +613,7 @@ export class Pipeline {
     }
     void urlTemplate;
     const handle = (meta[META_RESULT_HANDLE] as string | undefined) ?? null;
-    const draft = this.successDraft(ctx, tool, rawArgs, value, shaped?.truncated, { signals, handle, plan }, upstream.headers, decision, metaBase());
+    const draft = this.successDraft(ctx, tool, rawArgs, value, shaped?.truncated, { signals, handle, plan }, upstream.headers, decision, metaBase(), wroteLabel);
     if (left) draft.left = left;
     return { ok: true, unknown: false, decision, status: 'ok', value, result: v1Result(text, wrapStructured(value), meta), auditId, tool, draft, ...(signals ? { paging: { more: signals.more, next: signals.next } } : {}) };
   }
@@ -670,7 +682,7 @@ export class Pipeline {
   }
 
   /** Contract-neutral success: `page` on list tools, `truncated` for clipped objects, flags for instruction-like text, `wrote` after writes. */
-  private successDraft(ctx: RunContext, tool: ToolDef, args: Record<string, unknown>, value: unknown, cut: Parameters<typeof listView>[3], p: { signals: NextSignals | null; handle: string | null; plan: PagingPlan | null }, headers: Record<string, string>, decision: AuditDecision, meta: Record<string, unknown>): Draft {
+  private successDraft(ctx: RunContext, tool: ToolDef, args: Record<string, unknown>, value: unknown, cut: Parameters<typeof listView>[3], p: { signals: NextSignals | null; handle: string | null; plan: PagingPlan | null }, headers: Record<string, string>, decision: AuditDecision, meta: Record<string, unknown>, wroteLabel?: string): Draft {
     void headers;
     const extra: Omit<Draft, 'ok' | 'data'> = { meta };
     const own = p.plan ? [p.plan.names.cursor, p.plan.names.fields].filter((x): x is string => Boolean(x)) : [];
@@ -687,7 +699,7 @@ export class Pipeline {
     }
     if (tool.risk.write && decision !== 'dry_run') {
       const id = pathId(tool, args)?.value ?? (value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).id : undefined);
-      extra.wrote = `${tool.name} → ${nounOf(tool)}${id !== undefined && id !== null && typeof id !== 'object' ? ` ${String(id).slice(0, 60)}` : ''}`;
+      extra.wrote = wroteLabel ? `${tool.name} → ${wroteLabel}`.slice(0, 120) : `${tool.name} → ${nounOf(tool)}${id !== undefined && id !== null && typeof id !== 'object' ? ` ${String(id).slice(0, 60)}` : ''}`;
     }
     return okDraft(value, extra);
   }
@@ -707,6 +719,31 @@ export class Pipeline {
     const method = tool.binding.type === 'http' ? tool.binding.method : tool.binding.type === 'graphql' ? 'POST' : 'SCRIPT';
     const path = tool.binding.type === 'http' ? tool.binding.pathTemplate : tool.binding.type === 'graphql' ? `graphql:${tool.binding.operationType}` : tool.name;
     return { tool: tool.name, method, path, arguments: args, wouldConfirm, argsHash };
+  }
+
+  /**
+   * Contract 2, overlay `readBack` (tool mode): reads the write's target with the declared read tool (same required
+   * arguments) through the pipeline. Null when not configured, in scripts, or when the read fails.
+   */
+  private async readBack(ctx: RunContext, tool: ToolDef, args: Record<string, unknown>): Promise<{ label: string; values: Record<string, unknown> } | null> {
+    const rb = tool.readBack;
+    if (!rb || ctx.contract !== 2 || ctx.via === 'script') return null;
+    const r = ctx.bundle.build.tools.find((x) => x.name === rb.tool);
+    if (!r || r.risk.write) return null;
+    const a: Record<string, unknown> = {};
+    for (const k of Array.isArray(r.inputSchema.required) ? (r.inputSchema.required as string[]) : []) {
+      if (args[k] === undefined) return null;
+      a[k] = args[k];
+    }
+    const out = await this.invoke(ctx, r.name, a);
+    if (!out.ok || !out.value || typeof out.value !== 'object') return null;
+    return readBackView(tool, args, out.value, rb.label);
+  }
+
+  /** A write plan with the target's human label and current values (overlay readBack, contract 2). */
+  private async labelled(ctx: RunContext, tool: ToolDef, args: Record<string, unknown>, p: WritePlan): Promise<WritePlan> {
+    const rb = await this.readBack(ctx, tool, args);
+    return rb ? { ...p, target: rb.label, before: rb.values } : p;
   }
 
   /** Contract 2: the prod approval prompt also says what the write does and whether it can be undone. */

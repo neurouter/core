@@ -1,0 +1,96 @@
+## list_orders
+Lists orders, newest first. Filter by status or customer.
+Related: get_order (one order by id), create_order (create an order).
+Args: status, customer_id (all optional).
+Example: list_orders({"limit":5})
+Pages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=["id","customerId","status"].
+
+## create_order
+Creates a pending order for a customer with one or more line items. Writes data.
+Related: get_order (one order by id), list_orders (find orders).
+Args: customerId, items (required); shippingAddress.
+Example: create_order({"customerId":"customer_1","items":[{"sku":"product_1","quantity":1}]})
+Dry run: dry_run=true returns the plan.
+
+## get_order
+Returns one order with its line items, totals and status.
+Related: list_orders (find orders), create_order (create an order).
+Args: order_id (required).
+Example: get_order({"order_id":"order_1"})
+
+## update_order
+Changes the shipping address or the note of an order that has not shipped yet. Writes data.
+Related: list_orders (find orders), get_order (one order by id).
+Args: order_id (required); shippingAddress, note.
+Example: update_order({"order_id":"order_1"})
+Dry run: dry_run=true returns the plan.
+
+## cancel_order
+Cancels an order that has not shipped. Paid orders are refunded in full automatically. Irreversible.
+Related: get_order (one order by id), update_order (change an order).
+Args: order_id (required); reason.
+Example: cancel_order({"order_id":"order_1"})
+Dry run: dry_run=true returns the plan; then call with confirm from error.next.
+
+## list_order_refunds
+Lists the refunds issued for one order.
+Related: create_refund (create a refund).
+Args: order_id (required).
+Example: list_order_refunds({"order_id":"order_1"})
+Pages: cursor=page.next_cursor. Fields: fields=["id","orderId","amount"].
+
+## create_refund
+Refunds part or all of a paid order. The amount cannot exceed what is left to refund. Irreversible.
+Related: get_order (one order by id), list_order_refunds (find refunds).
+Args: order_id, amount, reason (required).
+Example: create_refund({"order_id":"order_1","amount":0.01,"reason":"damaged"})
+Dry run: dry_run=true returns the plan; then call with confirm from error.next.
+
+## list_customers
+Lists customers. Search by name or email with q.
+Related: get_customer (one customer by id), create_customer (create a customer).
+Args: q (all optional).
+Example: list_customers({"limit":5})
+Pages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=["id","name","email"].
+
+## create_customer
+Creates a customer account. Writes data.
+Related: get_customer (one customer by id), list_customers (find customers).
+Args: name, email (required); phone.
+Example: create_customer({"name":"Example","email":"ada@example.com"})
+Dry run: dry_run=true returns the plan.
+
+## get_customer
+Returns one customer with their lifetime order count and spend.
+Related: list_customers (find customers), create_customer (create a customer).
+Args: customer_id (required).
+Example: get_customer({"customer_id":"customer_1"})
+
+## list_shipments
+Lists shipments, optionally only those of one order.
+Related: get_shipment (one shipment by id).
+Args: order_id (all optional).
+Example: list_shipments({"limit":5})
+Pages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=["id","orderId","carrier"].
+
+## get_shipment
+Returns the carrier, tracking number and delivery status of a shipment.
+Related: list_shipments (find shipments).
+Args: shipment_id (required).
+Example: get_shipment({"shipment_id":"shipment_1"})
+
+## list_products
+Lists products in the catalog with price and stock.
+Related: get_product (one product by id).
+Args: q (all optional).
+Example: list_products({"limit":5})
+Pages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=["sku","name","price"].
+
+## get_product
+Returns one product with its price and stock level.
+Related: list_products (find products).
+Args: sku (required).
+Example: get_product({"sku":"product_1"})
+
+## count_orders
+Count the orders with a status.

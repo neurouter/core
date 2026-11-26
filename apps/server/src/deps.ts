@@ -317,6 +317,7 @@ export function createServices(input: ServiceInputs) {
   });
   const http = new HttpInvoker(upstreamFetchFor, now);
   const confirms = new ConfirmTokens(db, keyring, now);
+  const cursors = CursorCodec.fromKeyring(keyring, now);
   const pipeline = new Pipeline({
     audit,
     tracker,
@@ -332,7 +333,7 @@ export function createServices(input: ServiceInputs) {
     publicUrl: config.publicUrl,
     version: input.version,
     log: logger,
-    cursors: CursorCodec.fromKeyring(keyring, now),
+    cursors,
     confirms,
     onSuccess: (ctx, tool, args) => void recordTrafficExample(db, ctx.bundle.server.id, ctx.tenantId, tool.name, args, ctx.bundle.build.hash).catch(() => {}),
   });
@@ -369,7 +370,7 @@ export function createServices(input: ServiceInputs) {
     else logger.error({ err: r.error, mode }, 'code-mode executor failed to start; code mode is unavailable');
     await executorHealth.check();
   };
-  const scripts = new ScriptRunner({ db, executor: () => executor, pipeline, ops, tracker, audit, pages, metrics, now, log: logger, healthy: () => executorHealth.healthy, confirms });
+  const scripts = new ScriptRunner({ db, executor: () => executor, pipeline, ops, tracker, audit, pages, metrics, now, log: logger, healthy: () => executorHealth.healthy, confirms, cursors });
   const argValidator = new ArgValidator();
   const dispatcher = new Dispatcher({
     pipeline,

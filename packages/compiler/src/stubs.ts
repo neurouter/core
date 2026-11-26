@@ -3,7 +3,7 @@
  * namespace; the server regenerates them for the per-principal allowed set.
  */
 import { scriptBuiltinsLine, type JsonSchema, type ToolDef } from '@neurouter/shared';
-import { PY_KEYWORDS, pyIdent } from './naming.js';
+import { PY_KEYWORDS, pyIdent, snakeCase } from './naming.js';
 import { isObj, jcsHash, type Obj } from './util.js';
 import { COMPILER_VERSION } from './version.js';
 
@@ -15,7 +15,8 @@ export interface StubOptions {
   maxTypedDicts?: number;
 }
 
-class TypeRegistry {
+/** @internal shared with the contract-2 script API (`script-api.ts`) */
+export class TypeRegistry {
   readonly classes: string[] = [];
   private readonly byHash = new Map<string, string>();
   private readonly names = new Set<string>();
@@ -47,7 +48,8 @@ export function pascalCase(s: string): string {
   return /^[A-Za-z]/.test(out) ? out : `T${out}`;
 }
 
-function pyLiteral(v: unknown): string | null {
+/** @internal */
+export function pyLiteral(v: unknown): string | null {
   if (v === null) return 'None';
   if (v === true) return 'True';
   if (v === false) return 'False';
@@ -63,14 +65,16 @@ function union(parts: string[]): string {
   return [...nonNone, ...(uniq.includes('None') ? ['None'] : [])].join(' | ') || 'Any';
 }
 
-interface TypeCtx {
+/** @internal */
+export interface TypeCtx {
   reg: TypeRegistry;
   defs: Obj;
   depth: number;
   seenRefs: string[];
 }
 
-function pyType(schema: unknown, nameHint: string, ctx: TypeCtx): string {
+/** @internal */
+export function pyType(schema: unknown, nameHint: string, ctx: TypeCtx): string {
   if (!isObj(schema) || Object.keys(schema).length === 0) return 'Any';
   if (typeof schema.$ref === 'string') {
     const m = /^#\/\$defs\/(.+)$/.exec(schema.$ref);
@@ -139,12 +143,30 @@ function objectType(schema: Obj, nameHint: string, ctx: TypeCtx): string {
   );
 }
 
-/** Python keyword-safe arg name → schema arg name, for host calls (`from_` → `from`). */
-export function pyArgMap(tool: Pick<ToolDef, 'inputSchema'>): Record<string, string> {
+export interface PyArgOptions {
+  /** contract 2 (D8): snake_case keyword names (`customerId` → `customer_id`); colliding names keep their own form */
+  snake?: boolean;
+}
+
+/** Python keyword-safe arg name → schema arg name, for host calls (`from_` → `from`; contract 2: `customer_id` → `customerId`). */
+export function pyArgMap(tool: Pick<ToolDef, 'inputSchema'>, opts: PyArgOptions = {}): Record<string, string> {
   const out: Record<string, string> = {};
   const props = isObj(tool.inputSchema.properties) ? tool.inputSchema.properties : {};
-  for (const k of Object.keys(props)) out[pyIdent(k)] = k;
+  const keys = Object.keys(props);
+  if (!opts.snake) {
+    for (const k of keys) out[pyIdent(k)] = k;
+    return out;
+  }
+  const snake = (k: string) => pyIdent(snakeCase(k) || k);
+  const counts = new Map<string, number>();
+  for (const k of keys) counts.set(snake(k), (counts.get(snake(k)) ?? 0) + 1);
+  for (const k of keys) out[(counts.get(snake(k)) ?? 0) > 1 ? pyIdent(k) : snake(k)] = k;
   return out;
+}
+
+/** Schema arg name → Python keyword name (the inverse of `pyArgMap`). */
+export function pyNameMap(tool: Pick<ToolDef, 'inputSchema'>, opts: PyArgOptions = {}): Record<string, string> {
+  return Object.fromEntries(Object.entries(pyArgMap(tool, opts)).map(([py, arg]) => [arg, py]));
 }
 
 function docstring(tool: ToolDef): string {
@@ -172,7 +194,8 @@ function docstring(tool: ToolDef): string {
     .join('\n')}"""`;
 }
 
-function returnSchema(tool: ToolDef): unknown {
+/** @internal */
+export function returnSchema(tool: ToolDef): unknown {
   const o = tool.outputSchema;
   if (!isObj(o)) return undefined;
   const wrapped = o['x-neurouter-wrapped'];
@@ -180,23 +203,31 @@ function returnSchema(tool: ToolDef): unknown {
   return o;
 }
 
-function renderFunction(tool: ToolDef, reg: TypeRegistry): { signature: string; text: string } {
+/** @internal the parts of one function's stub: keyword parameters (required first) and the return type */
+export interface FunctionParts {
+  fn: string;
+  params: Array<{ py: string; arg: string; type: string; required: boolean; default: string | null; schema: JsonSchema }>;
+  ret: string;
+}
+
+/** @internal */
+export function functionParts(tool: ToolDef, reg: TypeRegistry, opts: PyArgOptions = {}): FunctionParts {
   const fn = pyIdent(tool.name);
   const hint = pascalCase(tool.name);
   const defs = isObj(tool.inputSchema.$defs) ? (tool.inputSchema.$defs as Obj) : {};
   const ctx: TypeCtx = { reg, defs, depth: 0, seenRefs: [] };
   const props = isObj(tool.inputSchema.properties) ? (tool.inputSchema.properties as Record<string, JsonSchema>) : {};
   const req = new Set(Array.isArray(tool.inputSchema.required) ? (tool.inputSchema.required as string[]) : []);
-  const reqArgs: string[] = [];
-  const optArgs: string[] = [];
-  for (const [k, s] of Object.entries(props)) {
-    const t = pyType(s, `${hint}Arg${pascalCase(k)}`, ctx);
-    const name = pyIdent(k);
-    if (req.has(k)) {
-      reqArgs.push(`${name}: ${t}`);
-    } else {
-      const def = s.default !== undefined ? pyLiteral(s.default) : null;
-      optArgs.push(def !== null ? `${name}: ${t} = ${def}` : `${name}: ${t.includes('None') ? t : `${t} | None`} = None`);
+  const names = pyNameMap(tool, opts);
+  const reqP: FunctionParts['params'] = [];
+  const optP: FunctionParts['params'] = [];
+  for (const [k, sch] of Object.entries(props)) {
+    const t = pyType(sch, `${hint}Arg${pascalCase(k)}`, ctx);
+    const py = names[k] ?? pyIdent(k);
+    if (req.has(k)) reqP.push({ py, arg: k, type: t, required: true, default: null, schema: sch });
+    else {
+      const def = sch.default !== undefined ? pyLiteral(sch.default) : null;
+      optP.push({ py, arg: k, type: def !== null ? t : t.includes('None') ? t : `${t} | None`, required: false, default: def ?? 'None', schema: sch });
     }
   }
   const outDefs = isObj(tool.outputSchema?.$defs) ? (tool.outputSchema!.$defs as Obj) : {};
@@ -204,7 +235,17 @@ function renderFunction(tool: ToolDef, reg: TypeRegistry): { signature: string; 
   let ret = rs === undefined ? 'Any' : pyType(rs, `${hint}Result`, { reg, defs: outDefs, depth: 0, seenRefs: [] });
   if (tool.risk.write) ret = ret.startsWith('list[') ? 'Any' : 'dict[str, Any]';
   if (ret === 'None') ret = 'Any';
-  const args = [...reqArgs, ...optArgs];
+  return { fn, params: [...reqP, ...optP], ret };
+}
+
+/** @internal `name: type[ = default]` for each parameter */
+export function paramList(p: FunctionParts['params']): string[] {
+  return p.map((x) => (x.required ? `${x.py}: ${x.type}` : `${x.py}: ${x.type} = ${x.default}`));
+}
+
+function renderFunction(tool: ToolDef, reg: TypeRegistry): { signature: string; text: string } {
+  const { fn, params, ret } = functionParts(tool, reg);
+  const args = paramList(params);
   const signature = `def ${fn}(${args.length ? `*, ${args.join(', ')}` : ''}) -> ${ret}`;
   return { signature, text: `${signature}:\n${docstring(tool)}\n` };
 }

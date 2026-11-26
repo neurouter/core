@@ -8,7 +8,8 @@ import { resolveVisibleTool } from '../pipeline/pipeline.js';
 import { applyArgTransforms } from '../http/request-builder.js';
 import type { Confirmer, McpToolResult, Pipeline } from '../pipeline/pipeline.js';
 import type { ToolSearchService } from '../search/search.service.js';
-import type { ScriptRunner } from '../code/run-script.js';
+import { scriptApiFor, toolExample, type ScriptRunner } from '../code/run-script.js';
+import { firstSentence, pyCallText } from '@neurouter/compiler';
 import { opFor, opsDefinition, reportEnabled, type OpsOp, type OpsTools } from '../ops/ops.js';
 import type { TaskTracker } from '../tasks/tracker.js';
 import { errorDraft, okDraft, type Draft } from '../envelope/draft.js';
@@ -277,12 +278,18 @@ export class Dispatcher {
   private searchDraft(ctx: RunContext, query: string, limit: number, format: 'json' | 'python', full: boolean, hits: SearchItem[], meta: Record<string, unknown>): Draft {
     const ns = ctx.server.slug.replace(/-/g, '_');
     const shown = hits.slice(0, limit);
+    // python: contract-2 signatures (snake_case keywords, D8) and docstrings, as run_script sees them
+    const apiTools = shown.map((h) => h.tool).filter((t): t is ToolDef => Boolean(t) && t!.kind !== 'composite');
+    const api = format === 'python' && apiTools.length ? scriptApiFor(apiTools, ns, ctx.bundle.build.hash, ctx.bundle.environment.writes.confirm === 'none') : null;
     const tools = shown.map((h) => {
-      const purpose = h.description.split('\n').find((l) => l.trim())?.trim().slice(0, 200) ?? h.title;
-      const ex = h.tool ? exampleArgs(h.tool) : null;
-      const python = format === 'python' && h.pySignature;
-      const signature = python ? pySignatureLine(h.pySignature!, h.pyName ?? `${ns}.${h.name}`) : `${h.name}(${h.args ?? ''})`;
-      const example = ex ? (python && h.tool ? pyCall(h.pyName ?? h.tool.pyName, ex, h.tool) : `${h.name}(${JSON.stringify(ex)})`) : undefined;
+      // the effect sentence (a compiled description starts with the spec summary title)
+      const purpose = (h.tool ? firstSentence(h.description) : '') || (h.description.split('\n').find((l) => l.trim())?.trim().slice(0, 200) ?? h.title);
+      const ex = h.tool ? (toolExample(h.tool) ?? exampleArgs(h.tool)) : null;
+      const sig = h.tool && api?.signatures[h.tool.name] ? api.signatures[h.tool.name] : h.pySignature;
+      const python = format === 'python' && sig;
+      const signature = python ? pySignatureLine(sig!, h.pyName ?? `${ns}.${h.name}`) : `${h.name}(${h.args ?? ''})`;
+      const example = ex ? (python && h.tool ? (h.tool.kind === 'composite' ? pyCall(h.pyName ?? h.tool.pyName, ex, h.tool) : pyCallText(h.tool, ex, ns)) : `${h.name}(${JSON.stringify(ex)})`) : undefined;
+      const doc = full && python && h.tool ? api?.docs[h.tool.name] : undefined;
       const returns = full && h.tool?.outputSchema ? topKeys(h.tool.outputSchema) : undefined;
       return {
         name: h.name,
@@ -293,6 +300,7 @@ export class Dispatcher {
         destructive: Boolean(h.destructive),
         ...(full && h.inputSchema ? { input_schema: h.inputSchema } : {}),
         ...(returns ? { returns } : {}),
+        ...(doc ? { doc } : {}),
       };
     });
     const has_more = hits.length > limit;

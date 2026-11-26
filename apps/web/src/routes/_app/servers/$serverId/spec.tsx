@@ -15,7 +15,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { environmentsQuery, usePinBuild } from '@/features/environments/queries';
-import { buildsQuery, serverQuery, specQuery, specsQuery } from '@/features/servers/queries';
+import { buildQuery, buildsQuery, serverQuery, specQuery, specsQuery } from '@/features/servers/queries';
+import { LintReportPanel } from '@/features/servers/lint-report';
 import { apiFetch } from '@/lib/api-client';
 import { specDownloadUrl } from '@/lib/download';
 import { formatBytes, formatRelative } from '@/lib/format';
@@ -74,6 +75,8 @@ function SpecPage() {
   const current = specs.data?.items[0];
   const selected = s.rev ?? current?.id;
   const detail = useQuery({ ...specQuery(selected ?? ''), enabled: !!selected });
+  const [lintOf, setLintOf] = useState<string | null>(null);
+  const lint = useQuery({ ...buildQuery(lintOf ?? ''), enabled: !!lintOf });
   if (specs.isError) return <ErrorState error={specs.error} onRetry={() => void specs.refetch()} />;
   return (
     <div className="flex flex-col gap-5">
@@ -144,12 +147,16 @@ function SpecPage() {
                 spec v{b.specRev} · overlay v{b.overlayRev ?? '–'}
               </span>
               <span className="text-muted-foreground">
-                {b.visibleCount} visible · {b.writeCount} write · lint {b.lintScore}
+                {b.visibleCount} visible · {b.writeCount} write ·{' '}
               </span>
+              <button type="button" className="text-primary hover:underline" aria-expanded={lintOf === b.id} onClick={() => setLintOf(lintOf === b.id ? null : b.id)}>
+                lint {b.lintScore}
+              </button>
               <span className="flex-1" />
               {b.environments.map((e) => (
                 <EnvBadge key={e} slug={e} />
               ))}
+              {lintOf === b.id ? <div className="basis-full pt-2">{lint.data ? <LintReportPanel report={lint.data.lint} /> : <Skeleton className="h-24" />}</div> : null}
             </li>
           ))}
         </ul>

@@ -46,8 +46,13 @@ export interface RunRequest {
   lineOffset?: number;
   /** Columns added by the wrapper's indentation (reported columns are mapped back). */
   colOffset?: number;
-  /** First feed; defaults to `import <every namespace>, ops`. */
+  /** First feed; defaults to `import <every namespace>, ops`. Its frames never count as the script's (errors report the user's line). */
   prelude?: string;
+  /**
+   * Extra type-check declarations for the user code (appended to the global stubs): a prelude that rebinds names
+   * (contract 2 binds each namespace to Python objects with `.page()`/`.pages()`) declares their types here.
+   */
+  typeStubs?: string;
   /** Allowed namespaces and functions. `ops` may list server-side ops functions (log_decision, …). */
   modules: Record<string, ModuleSpec>;
   /** Values bound as globals. */

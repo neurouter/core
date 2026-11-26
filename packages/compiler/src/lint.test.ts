@@ -77,11 +77,68 @@ describe('lint', () => {
     expect(rule(lint([tool({ outputSchema: big, shaping: { maxItems: 10 } })]), 'output_shaped').score).toBe(1);
   });
 
-  it('examples_present scales to 30%', () => {
-    const noEx = Array.from({ length: 10 }, () => tool({ examples: [] }));
-    expect(rule(lint(noEx), 'examples_present').score).toBe(0);
-    noEx[0] = tool();
-    expect(rule(lint(noEx), 'examples_present').score).toBeCloseTo(1 / 3, 5);
+  it('example_runs: checked examples must validate and run; without checks an example must exist', () => {
+    expect(rule(lint([tool({ examples: [] })]), 'example_runs').score).toBe(0);
+    expect(rule(lint([tool()]), 'example_runs').score).toBe(1);
+    const t = tool();
+    const ok = new Map([[t.name, { arguments: { q: 'x' }, source: 'overlay' as const, runs: true, conforms: true }]]);
+    expect(rule(lint([t], { examples: ok }), 'example_runs').score).toBe(1);
+    const bad = new Map([[t.name, { arguments: { q: 1 }, source: 'overlay' as const, runs: false, conforms: null, problem: 'does not match the input schema: /q must be string' }]]);
+    const r = lint([t], { examples: bad });
+    expect(rule(r, 'example_runs').score).toBe(0);
+    expect(r.findings.find((f) => f.rule === 'example_runs')?.message).toContain('/q must be string');
+    expect(rule(lint([t], { examples: new Map() }), 'example_runs').score).toBe(0);
+  });
+
+  it('envelope_conformance: an example response that does not match the output schema fails', () => {
+    const t = tool();
+    const ex = new Map([[t.name, { arguments: {}, source: 'synthesized' as const, runs: true, conforms: false, problem: 'the response does not match the output schema: /id must be integer' }]]);
+    expect(rule(lint([t], { examples: ex }), 'envelope_conformance').score).toBe(0);
+  });
+
+  it('destructive_marked: verb/DELETE writes are destructive and the first sentence names what is destroyed', () => {
+    const write = { readOnly: false, destructive: false, idempotent: false, openWorld: true, write: true };
+    const post = (path: string) => ({ type: 'http' as const, method: 'POST' as const, pathTemplate: path, params: [], successStatuses: [200], responseContentType: null, security: [] });
+    expect(rule(lint([tool({ name: 'cancel_item', description: 'Cancels the item in the inventory before it ships.', binding: post('/items/{id}/cancel'), risk: write })]), 'destructive_marked').score).toBe(0);
+    const marked = { ...write, destructive: true };
+    expect(rule(lint([tool({ name: 'cancel_item', description: 'Cancels the item in the inventory before it ships.', binding: post('/items/{id}/cancel'), risk: marked })]), 'destructive_marked').score).toBe(1);
+    expect(rule(lint([tool({ name: 'purge_item', description: 'Purges the item.', binding: post('/items/{id}/purge'), risk: marked })]), 'destructive_marked').score).toBe(1);
+    expect(rule(lint([tool({ name: 'archive_item', description: 'Moves an item to the attic.', binding: post('/items/{id}/archive'), risk: marked })]), 'destructive_marked').score).toBe(0);
+    expect(rule(lint([tool({ name: 'archive_item', description: 'Moves an item to the attic. This cannot be undone.', binding: post('/items/{id}/archive'), risk: marked })]), 'destructive_marked').score).toBe(1);
+  });
+
+  it('has_more_without_cursor: a page size without a position parameter fails', () => {
+    const q = (...names: string[]) => names.map((n) => ({ arg: n, in: 'query' as const, name: n, required: false }));
+    const list = (params: ReturnType<typeof q>, pagination?: { style: 'link' }) => tool({ binding: { type: 'http', method: 'GET', pathTemplate: '/items', params, successStatuses: [200], responseContentType: 'application/json', security: [], ...(pagination ? { pagination } : {}) } });
+    expect(rule(lint([list(q('limit'))]), 'has_more_without_cursor').score).toBe(0);
+    expect(rule(lint([list(q('limit', 'cursor'))]), 'has_more_without_cursor').score).toBe(1);
+    expect(rule(lint([list(q('per_page', 'page'))]), 'has_more_without_cursor').score).toBe(1);
+    expect(rule(lint([list(q('per_page'), { style: 'link' })]), 'has_more_without_cursor').score).toBe(1);
+    expect(rule(lint([list(q('q'))]), 'has_more_without_cursor').score).toBe(1);
+  });
+
+  it('first_sentence: verb first, 10–200 chars; a leading summary paragraph is skipped', () => {
+    expect(rule(lint([tool({ description: 'The items.' })]), 'first_sentence').score).toBe(0);
+    expect(rule(lint([tool({ description: `List ${'very '.repeat(50)}many items.` })]), 'first_sentence').score).toBe(0);
+    expect(rule(lint([tool({ description: 'List items\n\nReturns the items of the inventory, newest first.' })]), 'first_sentence').score).toBe(1);
+  });
+
+  it('description_length: the agent description stays within the limit', () => {
+    const long = Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`argument_number_${i}`, { type: 'string', description: 'x' }]));
+    expect(rule(lint([tool({ description: `List items. ${'More detail on how listing works here. '.repeat(30)}`, inputSchema: { type: 'object', properties: long } })]), 'description_length').score).toBe(1);
+    const huge = { q: 'x'.repeat(900) };
+    expect(rule(lint([tool({ examples: [{ arguments: huge }] })], { examples: new Map([['list_items', { arguments: huge, source: 'overlay' as const, runs: true, conforms: true }]]) }), 'description_length').score).toBe(0);
+  });
+
+  it('enum_in_schema: allowed values only in prose fail; repeated ones are info', () => {
+    const r = lint([tool({ inputSchema: { type: 'object', properties: { state: { type: 'string', description: 'open, closed or all' } } } })]);
+    expect(rule(r, 'enum_in_schema').score).toBe(0);
+    expect(r.findings.find((f) => f.rule === 'enum_in_schema')?.fix).toEqual([{ op: 'set', selector: 'k', field: 'args', value: { enum: { state: ['open', 'closed', 'all'] } } }]);
+    const dup = lint([tool({ inputSchema: { type: 'object', properties: { state: { type: 'string', enum: ['open', 'closed'], description: 'One of `open` or `closed`.' } } } })]);
+    expect(rule(dup, 'enum_in_schema').score).toBe(1);
+    expect(dup.findings.find((f) => f.rule === 'enum_in_schema')?.severity).toBe('info');
+    // booleans and values of another argument's enum are not prose enums
+    expect(rule(lint([tool({ inputSchema: { type: 'object', properties: { flag: { type: 'boolean', description: 'true or false' }, body: { type: 'string', description: 'Required when event is `APPROVE` or `COMMENT`.' }, event: { type: 'string', enum: ['APPROVE', 'COMMENT'] } } } })]), 'enum_in_schema').score).toBe(1);
   });
 
   it('writes_marked: DELETE must be destructive', () => {

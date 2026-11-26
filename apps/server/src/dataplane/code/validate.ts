@@ -30,6 +30,8 @@ export interface ValidateOptions {
   namespaces?: string[];
   /** Max errors reported (default 20). */
   maxErrors?: number;
+  /** Contract 2: built-ins allowed beyond the v1 set (`getattr`, `hasattr`). */
+  allow?: readonly string[];
 }
 
 export function validateScript(code: string, opts: ValidateOptions = {}): ValidationResult {
@@ -95,7 +97,7 @@ export function validateScript(code: string, opts: ValidateOptions = {}): Valida
       add(t.line, t.col, 'builtin', 'type() takes one argument in scripts', 'Use type(x) or isinstance(x, dict) to inspect a value; classes are not allowed.');
       continue;
     }
-    if (FORBIDDEN_NAMES.has(t.value) && !isAttr && !isKeywordArgument(toks, k)) {
+    if (FORBIDDEN_NAMES.has(t.value) && !opts.allow?.includes(t.value) && !isAttr && !isKeywordArgument(toks, k)) {
       add(t.line, t.col, 'builtin', `'${t.value}' is not available in scripts`, `Use tool functions (${nsHint}) and the allowed built-ins: ${ALLOWED_BUILTINS.join(', ')}.`);
     }
   }

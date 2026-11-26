@@ -20,7 +20,7 @@
   {
    "name": "list_orders",
    "title": "List orders",
-   "description": "List orders\n\nLists orders, newest first. Filter by status or customer.",
+   "description": "Lists orders, newest first. Filter by status or customer.\nRelated: get_order (one order by id), create_order (create an order).\nArgs: status, customer_id (all optional).\nExample: list_orders({\"limit\":5})\nPages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=[\"id\",\"customerId\",\"status\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -115,14 +115,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "c01e5ad8cd97b1cfd507e57ace29fd2bfe1933ff9f593f15a6779c1bd122c086",
+    "dev.neurouter/def-hash": "0ccaf8e63423d2c1f11e4b57085a044f228cdfa6d7ae6dbacdaeb8847aeb9cd3",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "create_order",
    "title": "Create an order",
-   "description": "Create an order\n\nCreates a pending order for a customer with one or more line items.",
+   "description": "Creates a pending order for a customer with one or more line items. Writes data.\nRelated: get_order (one order by id), list_orders (find orders).\nArgs: customerId, items (required); shippingAddress.\nExample: create_order({\"customerId\":\"customer_1\",\"items\":[{\"sku\":\"product_1\",\"quantity\":1}]})\nDry run: dry_run=true returns the plan.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -250,14 +250,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "d235d8cb2bdc14b60c58f6f8e49f4571dc71b87b7eb6bb6c10050b2512eb1b66",
+    "dev.neurouter/def-hash": "45ab6c71d147797ed2611416a95682a69eb414bb25b23183b41817d092a27cc3",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "get_order",
    "title": "Get an order",
-   "description": "Get an order\n\nReturns one order with its line items, totals and status.",
+   "description": "Returns one order with its line items, totals and status.\nRelated: list_orders (find orders), create_order (create an order).\nArgs: order_id (required).\nExample: get_order({\"order_id\":\"order_1\"})",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -331,14 +331,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "abf50cd998c618725fd096b687bc67aa4cf937140f243c5b7192b2f6097da4e2",
+    "dev.neurouter/def-hash": "887412a39b2111ddb79c7341983727384201ce1564eb62cea80993ae3c841ed1",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "update_order",
    "title": "Update an order",
-   "description": "Update an order\n\nChanges the shipping address or the note of an order that has not shipped yet.",
+   "description": "Changes the shipping address or the note of an order that has not shipped yet. Writes data.\nRelated: list_orders (find orders), get_order (one order by id).\nArgs: order_id (required); shippingAddress, note.\nExample: update_order({\"order_id\":\"order_1\"})\nDry run: dry_run=true returns the plan.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -449,14 +449,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "45f2bced7f0d3464dace4f7a1aa26be62a4d456b0d47537d3de62c0a8a94d4a4",
+    "dev.neurouter/def-hash": "15a1187b51afecc24a1a778e07cc86431fc37e96727c3c3aac66924cde33d838",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "cancel_order",
    "title": "Cancel an order",
-   "description": "Cancel an order\n\nCancels an order that has not shipped. Paid orders are refunded in full automatically.",
+   "description": "Cancels an order that has not shipped. Paid orders are refunded in full automatically. Irreversible.\nRelated: get_order (one order by id), update_order (change an order).\nArgs: order_id (required); reason.\nExample: cancel_order({\"order_id\":\"order_1\"})\nDry run: dry_run=true returns the plan; then call with confirm from error.next.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -548,14 +548,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "0d852c7929ca8adae8d3acc14ea295471bd0e96829dd1b4842fd1019603841f6",
+    "dev.neurouter/def-hash": "4990b8e098c359e2c3c987f765b72fd48bf9a0fb2644a83d91fb141a2f518a56",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "list_order_refunds",
    "title": "List refunds of an order",
-   "description": "List refunds of an order\n\nLists the refunds issued for one order.",
+   "description": "Lists the refunds issued for one order.\nRelated: create_refund (create a refund).\nArgs: order_id (required).\nExample: list_order_refunds({\"order_id\":\"order_1\"})\nPages: cursor=page.next_cursor. Fields: fields=[\"id\",\"orderId\",\"amount\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -633,14 +633,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "570e745cb6ec71c32bbf7049f6de36ad5823fb2b0c7b2bd80a53a51a3ab18d66",
+    "dev.neurouter/def-hash": "b6bf5a8d44b520d5372d88eab13beeb22b6a102b93b69a3256cfc1f60c4477c5",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "create_refund",
    "title": "Refund an order",
-   "description": "Refund an order\n\nRefunds part or all of a paid order. The amount cannot exceed what is left to refund.",
+   "description": "Refunds part or all of a paid order. The amount cannot exceed what is left to refund. Irreversible.\nRelated: get_order (one order by id), list_order_refunds (find refunds).\nArgs: order_id, amount, reason (required).\nExample: create_refund({\"order_id\":\"order_1\",\"amount\":0.01,\"reason\":\"damaged\"})\nDry run: dry_run=true returns the plan; then call with confirm from error.next.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -739,14 +739,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "141bd8d337b255e4a9bcfee1933c7dbd38a62ba8aece9b0f9fba4010e083329d",
+    "dev.neurouter/def-hash": "97b9dbf5411de364af40f6080c5ec0b10f84a47835f62c95f24b8f3d1c5bb382",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "list_customers",
    "title": "List customers",
-   "description": "List customers\n\nLists customers. Search by name or email with q.",
+   "description": "Lists customers. Search by name or email with q.\nRelated: get_customer (one customer by id), create_customer (create a customer).\nArgs: q (all optional).\nExample: list_customers({\"limit\":5})\nPages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=[\"id\",\"name\",\"email\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -828,14 +828,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "86b36091576409cef87cff30a711893a678193f3c882df12b67826c5dd0cc5b6",
+    "dev.neurouter/def-hash": "9a5c203f5ff9ba4031a4879194dc506c63bf8f5a1e6f9b7a513ff0a59ff5363e",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "create_customer",
    "title": "Create a customer",
-   "description": "Create a customer\n\nCreates a customer account.",
+   "description": "Creates a customer account. Writes data.\nRelated: get_customer (one customer by id), list_customers (find customers).\nArgs: name, email (required); phone.\nExample: create_customer({\"name\":\"Example\",\"email\":\"ada@example.com\"})\nDry run: dry_run=true returns the plan.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -923,14 +923,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "b7c546b606f786b2452b6099e7ae842c854d0f1aa1c82f464d49f1a2a57e8192",
+    "dev.neurouter/def-hash": "d91ca8cb208af387be20785346b5192d8987887f238184857290e3b28299a8bd",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "get_customer",
    "title": "Get a customer",
-   "description": "Get a customer\n\nReturns one customer with their lifetime order count and spend.",
+   "description": "Returns one customer with their lifetime order count and spend.\nRelated: list_customers (find customers), create_customer (create a customer).\nArgs: customer_id (required).\nExample: get_customer({\"customer_id\":\"customer_1\"})",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1004,14 +1004,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "d4297f8a7e3d9d4d9a96057c0998fc88378533a746aa237dc0fd3d92ab3985dc",
+    "dev.neurouter/def-hash": "f9d8228c0618a7a46a5402909f7fa9f5b8cbaf65822f1efa671645acf36d1920",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "list_shipments",
    "title": "List shipments",
-   "description": "List shipments\n\nLists shipments, optionally only those of one order.",
+   "description": "Lists shipments, optionally only those of one order.\nRelated: get_shipment (one shipment by id).\nArgs: order_id (all optional).\nExample: list_shipments({\"limit\":5})\nPages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=[\"id\",\"orderId\",\"carrier\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1093,14 +1093,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "0274ed2584628e21c7324c95a65804d1891b66a7530df8b75bb9633bfa4f30a6",
+    "dev.neurouter/def-hash": "8347a55ca3150e44e6c70511554611d7cccf354935faf7c97c8a2c2179ecdf04",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "get_shipment",
    "title": "Track a shipment",
-   "description": "Track a shipment\n\nReturns the carrier, tracking number and delivery status of a shipment.",
+   "description": "Returns the carrier, tracking number and delivery status of a shipment.\nRelated: list_shipments (find shipments).\nArgs: shipment_id (required).\nExample: get_shipment({\"shipment_id\":\"shipment_1\"})",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1174,14 +1174,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "edfe2ccfc72978c33ea3e80dbce82af7a68b95f7260e5c35f6cf4f277eb1ae8c",
+    "dev.neurouter/def-hash": "0a013b5f660c1e721b04b87fd1e287604be41c8a1b05f828ff900f5da0b0fa91",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "list_products",
    "title": "List products",
-   "description": "List products\n\nLists products in the catalog with price and stock.",
+   "description": "Lists products in the catalog with price and stock.\nRelated: get_product (one product by id).\nArgs: q (all optional).\nExample: list_products({\"limit\":5})\nPages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=[\"sku\",\"name\",\"price\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1263,14 +1263,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "fcfbaaa41ea97d3a8c579162ba1687ac4c5b9113691cb63fcd7be55a47a3f567",
+    "dev.neurouter/def-hash": "25d1fa72a6949a5d94c6ca46f30c041c877f45324c546a77cdd49b1914dff3fa",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "get_product",
    "title": "Get a product",
-   "description": "Get a product\n\nReturns one product with its price and stock level.",
+   "description": "Returns one product with its price and stock level.\nRelated: list_products (find products).\nArgs: sku (required).\nExample: get_product({\"sku\":\"product_1\"})",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1344,7 +1344,7 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "7ca270aa4a9f80db3701b5b6564f0fe1d5e735b410c94ec8e3cce809f374db0c",
+    "dev.neurouter/def-hash": "0f72b2e5bb273c45f0e38f4ddf2a3acc3c8435b90a5d6fcbc0b19afbbff4a3b6",
     "dev.neurouter/defer_loading": false
    }
   },
@@ -1424,7 +1424,7 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "2212a09fd1fb9ec769ffd520dc6b25f520992b57bbc5e4daf334615d2c5315e1",
+    "dev.neurouter/def-hash": "98c4c87097930998be975e19f3d73b155dfe8b78fcb81d5b03c8e3f39a59ff39",
     "dev.neurouter/defer_loading": false
    }
   },
@@ -1525,7 +1525,7 @@
   {
    "name": "run_script",
    "title": "Run a Python script against the API",
-   "description": "Run a short Python script that calls API tools as functions (e.g. acme.list_orders()) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins (len, sorted, isinstance, type, iter/next, …; no map/filter/getattr) and ops.* helpers. Tool results are whole dicts/lists inside scripts (no maxItems/maxBytes cuts); the script result limit applies to what you return. Use mode=\"dry_run\" to see planned writes without executing them. Get function signatures from search_tools.",
+   "description": "Run a short Python script against the Acme Orders API and return a JSON value with `return`. Functions are acme.<fn>(name=value, ...) (keyword arguments; find them with search_tools) and return plain data (dicts/lists).\nLists: acme.<fn>.pages(..., max_items=500) returns the items of every page; acme.<fn>.page(...) returns a Result (.data, .items, .page.next_cursor, .next()).\nErrors raise NotFound, InvalidArgs, Forbidden, WritesDisabled, ConfirmationRequired, RateLimited, Timeout or UpstreamError (ToolError catches all): str(e) says what failed and the next call; ops.error(e) gives {code, next, fields, retry, plan}.\nWrites: mode=\"dry_run\" returns the plan without changing anything; destructive changes then need the confirm token from error.next.\nops: parallel, now, days_since, report(kind, text). No imports, files or network. Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type, iter, next, repr, chr, ord, hex, print, getattr, hasattr (type takes one argument). No map/filter (use comprehensions); tool results are dicts/lists (d[\"key\"]).\n\nExample:\n  try:\n      one = acme.get_order(order_id=\"order_1\")\n  except NotFound as e:\n      return ops.error(e)[\"next\"]\n  rows = acme.list_orders.pages(limit=5, max_items=50)\n  return {\"one\": one, \"count\": len(rows)}\n",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1691,7 +1691,7 @@
   {
    "name": "run_script",
    "title": "Run a Python script against the API",
-   "description": "Run a short Python script that calls API tools as functions (e.g. acme.list_orders()) and returns a JSON-serializable value with `return`. No imports, no files, no network: only the tool functions, built-ins (len, sorted, isinstance, type, iter/next, …; no map/filter/getattr) and ops.* helpers. Tool results are whole dicts/lists inside scripts (no maxItems/maxBytes cuts); the script result limit applies to what you return. Use mode=\"dry_run\" to see planned writes without executing them. Get function signatures from search_tools.",
+   "description": "Run a short Python script against the Acme Orders API and return a JSON value with `return`. Functions are acme.<fn>(name=value, ...) (keyword arguments; find them with search_tools) and return plain data (dicts/lists).\nLists: acme.<fn>.pages(..., max_items=500) returns the items of every page; acme.<fn>.page(...) returns a Result (.data, .items, .page.next_cursor, .next()).\nErrors raise NotFound, InvalidArgs, Forbidden, WritesDisabled, ConfirmationRequired, RateLimited, Timeout or UpstreamError (ToolError catches all): str(e) says what failed and the next call; ops.error(e) gives {code, next, fields, retry, plan}.\nWrites: mode=\"dry_run\" returns the plan without changing anything; destructive changes then need the confirm token from error.next.\nops: parallel, now, days_since, report(kind, text). No imports, files or network. Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type, iter, next, repr, chr, ord, hex, print, getattr, hasattr (type takes one argument). No map/filter (use comprehensions); tool results are dicts/lists (d[\"key\"]).\n\nExample:\n  try:\n      one = acme.get_order(order_id=\"order_1\")\n  except NotFound as e:\n      return ops.error(e)[\"next\"]\n  rows = acme.list_orders.pages(limit=5, max_items=50)\n  return {\"one\": one, \"count\": len(rows)}\n",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1870,7 +1870,7 @@
   {
    "name": "list_orders",
    "title": "List orders",
-   "description": "List orders\n\nLists orders, newest first. Filter by status or customer.",
+   "description": "Lists orders, newest first. Filter by status or customer.\nRelated: get_order (one order by id), create_order (create an order).\nArgs: status, customer_id (all optional).\nExample: list_orders({\"limit\":5})\nPages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=[\"id\",\"customerId\",\"status\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1965,14 +1965,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "c01e5ad8cd97b1cfd507e57ace29fd2bfe1933ff9f593f15a6779c1bd122c086",
+    "dev.neurouter/def-hash": "0ccaf8e63423d2c1f11e4b57085a044f228cdfa6d7ae6dbacdaeb8847aeb9cd3",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "create_order",
    "title": "Create an order",
-   "description": "Create an order\n\nCreates a pending order for a customer with one or more line items.",
+   "description": "Creates a pending order for a customer with one or more line items. Writes data.\nRelated: get_order (one order by id), list_orders (find orders).\nArgs: customerId, items (required); shippingAddress.\nExample: create_order({\"customerId\":\"customer_1\",\"items\":[{\"sku\":\"product_1\",\"quantity\":1}]})\nDry run: dry_run=true returns the plan.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2100,14 +2100,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "d235d8cb2bdc14b60c58f6f8e49f4571dc71b87b7eb6bb6c10050b2512eb1b66",
+    "dev.neurouter/def-hash": "45ab6c71d147797ed2611416a95682a69eb414bb25b23183b41817d092a27cc3",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "get_order",
    "title": "Get an order",
-   "description": "Get an order\n\nReturns one order with its line items, totals and status.",
+   "description": "Returns one order with its line items, totals and status.\nRelated: list_orders (find orders), create_order (create an order).\nArgs: order_id (required).\nExample: get_order({\"order_id\":\"order_1\"})",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2181,14 +2181,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "abf50cd998c618725fd096b687bc67aa4cf937140f243c5b7192b2f6097da4e2",
+    "dev.neurouter/def-hash": "887412a39b2111ddb79c7341983727384201ce1564eb62cea80993ae3c841ed1",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "update_order",
    "title": "Update an order",
-   "description": "Update an order\n\nChanges the shipping address or the note of an order that has not shipped yet.",
+   "description": "Changes the shipping address or the note of an order that has not shipped yet. Writes data.\nRelated: list_orders (find orders), get_order (one order by id).\nArgs: order_id (required); shippingAddress, note.\nExample: update_order({\"order_id\":\"order_1\"})\nDry run: dry_run=true returns the plan.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2299,14 +2299,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "45f2bced7f0d3464dace4f7a1aa26be62a4d456b0d47537d3de62c0a8a94d4a4",
+    "dev.neurouter/def-hash": "15a1187b51afecc24a1a778e07cc86431fc37e96727c3c3aac66924cde33d838",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "cancel_order",
    "title": "Cancel an order",
-   "description": "Cancel an order\n\nCancels an order that has not shipped. Paid orders are refunded in full automatically.",
+   "description": "Cancels an order that has not shipped. Paid orders are refunded in full automatically. Irreversible.\nRelated: get_order (one order by id), update_order (change an order).\nArgs: order_id (required); reason.\nExample: cancel_order({\"order_id\":\"order_1\"})\nDry run: dry_run=true returns the plan; then call with confirm from error.next.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2398,14 +2398,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "0d852c7929ca8adae8d3acc14ea295471bd0e96829dd1b4842fd1019603841f6",
+    "dev.neurouter/def-hash": "4990b8e098c359e2c3c987f765b72fd48bf9a0fb2644a83d91fb141a2f518a56",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "list_order_refunds",
    "title": "List refunds of an order",
-   "description": "List refunds of an order\n\nLists the refunds issued for one order.",
+   "description": "Lists the refunds issued for one order.\nRelated: create_refund (create a refund).\nArgs: order_id (required).\nExample: list_order_refunds({\"order_id\":\"order_1\"})\nPages: cursor=page.next_cursor. Fields: fields=[\"id\",\"orderId\",\"amount\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2483,14 +2483,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "570e745cb6ec71c32bbf7049f6de36ad5823fb2b0c7b2bd80a53a51a3ab18d66",
+    "dev.neurouter/def-hash": "b6bf5a8d44b520d5372d88eab13beeb22b6a102b93b69a3256cfc1f60c4477c5",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "create_refund",
    "title": "Refund an order",
-   "description": "Refund an order\n\nRefunds part or all of a paid order. The amount cannot exceed what is left to refund.",
+   "description": "Refunds part or all of a paid order. The amount cannot exceed what is left to refund. Irreversible.\nRelated: get_order (one order by id), list_order_refunds (find refunds).\nArgs: order_id, amount, reason (required).\nExample: create_refund({\"order_id\":\"order_1\",\"amount\":0.01,\"reason\":\"damaged\"})\nDry run: dry_run=true returns the plan; then call with confirm from error.next.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2589,14 +2589,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "141bd8d337b255e4a9bcfee1933c7dbd38a62ba8aece9b0f9fba4010e083329d",
+    "dev.neurouter/def-hash": "97b9dbf5411de364af40f6080c5ec0b10f84a47835f62c95f24b8f3d1c5bb382",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "list_customers",
    "title": "List customers",
-   "description": "List customers\n\nLists customers. Search by name or email with q.",
+   "description": "Lists customers. Search by name or email with q.\nRelated: get_customer (one customer by id), create_customer (create a customer).\nArgs: q (all optional).\nExample: list_customers({\"limit\":5})\nPages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=[\"id\",\"name\",\"email\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2678,14 +2678,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "86b36091576409cef87cff30a711893a678193f3c882df12b67826c5dd0cc5b6",
+    "dev.neurouter/def-hash": "9a5c203f5ff9ba4031a4879194dc506c63bf8f5a1e6f9b7a513ff0a59ff5363e",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "create_customer",
    "title": "Create a customer",
-   "description": "Create a customer\n\nCreates a customer account.",
+   "description": "Creates a customer account. Writes data.\nRelated: get_customer (one customer by id), list_customers (find customers).\nArgs: name, email (required); phone.\nExample: create_customer({\"name\":\"Example\",\"email\":\"ada@example.com\"})\nDry run: dry_run=true returns the plan.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2773,14 +2773,14 @@
     "dev.neurouter/write": true,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "b7c546b606f786b2452b6099e7ae842c854d0f1aa1c82f464d49f1a2a57e8192",
+    "dev.neurouter/def-hash": "d91ca8cb208af387be20785346b5192d8987887f238184857290e3b28299a8bd",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "get_customer",
    "title": "Get a customer",
-   "description": "Get a customer\n\nReturns one customer with their lifetime order count and spend.",
+   "description": "Returns one customer with their lifetime order count and spend.\nRelated: list_customers (find customers), create_customer (create a customer).\nArgs: customer_id (required).\nExample: get_customer({\"customer_id\":\"customer_1\"})",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2854,14 +2854,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "d4297f8a7e3d9d4d9a96057c0998fc88378533a746aa237dc0fd3d92ab3985dc",
+    "dev.neurouter/def-hash": "f9d8228c0618a7a46a5402909f7fa9f5b8cbaf65822f1efa671645acf36d1920",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "list_shipments",
    "title": "List shipments",
-   "description": "List shipments\n\nLists shipments, optionally only those of one order.",
+   "description": "Lists shipments, optionally only those of one order.\nRelated: get_shipment (one shipment by id).\nArgs: order_id (all optional).\nExample: list_shipments({\"limit\":5})\nPages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=[\"id\",\"orderId\",\"carrier\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2943,14 +2943,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "0274ed2584628e21c7324c95a65804d1891b66a7530df8b75bb9633bfa4f30a6",
+    "dev.neurouter/def-hash": "8347a55ca3150e44e6c70511554611d7cccf354935faf7c97c8a2c2179ecdf04",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "get_shipment",
    "title": "Track a shipment",
-   "description": "Track a shipment\n\nReturns the carrier, tracking number and delivery status of a shipment.",
+   "description": "Returns the carrier, tracking number and delivery status of a shipment.\nRelated: list_shipments (find shipments).\nArgs: shipment_id (required).\nExample: get_shipment({\"shipment_id\":\"shipment_1\"})",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -3024,14 +3024,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "edfe2ccfc72978c33ea3e80dbce82af7a68b95f7260e5c35f6cf4f277eb1ae8c",
+    "dev.neurouter/def-hash": "0a013b5f660c1e721b04b87fd1e287604be41c8a1b05f828ff900f5da0b0fa91",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "list_products",
    "title": "List products",
-   "description": "List products\n\nLists products in the catalog with price and stock.",
+   "description": "Lists products in the catalog with price and stock.\nRelated: get_product (one product by id).\nArgs: q (all optional).\nExample: list_products({\"limit\":5})\nPages: cursor=page.next_cursor, limit ≤ 100. Fields: fields=[\"sku\",\"name\",\"price\"].",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -3113,14 +3113,14 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "fcfbaaa41ea97d3a8c579162ba1687ac4c5b9113691cb63fcd7be55a47a3f567",
+    "dev.neurouter/def-hash": "25d1fa72a6949a5d94c6ca46f30c041c877f45324c546a77cdd49b1914dff3fa",
     "dev.neurouter/defer_loading": false
    }
   },
   {
    "name": "get_product",
    "title": "Get a product",
-   "description": "Get a product\n\nReturns one product with its price and stock level.",
+   "description": "Returns one product with its price and stock level.\nRelated: list_products (find products).\nArgs: sku (required).\nExample: get_product({\"sku\":\"product_1\"})",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -3194,7 +3194,7 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "7ca270aa4a9f80db3701b5b6564f0fe1d5e735b410c94ec8e3cce809f374db0c",
+    "dev.neurouter/def-hash": "0f72b2e5bb273c45f0e38f4ddf2a3acc3c8435b90a5d6fcbc0b19afbbff4a3b6",
     "dev.neurouter/defer_loading": false
    }
   },
@@ -3274,7 +3274,7 @@
     "dev.neurouter/write": false,
     "dev.neurouter/writes-enabled": true,
     "dev.neurouter/confirm": "none",
-    "dev.neurouter/def-hash": "2212a09fd1fb9ec769ffd520dc6b25f520992b57bbc5e4daf334615d2c5315e1",
+    "dev.neurouter/def-hash": "98c4c87097930998be975e19f3d73b155dfe8b78fcb81d5b03c8e3f39a59ff39",
     "dev.neurouter/defer_loading": false
    }
   },
@@ -4515,7 +4515,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"list_order_refunds\",\"purpose\":\"List refunds of an order\",\"signature\":\"list_order_refunds(order_id*: string, cursor?: string, fields?: string[])\",\"read_only\":true,\"destructive\":false},{\"name\":\"create_refund\",\"purpose\":\"Refund an order\",\"signature\":\"create_refund(order_id*: string, amount*: number, reason*: \\\"damaged\\\"|\\\"not_received\\\"|\\\"wrong_item\\\"|\\\"goodwill\\\", fields?: string[], dry_run?: boolean, confirm?: string)\",\"read_only\":false,\"destructive\":true},{\"name\":\"get_order\",\"purpose\":\"Get an order\",\"signature\":\"get_order(order_id*: string, fields?: string[])\",\"read_only\":true,\"destructive\":false},{\"name\":\"cancel_order\",\"purpose\":\"Cancel an order\",\"signature\":\"cancel_order(order_id*: string, reason?: \\\"customer_request\\\"|\\\"out_of_stock\\\"|\\\"fraud\\\"|\\\"other\\\", fields?: string[], dry_run?: boolean, confirm?: string)\",\"read_only\":false,\"destructive\":true},{\"name\":\"update_order\",\"purpose\":\"Update an order\",\"signature\":\"update_order(order_id*: string, shippingAddress?: object, note?: string, fields?: string[], dry_run?: boolean)\",\"read_only\":false,\"destructive\":false},{\"name\":\"create_order\",\"purpose\":\"Create an order\",\"signature\":\"create_order(customerId*: string, items*: object[], shippingAddress?: object, fields?: string[], dry_run?: boolean)\",\"read_only\":false,\"destructive\":false},{\"name\":\"list_orders\",\"purpose\":\"List orders\",\"signature\":\"list_orders(status?: \\\"pending\\\"|\\\"paid\\\"|\\\"shipped\\\"|\\\"delivered\\\"|\\\"cancelled\\\"|\\\"refunded\\\", customer_id?: string, limit?: integer, cursor?: string, fields?: string[])\",\"example\":\"list_orders({})\",\"read_only\":true,\"destructive\":false},{\"name\":\"list_shipments\",\"purpose\":\"List shipments\",\"signature\":\"list_shipments(order_id?: string, limit?: integer, cursor?: string, fields?: string[])\",\"example\":\"list_shipments({})\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":8,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":25}}"
+    "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"list_order_refunds\",\"purpose\":\"Lists the refunds issued for one order.\",\"signature\":\"list_order_refunds(order_id*: string, cursor?: string, fields?: string[])\",\"example\":\"list_order_refunds({\\\"order_id\\\":\\\"order_1\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"create_refund\",\"purpose\":\"Refunds part or all of a paid order.\",\"signature\":\"create_refund(order_id*: string, amount*: number, reason*: \\\"damaged\\\"|\\\"not_received\\\"|\\\"wrong_item\\\"|\\\"goodwill\\\", fields?: string[], dry_run?: boolean, confirm?: string)\",\"example\":\"create_refund({\\\"order_id\\\":\\\"order_1\\\",\\\"amount\\\":0.01,\\\"reason\\\":\\\"damaged\\\"})\",\"read_only\":false,\"destructive\":true},{\"name\":\"get_order\",\"purpose\":\"Returns one order with its line items, totals and status.\",\"signature\":\"get_order(order_id*: string, fields?: string[])\",\"example\":\"get_order({\\\"order_id\\\":\\\"order_1\\\"})\",\"read_only\":true,\"destructive\":false},{\"name\":\"cancel_order\",\"purpose\":\"Cancels an order that has not shipped.\",\"signature\":\"cancel_order(order_id*: string, reason?: \\\"customer_request\\\"|\\\"out_of_stock\\\"|\\\"fraud\\\"|\\\"other\\\", fields?: string[], dry_run?: boolean, confirm?: string)\",\"example\":\"cancel_order({\\\"order_id\\\":\\\"order_1\\\"})\",\"read_only\":false,\"destructive\":true},{\"name\":\"update_order\",\"purpose\":\"Changes the shipping address or the note of an order that has not shipped yet.\",\"signature\":\"update_order(order_id*: string, shippingAddress?: object, note?: string, fields?: string[], dry_run?: boolean)\",\"example\":\"update_order({\\\"order_id\\\":\\\"order_1\\\"})\",\"read_only\":false,\"destructive\":false},{\"name\":\"create_order\",\"purpose\":\"Creates a pending order for a customer with one or more line items.\",\"signature\":\"create_order(customerId*: string, items*: object[], shippingAddress?: object, fields?: string[], dry_run?: boolean)\",\"example\":\"create_order({\\\"customerId\\\":\\\"customer_1\\\",\\\"items\\\":[{\\\"sku\\\":\\\"product_1\\\",\\\"quantity\\\":1}]})\",\"read_only\":false,\"destructive\":false},{\"name\":\"list_orders\",\"purpose\":\"Lists orders, newest first.\",\"signature\":\"list_orders(status?: \\\"pending\\\"|\\\"paid\\\"|\\\"shipped\\\"|\\\"delivered\\\"|\\\"cancelled\\\"|\\\"refunded\\\", customer_id?: string, limit?: integer, cursor?: string, fields?: string[])\",\"example\":\"list_orders({\\\"limit\\\":5})\",\"read_only\":true,\"destructive\":false},{\"name\":\"list_shipments\",\"purpose\":\"Lists shipments, optionally only those of one order.\",\"signature\":\"list_shipments(order_id?: string, limit?: integer, cursor?: string, fields?: string[])\",\"example\":\"list_shipments({\\\"limit\\\":5})\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":8,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":25}}"
    }
   ],
   "structuredContent": {
@@ -4524,59 +4524,65 @@
     "tools": [
      {
       "name": "list_order_refunds",
-      "purpose": "List refunds of an order",
+      "purpose": "Lists the refunds issued for one order.",
       "signature": "list_order_refunds(order_id*: string, cursor?: string, fields?: string[])",
+      "example": "list_order_refunds({\"order_id\":\"order_1\"})",
       "read_only": true,
       "destructive": false
      },
      {
       "name": "create_refund",
-      "purpose": "Refund an order",
+      "purpose": "Refunds part or all of a paid order.",
       "signature": "create_refund(order_id*: string, amount*: number, reason*: \"damaged\"|\"not_received\"|\"wrong_item\"|\"goodwill\", fields?: string[], dry_run?: boolean, confirm?: string)",
+      "example": "create_refund({\"order_id\":\"order_1\",\"amount\":0.01,\"reason\":\"damaged\"})",
       "read_only": false,
       "destructive": true
      },
      {
       "name": "get_order",
-      "purpose": "Get an order",
+      "purpose": "Returns one order with its line items, totals and status.",
       "signature": "get_order(order_id*: string, fields?: string[])",
+      "example": "get_order({\"order_id\":\"order_1\"})",
       "read_only": true,
       "destructive": false
      },
      {
       "name": "cancel_order",
-      "purpose": "Cancel an order",
+      "purpose": "Cancels an order that has not shipped.",
       "signature": "cancel_order(order_id*: string, reason?: \"customer_request\"|\"out_of_stock\"|\"fraud\"|\"other\", fields?: string[], dry_run?: boolean, confirm?: string)",
+      "example": "cancel_order({\"order_id\":\"order_1\"})",
       "read_only": false,
       "destructive": true
      },
      {
       "name": "update_order",
-      "purpose": "Update an order",
+      "purpose": "Changes the shipping address or the note of an order that has not shipped yet.",
       "signature": "update_order(order_id*: string, shippingAddress?: object, note?: string, fields?: string[], dry_run?: boolean)",
+      "example": "update_order({\"order_id\":\"order_1\"})",
       "read_only": false,
       "destructive": false
      },
      {
       "name": "create_order",
-      "purpose": "Create an order",
+      "purpose": "Creates a pending order for a customer with one or more line items.",
       "signature": "create_order(customerId*: string, items*: object[], shippingAddress?: object, fields?: string[], dry_run?: boolean)",
+      "example": "create_order({\"customerId\":\"customer_1\",\"items\":[{\"sku\":\"product_1\",\"quantity\":1}]})",
       "read_only": false,
       "destructive": false
      },
      {
       "name": "list_orders",
-      "purpose": "List orders",
+      "purpose": "Lists orders, newest first.",
       "signature": "list_orders(status?: \"pending\"|\"paid\"|\"shipped\"|\"delivered\"|\"cancelled\"|\"refunded\", customer_id?: string, limit?: integer, cursor?: string, fields?: string[])",
-      "example": "list_orders({})",
+      "example": "list_orders({\"limit\":5})",
       "read_only": true,
       "destructive": false
      },
      {
       "name": "list_shipments",
-      "purpose": "List shipments",
+      "purpose": "Lists shipments, optionally only those of one order.",
       "signature": "list_shipments(order_id?: string, limit?: integer, cursor?: string, fields?: string[])",
-      "example": "list_shipments({})",
+      "example": "list_shipments({\"limit\":5})",
       "read_only": true,
       "destructive": false
      }
@@ -4605,7 +4611,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"cancel_order\",\"purpose\":\"Cancel an order\",\"signature\":\"cancel_order(order_id*: string, reason?: \\\"customer_request\\\"|\\\"out_of_stock\\\"|\\\"fraud\\\"|\\\"other\\\", fields?: string[], dry_run?: boolean, confirm?: string)\",\"read_only\":false,\"destructive\":true,\"input_schema\":{\"type\":\"object\",\"properties\":{\"order_id\":{\"type\":\"string\",\"description\":\"The order id.\"},\"reason\":{\"type\":\"string\",\"enum\":[\"customer_request\",\"out_of_stock\",\"fraud\",\"other\"],\"description\":\"Why the order is cancelled.\"},\"fields\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"maxItems\":50,\"description\":\"Return only these fields (dot paths, e.g. [\\\"id\\\",\\\"customer.name\\\"]).\"},\"dry_run\":{\"type\":\"boolean\",\"description\":\"true: return the plan (target, effect, reversible) without changing anything.\"},\"confirm\":{\"type\":\"string\",\"description\":\"Outside prod: the token from the plan this call returned (error.next); inside prod your user approves instead.\"}},\"required\":[\"order_id\"],\"additionalProperties\":false},\"returns\":[\"id\",\"customerId\",\"status\",\"items\",\"total\",\"currency\",\"shippingAddress\",\"note\",\"createdAt\"]},{\"name\":\"get_order\",\"purpose\":\"Get an order\",\"signature\":\"get_order(order_id*: string, fields?: string[])\",\"read_only\":true,\"destructive\":false,\"input_schema\":{\"type\":\"object\",\"properties\":{\"order_id\":{\"type\":\"string\",\"description\":\"The order id.\"},\"fields\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"maxItems\":50,\"description\":\"Return only these fields (dot paths, e.g. [\\\"id\\\",\\\"customer.name\\\"]).\"}},\"required\":[\"order_id\"],\"additionalProperties\":false},\"returns\":[\"id\",\"customerId\",\"status\",\"items\",\"total\",\"currency\",\"shippingAddress\",\"note\",\"createdAt\"]}],\"total_matches\":null},\"page\":{\"count\":2,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":26}}"
+    "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"cancel_order\",\"purpose\":\"Cancels an order that has not shipped.\",\"signature\":\"cancel_order(order_id*: string, reason?: \\\"customer_request\\\"|\\\"out_of_stock\\\"|\\\"fraud\\\"|\\\"other\\\", fields?: string[], dry_run?: boolean, confirm?: string)\",\"example\":\"cancel_order({\\\"order_id\\\":\\\"order_1\\\"})\",\"read_only\":false,\"destructive\":true,\"input_schema\":{\"type\":\"object\",\"properties\":{\"order_id\":{\"type\":\"string\",\"description\":\"The order id.\"},\"reason\":{\"type\":\"string\",\"enum\":[\"customer_request\",\"out_of_stock\",\"fraud\",\"other\"],\"description\":\"Why the order is cancelled.\"},\"fields\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"maxItems\":50,\"description\":\"Return only these fields (dot paths, e.g. [\\\"id\\\",\\\"customer.name\\\"]).\"},\"dry_run\":{\"type\":\"boolean\",\"description\":\"true: return the plan (target, effect, reversible) without changing anything.\"},\"confirm\":{\"type\":\"string\",\"description\":\"Outside prod: the token from the plan this call returned (error.next); inside prod your user approves instead.\"}},\"required\":[\"order_id\"],\"additionalProperties\":false},\"returns\":[\"id\",\"customerId\",\"status\",\"items\",\"total\",\"currency\",\"shippingAddress\",\"note\",\"createdAt\"]},{\"name\":\"get_order\",\"purpose\":\"Returns one order with its line items, totals and status.\",\"signature\":\"get_order(order_id*: string, fields?: string[])\",\"example\":\"get_order({\\\"order_id\\\":\\\"order_1\\\"})\",\"read_only\":true,\"destructive\":false,\"input_schema\":{\"type\":\"object\",\"properties\":{\"order_id\":{\"type\":\"string\",\"description\":\"The order id.\"},\"fields\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"maxItems\":50,\"description\":\"Return only these fields (dot paths, e.g. [\\\"id\\\",\\\"customer.name\\\"]).\"}},\"required\":[\"order_id\"],\"additionalProperties\":false},\"returns\":[\"id\",\"customerId\",\"status\",\"items\",\"total\",\"currency\",\"shippingAddress\",\"note\",\"createdAt\"]}],\"total_matches\":null},\"page\":{\"count\":2,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":26}}"
    }
   ],
   "structuredContent": {
@@ -4614,8 +4620,9 @@
     "tools": [
      {
       "name": "cancel_order",
-      "purpose": "Cancel an order",
+      "purpose": "Cancels an order that has not shipped.",
       "signature": "cancel_order(order_id*: string, reason?: \"customer_request\"|\"out_of_stock\"|\"fraud\"|\"other\", fields?: string[], dry_run?: boolean, confirm?: string)",
+      "example": "cancel_order({\"order_id\":\"order_1\"})",
       "read_only": false,
       "destructive": true,
       "input_schema": {
@@ -4671,8 +4678,9 @@
      },
      {
       "name": "get_order",
-      "purpose": "Get an order",
+      "purpose": "Returns one order with its line items, totals and status.",
       "signature": "get_order(order_id*: string, fields?: string[])",
+      "example": "get_order({\"order_id\":\"order_1\"})",
       "read_only": true,
       "destructive": false,
       "input_schema": {
@@ -4733,7 +4741,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"list_orders\",\"purpose\":\"List orders\",\"signature\":\"acme.list_orders(*, status: Literal[\\\"pending\\\", \\\"paid\\\", \\\"shipped\\\", \\\"delivered\\\", \\\"cancelled\\\", \\\"refunded\\\"] | None = None, customer_id: str | None = None, limit: int = 20, cursor: str | None = None) -> ListOrdersResult\",\"example\":\"acme.list_orders()\",\"read_only\":true,\"destructive\":false},{\"name\":\"create_order\",\"purpose\":\"Create an order\",\"signature\":\"acme.create_order(*, customerId: str, items: list[LineItem], shippingAddress: Address | None = None) -> dict[str, Any]\",\"read_only\":false,\"destructive\":false},{\"name\":\"get_customer\",\"purpose\":\"Get a customer\",\"signature\":\"acme.get_customer(*, customer_id: str) -> Customer\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":3,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":27}}"
+    "text": "{\"ok\":true,\"data\":{\"tools\":[{\"name\":\"list_orders\",\"purpose\":\"Lists orders, newest first.\",\"signature\":\"acme.list_orders(*, status: Literal[\\\"pending\\\", \\\"paid\\\", \\\"shipped\\\", \\\"delivered\\\", \\\"cancelled\\\", \\\"refunded\\\"] | None = None, customer_id: str | None = None, limit: int = 20, cursor: str | None = None) -> ListOrdersResult\",\"example\":\"acme.list_orders(limit=5)\",\"read_only\":true,\"destructive\":false},{\"name\":\"create_order\",\"purpose\":\"Creates a pending order for a customer with one or more line items.\",\"signature\":\"acme.create_order(*, customer_id: str, items: list[LineItem2], shipping_address: Address | None = None) -> dict[str, Any]\",\"example\":\"acme.create_order(customer_id=\\\"customer_1\\\", items=[{\\\"sku\\\": \\\"product_1\\\", \\\"quantity\\\": 1}])\",\"read_only\":false,\"destructive\":false},{\"name\":\"get_customer\",\"purpose\":\"Returns one customer with their lifetime order count and spend.\",\"signature\":\"acme.get_customer(*, customer_id: str) -> Customer\",\"example\":\"acme.get_customer(customer_id=\\\"customer_1\\\")\",\"read_only\":true,\"destructive\":false}],\"total_matches\":null},\"page\":{\"count\":3,\"total\":null,\"has_more\":true,\"next_cursor\":null},\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":27}}"
    }
   ],
   "structuredContent": {
@@ -4742,23 +4750,25 @@
     "tools": [
      {
       "name": "list_orders",
-      "purpose": "List orders",
+      "purpose": "Lists orders, newest first.",
       "signature": "acme.list_orders(*, status: Literal[\"pending\", \"paid\", \"shipped\", \"delivered\", \"cancelled\", \"refunded\"] | None = None, customer_id: str | None = None, limit: int = 20, cursor: str | None = None) -> ListOrdersResult",
-      "example": "acme.list_orders()",
+      "example": "acme.list_orders(limit=5)",
       "read_only": true,
       "destructive": false
      },
      {
       "name": "create_order",
-      "purpose": "Create an order",
-      "signature": "acme.create_order(*, customerId: str, items: list[LineItem], shippingAddress: Address | None = None) -> dict[str, Any]",
+      "purpose": "Creates a pending order for a customer with one or more line items.",
+      "signature": "acme.create_order(*, customer_id: str, items: list[LineItem2], shipping_address: Address | None = None) -> dict[str, Any]",
+      "example": "acme.create_order(customer_id=\"customer_1\", items=[{\"sku\": \"product_1\", \"quantity\": 1}])",
       "read_only": false,
       "destructive": false
      },
      {
       "name": "get_customer",
-      "purpose": "Get a customer",
+      "purpose": "Returns one customer with their lifetime order count and spend.",
       "signature": "acme.get_customer(*, customer_id: str) -> Customer",
+      "example": "acme.get_customer(customer_id=\"customer_1\")",
       "read_only": true,
       "destructive": false
      }
@@ -5650,12 +5660,12 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":\"{\\\"code\\\":\\\"not_found\\\",\\\"message\\\":\\\"No order 'ord_nope' in mock. Nothing changed.\\\",\\\"retry\\\":\\\"after_fix\\\",\\\"next\\\":[{\\\"tool\\\":\\\"run_script\\\",\\\"args\\\":{\\\"code\\\":\\\"return acme.list_orders(limit=20)\\\"}}],\\\"upstream\\\":{\\\"status\\\":404,\\\"detail\\\":\\\"order ord_nope not found\\\"},\\\"error_id\\\":\\\"err_<id>\\\"}\",\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":52,\"left\":{\"calls\":199,\"seconds\":0},\"script_calls\":1}}"
+    "text": "{\"ok\":true,\"data\":\"not_found: No order 'ord_nope' in mock. Nothing changed. Next: acme.list_orders(limit=20)\",\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":52,\"left\":{\"calls\":199,\"seconds\":0},\"script_calls\":1}}"
    }
   ],
   "structuredContent": {
    "ok": true,
-   "data": "{\"code\":\"not_found\",\"message\":\"No order 'ord_nope' in mock. Nothing changed.\",\"retry\":\"after_fix\",\"next\":[{\"tool\":\"run_script\",\"args\":{\"code\":\"return acme.list_orders(limit=20)\"}}],\"upstream\":{\"status\":404,\"detail\":\"order ord_nope not found\"},\"error_id\":\"err_<id>\"}",
+   "data": "not_found: No order 'ord_nope' in mock. Nothing changed. Next: acme.list_orders(limit=20)",
    "page": null,
    "truncated": null,
    "error": null,
@@ -5679,12 +5689,12 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":\"{\\\"code\\\":\\\"invalid_args\\\",\\\"message\\\":\\\"1 invalid argument; nothing was called.\\\",\\\"fields\\\":[{\\\"field\\\":\\\"limit\\\",\\\"received\\\":500,\\\"allowed\\\":\\\"1..100\\\",\\\"problem\\\":\\\"out of range\\\"}],\\\"retry\\\":\\\"after_fix\\\",\\\"next\\\":[{\\\"tool\\\":\\\"run_script\\\",\\\"args\\\":{\\\"code\\\":\\\"return acme.list_orders(limit=100)\\\"}}],\\\"error_id\\\":\\\"err_<id>\\\"}\",\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":53,\"left\":{\"calls\":199,\"seconds\":0},\"script_calls\":1}}"
+    "text": "{\"ok\":true,\"data\":\"invalid_args: 1 invalid argument; nothing was called. Next: acme.list_orders(limit=100)\",\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":53,\"left\":{\"calls\":199,\"seconds\":0},\"script_calls\":1}}"
    }
   ],
   "structuredContent": {
    "ok": true,
-   "data": "{\"code\":\"invalid_args\",\"message\":\"1 invalid argument; nothing was called.\",\"fields\":[{\"field\":\"limit\",\"received\":500,\"allowed\":\"1..100\",\"problem\":\"out of range\"}],\"retry\":\"after_fix\",\"next\":[{\"tool\":\"run_script\",\"args\":{\"code\":\"return acme.list_orders(limit=100)\"}}],\"error_id\":\"err_<id>\"}",
+   "data": "invalid_args: 1 invalid argument; nothing was called. Next: acme.list_orders(limit=100)",
    "page": null,
    "truncated": null,
    "error": null,
@@ -5708,22 +5718,24 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"result\":{\"dry_run\":true,\"planned\":{\"tool\":\"cancel_order\",\"method\":\"POST\",\"path\":\"/orders/{orderId}/cancel\",\"arguments\":{\"order_id\":\"order_2\",\"reason\":\"other\"}}},\"plan\":[{\"tool\":\"cancel_order\",\"target\":\"order order_2\",\"method\":\"POST\",\"path\":\"/orders/{orderId}/cancel\",\"args\":{\"order_id\":\"order_2\",\"reason\":\"other\"},\"reversible\":false,\"effect\":\"Cancels an order that has not shipped. Paid orders are refunded in full automatically.\"}],\"next\":{\"tool\":\"run_script\",\"args\":{\"code\":\"return acme.cancel_order(order_id=\\\"order_2\\\", reason=\\\"other\\\")\",\"mode\":\"execute\",\"confirm\":\"ct_<token>\"}}},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":54,\"left\":{\"calls\":199,\"seconds\":0},\"script_calls\":1,\"flags\":[\"dry_run\"]}}"
+    "text": "{\"ok\":true,\"data\":{\"result\":{\"plan\":{\"tool\":\"cancel_order\",\"target\":\"order order_2\",\"method\":\"POST\",\"path\":\"/orders/{orderId}/cancel\",\"args\":{\"order_id\":\"order_2\",\"reason\":\"other\"},\"reversible\":false,\"effect\":\"Cancels an order that has not shipped. Paid orders are refunded in full automatically.\"}},\"plan\":[{\"tool\":\"cancel_order\",\"target\":\"order order_2\",\"method\":\"POST\",\"path\":\"/orders/{orderId}/cancel\",\"args\":{\"order_id\":\"order_2\",\"reason\":\"other\"},\"reversible\":false,\"effect\":\"Cancels an order that has not shipped. Paid orders are refunded in full automatically.\"}],\"next\":{\"tool\":\"run_script\",\"args\":{\"code\":\"return acme.cancel_order(order_id=\\\"order_2\\\", reason=\\\"other\\\")\",\"mode\":\"execute\",\"confirm\":\"ct_<token>\"}}},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"env\":\"mock\",\"writes\":\"on\",\"task\":\"t_<id>\",\"call\":54,\"left\":{\"calls\":199,\"seconds\":0},\"script_calls\":1,\"flags\":[\"dry_run\"]}}"
    }
   ],
   "structuredContent": {
    "ok": true,
    "data": {
     "result": {
-     "dry_run": true,
-     "planned": {
+     "plan": {
       "tool": "cancel_order",
+      "target": "order order_2",
       "method": "POST",
       "path": "/orders/{orderId}/cancel",
-      "arguments": {
+      "args": {
        "order_id": "order_2",
        "reason": "other"
-      }
+      },
+      "reversible": false,
+      "effect": "Cancels an order that has not shipped. Paid orders are refunded in full automatically."
      }
     },
     "plan": [
@@ -5816,7 +5828,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"script_error\",\"message\":\"Type error: Module `acme` has no member `no_such_fn`\",\"retry\":\"after_fix\",\"next\":[],\"line\":1},\"state\":{\"task\":\"t_<id>\",\"call\":56,\"left\":{\"calls\":200,\"seconds\":0},\"script_calls\":0,\"flags\":[\"dry_run\"]}}"
+    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"script_error\",\"message\":\"Type error: acme has no function no_such_fn. Closest: acme.list_shipments, acme.get_shipment. Find functions with search_tools.\",\"retry\":\"after_fix\",\"next\":[],\"line\":1},\"state\":{\"task\":\"t_<id>\",\"call\":56,\"left\":{\"calls\":200,\"seconds\":0},\"script_calls\":0,\"flags\":[\"dry_run\"]}}"
    }
   ],
   "structuredContent": {
@@ -5826,7 +5838,7 @@
    "truncated": null,
    "error": {
     "code": "script_error",
-    "message": "Type error: Module `acme` has no member `no_such_fn`",
+    "message": "Type error: acme has no function no_such_fn. Closest: acme.list_shipments, acme.get_shipment. Find functions with search_tools.",
     "retry": "after_fix",
     "next": [],
     "line": 1

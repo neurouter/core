@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { generateOpsStub, generateStubs, pyArgMap } from '@neurouter/compiler';
+import { generateOpsStub, generateOpsStubV2, generateStubs, NR_HOST_STUBS, pyArgMap, pyCallText, pyNameMap, scriptApi, scriptCommonTypeStubs, scriptErrorType, scriptPrelude } from '@neurouter/compiler';
 import type { Executor, HostCallResult, RunResult } from '@neurouter/executor';
 import { META_CALL_ID, META_PLANNED_CHANGES, META_RESULT_HANDLE, META_TASK_ID, META_TRUNCATED, SCRIPT_BUILTIN_ALTERNATIVES, scriptBuiltinsLine, type ErrorCode, type ScriptStatus, type ToolDef } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
@@ -20,25 +20,16 @@ import type { Call, EnvelopeErrorCode, ErrorInfo } from '../envelope/types.js';
 import { NO_RESULT, v1Result } from '../envelope/v1.js';
 import { envLabel, killSwitchFor, resolveVisibleTool, writeEnabled, type Confirmer, type McpToolResult, type Pipeline, type PlannedChange } from '../pipeline/pipeline.js';
 import type { OpsTools } from '../ops/ops.js';
-import { opFor } from '../ops/ops.js';
+import { opFor, reportEnabled } from '../ops/ops.js';
 import { validateScript } from './validate.js';
 import { writePlan, type ConfirmTokens } from '../pipeline/confirm-token.js';
-import type { CursorPayload } from '../paging/cursor.js';
+import { CursorError, isNeurouterCursor, type CursorCodec, type CursorPayload } from '../paging/cursor.js';
+import { exampleArgs, propsOf } from '../envelope/relations.js';
 import { itemsOf, pagingPlan } from '../paging/plan.js';
 import { wrapScript } from './wrap.js';
 
 /** Ops helpers forwarded to the host (parallel / days_since / now run inside the executor). */
 export const SCRIPT_OPS = ['log_decision', 'report_unmet_need', 'report_issue'] as const;
-
-/** Contract 2: `ops.pages` (all items of a list tool across its pages; P4 adds `fn.pages()` on the functions). */
-const PAGES_STUB = [
-  'def pages(fn: str, args: dict[str, Any] | None = None, max_items: int = 500) -> list[Any]:',
-  '    """All items of a list function across its pages, e.g. ops.pages(fn="ns.list_orders", args={"status": "paid"}, max_items=200).',
-  '',
-  '    Each page is one tool call. Stops after max_items (at most 5000) or the last page."""',
-  '',
-].join('\n');
-const PAGES_MAX = 5000;
 
 export const RUN_SCRIPT_DEFINITION = {
   name: 'run_script',
@@ -73,6 +64,16 @@ export interface RunScriptDeps {
   healthy: () => boolean;
   /** contract 2: confirm tokens for scripts with destructive calls outside prod (D5) */
   confirms?: ConfirmTokens;
+  /** contract 2: page cursors (`fn.page()` / `Result.next()` / `fn.pages()`), the P2 codec */
+  cursors?: CursorCodec;
+}
+
+/** What contract-2 code mode is given per run: module stubs, the prelude and the type-check declarations. */
+interface ScriptSurface {
+  stubs: Record<string, string>;
+  prelude?: string;
+  typeStubs?: string;
+  opsFunctions: string[];
 }
 
 interface Phase {
@@ -83,19 +84,25 @@ interface Phase {
 
 const MAX_CONCURRENT_PER_PRINCIPAL = 2;
 
-/** Contract 2: the Python exception a tool error raises inside a script (its message is the error object as JSON). */
-const PY_ERROR: Partial<Record<EnvelopeErrorCode, string>> = {
-  not_found: 'LookupError',
-  invalid_args: 'ValueError',
-  unknown_tool: 'AttributeError',
-  forbidden: 'PermissionError',
-  writes_disabled: 'PermissionError',
-  policy_denied: 'PermissionError',
-  confirmation_required: 'PermissionError',
-  confirmation_declined: 'PermissionError',
-  confirmation_unsupported: 'PermissionError',
-  timeout: 'TimeoutError',
-};
+/** A tool error raised into a script (by its `str(e)`), for the run's error when the script does not catch it. */
+interface InnerError {
+  info: ErrorInfo;
+  plan?: unknown;
+}
+
+/** Contract 2: the error object `ops.error(e)` returns inside a script (next calls as `{fn, args}` with Python names). */
+interface ScriptErrorObject {
+  code: EnvelopeErrorCode;
+  message: string;
+  retry: ErrorInfo['retry'];
+  retry_after_ms?: number;
+  next: Array<{ fn: string; args: Record<string, unknown> }>;
+  fields?: ErrorInfo['fields'];
+  closest?: string[];
+  upstream?: ErrorInfo['upstream'];
+  error_id?: string;
+  plan?: unknown;
+}
 
 /** A JSON value as a Python literal. */
 function pyLiteral(v: unknown): string {
@@ -109,12 +116,43 @@ function pyLiteral(v: unknown): string {
 }
 
 /** An API tool call as the `run_script` call that makes it (next calls inside code mode). */
-function asScriptCall(call: Call, tools: ToolDef[]): Call {
+function asScriptCall(call: Call, tools: ToolDef[], snake = false): Call {
   const t = tools.find((x) => x.name === call.tool);
   if (!t) return call;
-  const inv = Object.fromEntries(Object.entries(pyArgMap(t)).map(([py, arg]) => [arg, py]));
+  const inv = pyNameMap(t, { snake });
   const kw = Object.entries(call.args).map(([k, v]) => `${inv[k] ?? k}=${pyLiteral(v)}`).join(', ');
   return { tool: 'run_script', args: { code: `return ${t.pyName}(${kw})` } };
+}
+
+/** Contract 2: an envelope error as the script sees it (`ops.error(e)`, `str(e)`): next calls in Python form. */
+function scriptErrorObject(info: ErrorInfo, tools: ToolDef[], plan: unknown): { error: ScriptErrorObject; text: string } {
+  const next = info.next.map((c) => {
+    const t = tools.find((x) => x.name === c.tool);
+    if (!t) return { fn: c.tool, args: c.args };
+    const names = pyNameMap(t, { snake: true });
+    return { fn: t.pyName, args: Object.fromEntries(Object.entries(c.args).map(([k, v]) => [names[k] ?? k, v])) };
+  });
+  const firstTool = info.next[0] ? tools.find((x) => x.name === info.next[0]!.tool) : undefined;
+  const nextText = info.next[0] ? (firstTool ? pyCallText(firstTool, info.next[0].args) : `${info.next[0].tool}(${JSON.stringify(info.next[0].args)})`) : '';
+  const fields = info.fields?.map((f) => {
+    const t = info.next[0] ? tools.find((x) => x.name === info.next[0]!.tool) : undefined;
+    const py = t ? pyNameMap(t, { snake: true })[f.field] : undefined;
+    return py ? { ...f, field: py } : f;
+  });
+  const error: ScriptErrorObject = {
+    code: info.code,
+    message: info.message,
+    retry: info.retry,
+    ...(info.retry_after_ms !== undefined ? { retry_after_ms: info.retry_after_ms } : {}),
+    next,
+    ...(fields?.length ? { fields } : {}),
+    ...(info.closest?.length ? { closest: info.closest } : {}),
+    ...(info.upstream ? { upstream: info.upstream } : {}),
+    ...(info.error_id ? { error_id: info.error_id } : {}),
+    ...(plan !== undefined ? { plan } : {}),
+  };
+  const head = `${info.code}: ${info.message}`;
+  return { error, text: nextText && head.length + nextText.length < 380 ? `${head} Next: ${nextText}` : head };
 }
 
 export interface ScriptReply {
@@ -165,7 +203,7 @@ export function runScriptEntry(ctx: RunContext): Omit<typeof RUN_SCRIPT_DEFINITI
   const tools = allowedTools(ctx);
   const call = exampleCall(tools);
   const writes = tools.some((t) => t.risk.write);
-  const description = call ? RUN_SCRIPT_DEFINITION.description.replace('(e.g. <namespace>.<function>(arg=...))', `(e.g. ${call})`) : RUN_SCRIPT_DEFINITION.description;
+  const description = ctx.contract === 2 ? runScriptDescriptionV2(ctx, tools) : call ? RUN_SCRIPT_DEFINITION.description.replace('(e.g. <namespace>.<function>(arg=...))', `(e.g. ${call})`) : RUN_SCRIPT_DEFINITION.description;
   const destructive = tools.some((t) => t.risk.write && t.risk.destructive);
   // contract 2 outside prod (D5): scripts with destructive calls run with the confirm token of their dry run
   const confirm = ctx.contract === 2 && destructive && ctx.bundle.environment.writes.confirm === 'none';
@@ -189,7 +227,7 @@ export function codeModeAvailable(ctx: RunContext, healthy: boolean): boolean {
 export class ScriptRunner {
   private readonly validated = new Map<string, ReturnType<typeof validateScript>>();
   private readonly running = new Map<string, number>();
-  private readonly stubCache = new Map<string, Record<string, string>>();
+  private readonly stubCache = new Map<string, ScriptSurface>();
 
   constructor(private readonly d: RunScriptDeps) {}
 
@@ -324,7 +362,7 @@ export class ScriptRunner {
     planned: PlannedChange[],
     callAs: ScriptCallAs,
     budget: { calls: number; left: { calls: number; seconds: number } },
-    innerErrors: Map<string, ErrorInfo>,
+    innerErrors: Map<string, InnerError>,
     meta: Record<string, unknown>,
     src: { code: string; inputs: Record<string, unknown> },
   ): Draft {
@@ -350,8 +388,11 @@ export class ScriptRunner {
     const line = typeof e.line === 'number' ? e.line : undefined;
     const base = { name: callAs.name, args: callAs.args, ...(line !== undefined ? { line } : {}) };
     // an uncaught tool error: the message is the error object raised into the script
-    const inner = [...innerErrors.entries()].find(([json]) => raw.includes(json))?.[1];
-    if (inner) return errorDraft({ code: inner.code, message: inner.message, info: inner, ...base }, extra);
+    const hit = [...innerErrors.entries()].find(([text]) => raw.includes(text))?.[1];
+    if (hit) {
+      const inner = hit.info;
+      return errorDraft({ code: inner.code, message: inner.message, info: inner, ...base }, { ...extra, ...(hit.plan !== undefined ? { data: { plan: [hit.plan] } } : {}) });
+    }
     const msg = (s: string) => (s.length <= 200 ? s : `${s.slice(0, 199)}…`);
     switch (status) {
       case 'rejected':
@@ -371,46 +412,89 @@ export class ScriptRunner {
   }
 
   /**
-   * `ops.pages(fn, args, max_items)` (contract 2): calls a list function page by page with the positions the
-   * pipeline reads from each upstream answer (the same ones `page.next_cursor` encodes), up to `max_items`. Each
-   * page is one tool call of the script (limits apply); a failing page raises its tool error.
+   * Contract 2: `_nr.call(fn, args, page?)`, the host side of every tool function in the prelude. Python keyword
+   * names are mapped back (D8), a `c_` cursor (from `Result.page.next_cursor`) is checked with the P2 codec against
+   * this call's other arguments, and the call runs through the pipeline. Tool errors come back as values
+   * (`{ok: false, py, text, error}`) for the prelude to raise; `page: true` adds `items` and `page`.
    */
-  private async pages(ctx: RunContext, kwargs: Record<string, unknown>, byFn: Map<string, ToolDef>, count: () => void, raise: (info: ErrorInfo) => HostCallResult, tools: ToolDef[], signal: AbortSignal | undefined, planned: PlannedChange[]): Promise<HostCallResult> {
-    const fn = typeof kwargs.fn === 'string' ? kwargs.fn : '';
-    const t = byFn.get(fn);
-    const bad = (text: string) => raise({ code: 'invalid_args', message: text, retry: 'after_fix', next: [] });
-    if (!t) return bad(`ops.pages: no function ${fn || '(fn missing)'} in this script's namespaces; pass fn="<ns>.<list function>".`);
-    if (!pagingPlan(t).list) return bad(`ops.pages: ${fn} does not return a list.`);
-    const raw = kwargs.args ?? {};
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('ops.pages: args must be a dict of keyword arguments.');
-    const max = Math.min(PAGES_MAX, Math.max(1, Number.isInteger(kwargs.max_items) ? (kwargs.max_items as number) : 500));
-    const map = pyArgMap(t);
-    const args: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) args[map[k] ?? k] = v;
-    const items: unknown[] = [];
-    let position: Exclude<CursorPayload, { k: 'r' }> | undefined;
-    for (let page = 0; page < PAGES_MAX && items.length < max; page++) {
-      if (page > 0) count();
-      const out = await this.d.pipeline.invoke(ctx, t.name, args, { planned, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
-      if (!out.ok) {
-        const info: ErrorInfo = out.draft.error ? await errorInfoFor(ctx, out.draft.error) : { code: 'upstream_error', message: out.error?.message ?? 'page failed', retry: 'no', next: [] };
-        return raise({ ...info, next: info.next.map((c) => asScriptCall(c, tools)) });
-      }
-      items.push(...(itemsOf(out.value) ?? []));
-      if (!out.paging?.more || !out.paging.next) break;
-      position = out.paging.next;
+  private async nrCall(
+    ctx: RunContext,
+    kwargs: Record<string, unknown>,
+    byFn: Map<string, ToolDef>,
+    refuse: (info: ErrorInfo, plan?: unknown) => HostCallResult,
+    unknownFn: (name: string) => Promise<ErrorInfo>,
+    planned: PlannedChange[],
+    signal: AbortSignal | undefined,
+    onBlocked: () => void,
+  ): Promise<HostCallResult> {
+    const name = typeof kwargs.fn === 'string' ? kwargs.fn : '';
+    const t = byFn.get(name);
+    if (!t) {
+      onBlocked();
+      return refuse(await unknownFn(name || '(no function)'));
     }
-    return { ok: true, value: items.slice(0, max) };
+    const raw = kwargs.args && typeof kwargs.args === 'object' && !Array.isArray(kwargs.args) ? (kwargs.args as Record<string, unknown>) : {};
+    const map = pyArgMap(t, { snake: true });
+    const plan = pagingPlan(t);
+    const args: Record<string, unknown> = {};
+    let cursor: string | undefined;
+    for (const [k, v] of Object.entries(raw)) {
+      if (k === 'cursor' && typeof v === 'string' && isNeurouterCursor(v)) cursor = v;
+      else args[map[k] ?? k] = v;
+    }
+    // a raw upstream cursor value passed as `cursor` goes to the upstream cursor parameter (as in tool mode)
+    if (args.cursor !== undefined && !('cursor' in propsOf(t)) && plan.cursor) {
+      args[plan.cursor.arg] = args.cursor;
+      delete args.cursor;
+    }
+    let position: CursorPayload | undefined;
+    if (cursor) {
+      const problem = (() => {
+        if (!this.d.cursors) return 'is not available here';
+        try {
+          position = this.d.cursors.decode(cursor, { tenantId: ctx.tenantId, credentialKey: ctx.credentialKey, tool: t.name, args: Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined)), contract: 2 });
+          return null;
+        } catch (err) {
+          const p = err instanceof CursorError ? err.problem : 'malformed';
+          return p === 'expired' ? 'expired (cursors last 1 hour)' : p === 'mismatch' ? 'belongs to another function or other arguments' : 'is not a page.next_cursor';
+        }
+      })();
+      if (problem) {
+        onBlocked();
+        return refuse(await errorInfoFor(ctx, { code: 'invalid_args', message: '', text: `The cursor ${problem}; nothing was called. Call again without it, with the same other arguments.`, name: t.name, tool: t, args, issues: [{ path: '/cursor', keyword: 'cursor', params: {}, message: problem }], next: [{ tool: t.name, args }] }));
+      }
+    }
+    const out = await this.d.pipeline.invoke(ctx, t.name, args, { planned, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
+    if (!out.ok) {
+      if (out.decision.startsWith('denied_')) onBlocked();
+      if (out.draft.error) return refuse(await errorInfoFor(ctx, out.draft.error), planOf(out.draft.data));
+      return refuse({ code: 'upstream_error', message: out.error?.message ?? 'The call failed.', retry: 'no', next: [] });
+    }
+    const data = innerValue(ctx, out, args);
+    if (kwargs.page !== true) return { ok: true, value: { ok: true, data } };
+    return { ok: true, value: { ok: true, data, items: itemsOf(data), page: out.draft.page ?? null } };
   }
 
-  /** Stubs regenerated from the filtered tool list, cached by (build, allowedSetHash). */
-  private stubsFor(ctx: RunContext, tools: ToolDef[], ns: string): Record<string, string> {
+  /** Stubs regenerated from the filtered tool list, cached by (build, allowedSetHash, contract). */
+  private surfaceFor(ctx: RunContext, tools: ToolDef[], ns: string): ScriptSurface {
     const ops = SCRIPT_OPS.filter((o) => ctx.bundle.server.opsTools[o]);
     const v2 = ctx.contract === 2;
-    const k = `${ctx.bundle.build.id}|${sha256Hex(tools.map((t) => t.name).join(','))}|${ops.join(',')}|${v2 ? 2 : 1}`;
+    const report = v2 && reportEnabled(ctx);
+    const confirmTokens = v2 && ctx.bundle.environment.writes.confirm === 'none';
+    const k = `${ctx.bundle.build.id}|${sha256Hex(tools.map((t) => t.name).join(','))}|${ops.join(',')}|${v2 ? `2${report ? 'r' : ''}${confirmTokens ? 'c' : ''}` : 1}`;
     const hit = this.stubCache.get(k);
     if (hit) return hit;
-    const out = { [ns]: generateStubs(tools, ns, { buildHash: ctx.bundle.build.hash }), ops: generateOpsStub(ops) + (v2 ? `\n${PAGES_STUB}` : '') };
+    let out: ScriptSurface;
+    if (!v2) out = { stubs: { [ns]: generateStubs(tools, ns, { buildHash: ctx.bundle.build.hash }), ops: generateOpsStub(ops) }, opsFunctions: [...ops] };
+    else {
+      const api = scriptApiFor(tools, ns, ctx.bundle.build.hash, confirmTokens);
+      out = {
+        stubs: { [ns]: api.stubs, ops: generateOpsStubV2(ops, report), _nr: NR_HOST_STUBS },
+        prelude: scriptPrelude([{ ns, functions: tools.map((t) => t.pyName.split('.').slice(1).join('.')) }], ops, report),
+        typeStubs: `${scriptCommonTypeStubs(ops, report)}${api.typeStubs}`,
+        opsFunctions: [...ops, ...(report ? ['report'] : [])],
+      };
+    }
     if (this.stubCache.size > 200) this.stubCache.clear();
     this.stubCache.set(k, out);
     return out;
@@ -486,17 +570,17 @@ export class ScriptRunner {
       return { status, planned, result: v1Result(text.length > 8192 ? `${text.slice(0, 8150)}… (truncated preview)` : text, structured, meta, isError), draft };
     };
     /** contract 2: the error objects raised into the script (by JSON message), so an uncaught one becomes the run's error */
-    const innerErrors = new Map<string, ErrorInfo>();
+    const innerErrors = new Map<string, InnerError>();
     let calls = 0;
     let blocked = 0;
 
     // validate (cached by code hash)
     const t0 = this.d.now();
-    let v = this.validated.get(codeHash);
+    let v = this.validated.get(`${ctx0.contract}|${codeHash}`);
     if (!v) {
-      v = validateScript(code, { namespaces: [ns, 'ops'] });
+      v = validateScript(code, { namespaces: [ns, 'ops'], ...(ctx0.contract === 2 ? { allow: ['getattr', 'hasattr'] } : {}) });
       if (this.validated.size > 1000) this.validated.delete(this.validated.keys().next().value!);
-      this.validated.set(codeHash, v);
+      this.validated.set(`${ctx0.contract}|${codeHash}`, v);
     }
     phases.push({ name: 'validate', status: v.ok ? 'ok' : 'failed', durationMs: this.d.now() - t0 });
     if (!v.ok) {
@@ -507,8 +591,8 @@ export class ScriptRunner {
 
     const tools = allowedTools(ctx);
     const byFn = new Map(tools.map((t) => [t.pyName, t]));
-    const stubs = this.stubsFor(ctx, tools, ns);
-    const opsFns = SCRIPT_OPS.filter((o) => ctx.bundle.server.opsTools[o]);
+    const surface = this.surfaceFor(ctx, tools, ns);
+    const stubs = surface.stubs;
     const capability = `rc_${randomBytes(32).toString('base64url')}`;
     const wrapped = wrapScript(code);
     const v2 = ctx.contract === 2;
@@ -519,38 +603,48 @@ export class ScriptRunner {
         if (calls >= lim.maxToolCalls) return { ok: false, error: { code: 'limit_exceeded', message: `${lim.maxToolCalls} tool calls` } };
         calls++;
         return sem.run(async () => {
-          const raise = (info: ErrorInfo): HostCallResult => {
-            const message = JSON.stringify(info);
-            innerErrors.set(message, info);
-            return { ok: false, error: { code: info.code, message, ...(PY_ERROR[info.code] ? { pyType: PY_ERROR[info.code] } : { pyType: 'RuntimeError' }) } } as HostCallResult;
+          // contract 2: a tool error raised into the script: concise `str(e)` (`<code>: <message> Next: <call>`), the
+          // structured error behind `ops.error(e)`, and the run's envelope error when the script does not catch it
+          const scriptError = (info0: ErrorInfo, plan?: unknown): { error: ScriptErrorObject; text: string } => {
+            // a destructive call outside the confirmed plan: the way on is to re-plan the script (its dry run gives a token)
+            const info = info0.code === 'confirmation_required' ? { ...info0, next: [{ tool: callAs.name, args: withoutConfirm(callAs.args) }] } : info0;
+            const runInfo = { ...info, next: info.code === 'confirmation_required' ? info.next : info.next.map((c) => asScriptCall(c, tools, true)) };
+            const out = scriptErrorObject(info, tools, plan);
+            innerErrors.set(out.text, { info: runInfo, plan });
+            return out;
           };
-          const unknownFn = async (): Promise<HostCallResult> => raise(await errorInfoFor(ctx, { code: 'unknown_tool', message: '', text: `No function ${fn} in this script's namespaces; nothing was called.`, name: fn, closest: closestNames(fn, [...byFn.keys()]), next: [{ tool: 'search_tools', args: { query: fn.split('.').pop() ?? fn } }] }));
-          if (fn === 'ops.pages' && v2) return this.pages(ctx, kwargs, byFn, () => calls++, raise, tools, signal, planned);
+          const raise = (info: ErrorInfo, plan?: unknown): HostCallResult => {
+            const { text } = scriptError(info, plan);
+            return { ok: false, error: { code: info.code, message: text, pyType: scriptErrorType(info.code) } } as HostCallResult;
+          };
+          /** `_nr.call` answers tool errors as values; the prelude raises them (no host-side exception). */
+          const refuse = (info: ErrorInfo, plan?: unknown): HostCallResult => {
+            const { error, text } = scriptError(info, plan);
+            return { ok: true, value: { ok: false, py: scriptErrorType(info.code), text, error } };
+          };
+          const unknownFn = async (name: string): Promise<ErrorInfo> => errorInfoFor(ctx, { code: 'unknown_tool', message: '', text: `No function ${name} in this script's namespaces; nothing was called.`, name, closest: closestNames(name, [...byFn.keys()]), next: [{ tool: 'search_tools', args: { query: name.split('.').pop() ?? name } }] });
+          if (fn === '_nr.call' && v2) return this.nrCall(ctx, kwargs, byFn, refuse, unknownFn, planned, signal, () => blocked++);
           if (fn.startsWith('ops.')) {
             const op = opFor(ctx, fn);
-            if (!op || !(SCRIPT_OPS as readonly string[]).includes(op)) return v2 ? unknownFn() : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
+            if (!op || !(surface.opsFunctions as readonly string[]).includes(op)) return v2 ? raise(await unknownFn(fn)) : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
             const r = await this.d.ops.call(ctx, op, kwargs);
             return { ok: true, value: r.value };
           }
           const t = byFn.get(fn);
           if (!t) {
             blocked++;
-            return v2 ? unknownFn() : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
+            return v2 ? raise(await unknownFn(fn)) : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
           }
-          const map = pyArgMap(t);
+          const map = pyArgMap(t, { snake: v2 });
           const argsIn: Record<string, unknown> = {};
           for (const [k, val] of Object.entries(kwargs)) argsIn[map[k] ?? k] = val;
           const out = await this.d.pipeline.invoke(ctx, t.name, argsIn, { planned, ...(signal ? { signal } : {}) });
           if (!out.ok) {
             blocked += out.decision.startsWith('denied_') ? 1 : 0;
-            if (v2 && out.draft.error) {
-              // next calls name API tools; inside a script they become run_script calls of the same function
-              const info = await errorInfoFor(ctx, out.draft.error);
-              return raise({ ...info, next: info.next.map((c) => asScriptCall(c, tools)) });
-            }
+            if (v2 && out.draft.error) return raise(await errorInfoFor(ctx, out.draft.error), planOf(out.draft.data));
             return { ok: false, error: { code: out.error?.code ?? 'tool_error', message: out.error?.message ?? 'tool call failed', ...(out.error?.errorId ? { errorId: out.error.errorId } : {}) } };
           }
-          return { ok: true, value: out.value ?? null };
+          return { ok: true, value: v2 ? innerValue(ctx, out, argsIn) : (out.value ?? null) };
         });
       },
     };
@@ -569,7 +663,9 @@ export class ScriptRunner {
           code: wrapped.code,
           lineOffset: wrapped.lineOffset,
           colOffset: wrapped.colOffset,
-          modules: { [ns]: { functions: tools.map((t) => t.pyName.split('.').slice(1).join('.')), stubs: stubs[ns]! }, ops: { functions: [...opsFns, ...(v2 ? ['pages'] : [])], stubs: stubs.ops! } },
+          modules: { [ns]: { functions: tools.map((t) => t.pyName.split('.').slice(1).join('.')), stubs: stubs[ns]! }, ops: { functions: surface.opsFunctions, stubs: stubs.ops! }, ...(v2 ? { _nr: { functions: ['call'], stubs: stubs._nr! } } : {}) },
+          ...(surface.prelude ? { prelude: surface.prelude } : {}),
+          ...(surface.typeStubs ? { typeStubs: surface.typeStubs } : {}),
           inputs,
           limits: { cpuTimeSec: lim.cpuTimeSec, wallTimeSec: lim.wallTimeSec, maxMemoryMb: lim.maxMemoryMb, maxToolCalls: lim.maxToolCalls, maxConcurrentCalls: lim.maxConcurrentCalls, maxResultBytes: lim.maxResultBytes },
           osPolicy: { datetime: new Date(started).toISOString(), seed: parseInt(sha256Hex(runId).slice(0, 8), 16) },
@@ -592,7 +688,7 @@ export class ScriptRunner {
     if (res.status === 'type_error' || res.status === 'syntax_error') phases.push({ name: 'type_check', status: 'failed', durationMs: execMs }, { name: 'execute', status: 'skipped', durationMs: 0 });
     else phases.push({ name: 'type_check', status: 'ok', durationMs: 0 }, { name: 'execute', status: res.status === 'ok' ? 'ok' : 'failed', durationMs: execMs });
     void planOnly;
-    return finish(res.status as ScriptStatus, { value: res.value, ...(res.error ? { error: withBuiltinHint({ ...res.error }) } : {}), stats: { wallMs: res.stats.wallMs, suspensions: res.stats.suspensions, toolCalls: calls }, stdout: res.stdout, truncated: res.truncated === true, preview: res.preview, valueBytes: res.valueBytes });
+    return finish(res.status as ScriptStatus, { value: res.value, ...(res.error ? { error: v2 ? scriptHintV2(withBuiltinHint({ ...res.error }, 2), ns, [...byFn.keys()]) : withBuiltinHint({ ...res.error }) } : {}), stats: { wallMs: res.stats.wallMs, suspensions: res.stats.suspensions, toolCalls: calls }, stdout: res.stdout, truncated: res.truncated === true, preview: res.preview, valueBytes: res.valueBytes });
   }
 }
 
@@ -630,9 +726,99 @@ class Semaphore {
  * Monty reports an unsupported built-in as "Name `map` used when not defined": say what scripts can use
  * instead (agents otherwise retry the same call or guess).
  */
-export function withBuiltinHint(error: Record<string, unknown>): Record<string, unknown> {
+export function withBuiltinHint(error: Record<string, unknown>, contract: 1 | 2 = 1): Record<string, unknown> {
   const m = /Name `([A-Za-z_][A-Za-z0-9_]*)` used when not defined/.exec(String(error.message ?? ''));
   if (!m || error.hint) return error;
   const alt = SCRIPT_BUILTIN_ALTERNATIVES[m[1]!];
-  return { ...error, hint: `${alt ? `${m[1]} is not available in scripts: ${alt}. ` : ''}${scriptBuiltinsLine()}` };
+  return { ...error, hint: `${alt ? `${m[1]} is not available in scripts: ${alt}. ` : ''}${scriptBuiltinsLine(contract)}` };
+}
+
+/** Attributes agents try on a caught tool error (the sandbox's exceptions carry none). */
+const ERROR_ATTRS = new Set(['code', 'next', 'fields', 'retry', 'retry_after_ms', 'plan', 'message', 'closest', 'error_id', 'upstream']);
+
+/**
+ * Contract 2: type-check messages in the agent's terms. The prelude's private type names become the namespace
+ * (`Object of type \`_nr_ns_acme\` has no attribute \`get_ordr\`` → `acme has no function get_ordr`, with the closest
+ * names); attribute access on a caught error points at `ops.error(e)`.
+ */
+export function scriptHintV2(error: Record<string, unknown>, ns: string, fns: string[]): Record<string, unknown> {
+  let message = String(error.message ?? '');
+  const out: Record<string, unknown> = { ...error };
+  const missing = /Object of type `_nr_ns_([A-Za-z0-9_]+)` has no attribute `([A-Za-z_][A-Za-z0-9_]*)`/.exec(message);
+  if (missing) {
+    const fn = `${missing[1]}.${missing[2]}`;
+    message = `${missing[1]} has no function ${missing[2]}.`;
+    const near = closestNames(fn, fns, 3);
+    out.hint = `${near.length ? `Closest: ${near.join(', ')}. ` : ''}Find functions with search_tools.`;
+  }
+  const attr = /`(LookupError|ValueError|PermissionError|TimeoutError|RuntimeError|AttributeError)[^`]*` has no attribute `([a-z_]+)`|'(LookupError|ValueError|PermissionError|TimeoutError|RuntimeError|AttributeError)' object has no attribute '([a-z_]+)'/.exec(message);
+  if (attr && ERROR_ATTRS.has(attr[2] ?? attr[4] ?? '')) out.hint = `Tool errors carry no attributes in scripts: use ops.error(e)["${attr[2] ?? attr[4]}"] (or str(e)).`;
+  out.message = message.replace(/_nr_f_[A-Za-z0-9]+_([A-Za-z0-9_]+)\.__call__/g, `${ns}.$1`).replace(/_nr_ns_([A-Za-z0-9_]+)/g, '$1').replace(/_nr_t_[A-Za-z0-9_]+\./g, '');
+  return out;
+}
+
+/** The `plan` of a refused write (confirmation_required / prod refusal), if any. */
+function planOf(data: unknown): unknown {
+  return data && typeof data === 'object' && !Array.isArray(data) && 'plan' in data ? (data as { plan: unknown }).plan : undefined;
+}
+
+/** Contract 2: what a tool function returns in a script; inner dry-run writes return `{plan}` (as `dry_run: true` does in tool mode). */
+function innerValue(ctx: RunContext, out: { value?: unknown; decision: string; tool?: ToolDef }, args: Record<string, unknown>): unknown {
+  if (ctx.dryRun && out.decision === 'dry_run' && out.tool?.risk.write) return { plan: writePlan(out.tool, args) };
+  return out.value ?? null;
+}
+
+const apiCache = new Map<string, ReturnType<typeof scriptApi>>();
+
+/** The contract-2 script API of a set of tools (stubs with docstrings, signatures, type-check declarations), cached. */
+export function scriptApiFor(tools: ToolDef[], ns: string, buildHash: string, confirmTokens: boolean): ReturnType<typeof scriptApi> {
+  const key = `${buildHash}|${ns}|${confirmTokens ? 1 : 0}|${sha256Hex(tools.map((t) => `${t.name}:${t.defHash}`).join(','))}`;
+  const hit = apiCache.get(key);
+  if (hit) return hit;
+  const api = scriptApi(tools, ns, { buildHash, isList: (t) => pagingPlan(t).list, example: (t) => toolExample(t), confirmTokens });
+  if (apiCache.size > 100) apiCache.clear();
+  apiCache.set(key, api);
+  return api;
+}
+
+/** The copy-ready example of a tool (schema argument names): the compiler's checked example, else overlay/spec/defaults. */
+export function toolExample(t: ToolDef): Record<string, unknown> | null {
+  const c = t.checkedExample;
+  if (c && c.runs !== false) return c.arguments;
+  return exampleArgs(t);
+}
+
+/**
+ * Contract-2 `run_script` description (contract-v2 §5), per server: what the functions return, the paging and error
+ * idioms, writes, the helpers and built-ins, and an example built from this server's own functions (a lookup by id
+ * with its NotFound handling, and a list walked with `.pages()`). The example is executed in the tests.
+ */
+export function runScriptDescriptionV2(ctx: RunContext, tools: ToolDef[]): string {
+  const ns = ctx.server.slug.replace(/-/g, '_');
+  const reads = tools.filter((t) => !t.risk.write && t.kind !== 'composite');
+  const withEx = (t: ToolDef) => toolExample(t) !== null;
+  const lookup = reads.find((t) => withEx(t) && t.binding.type === 'http' && /\{[^}]+\}$/.test(t.binding.pathTemplate) && !pagingPlan(t).list);
+  const list = reads.find((t) => withEx(t) && pagingPlan(t).list);
+  const lines = [
+    `Run a short Python script against the ${ctx.bundle.server.name} API and return a JSON value with \`return\`. Functions are ${ns}.<fn>(name=value, ...) (keyword arguments; find them with search_tools) and return plain data (dicts/lists).`,
+    `Lists: ${ns}.<fn>.pages(..., max_items=500) returns the items of every page; ${ns}.<fn>.page(...) returns a Result (.data, .items, .page.next_cursor, .next()).`,
+    'Errors raise NotFound, InvalidArgs, Forbidden, WritesDisabled, ConfirmationRequired, RateLimited, Timeout or UpstreamError (ToolError catches all): str(e) says what failed and the next call; ops.error(e) gives {code, next, fields, retry, plan}.',
+    'Writes: mode="dry_run" returns the plan without changing anything; destructive changes then need the confirm token from error.next.',
+    'ops: parallel, now, days_since, report(kind, text). No imports, files or network. ' + scriptBuiltinsLine(2),
+  ];
+  const ex: string[] = [];
+  if (lookup) {
+    const call = pyCallText(lookup, toolExample(lookup)!, ns);
+    ex.push('try:', `    one = ${call}`, 'except NotFound as e:', '    return ops.error(e)["next"]');
+  }
+  if (list) {
+    const args = toolExample(list)!;
+    const call = pyCallText(list, args, ns).replace(/\)$/, `${Object.keys(args).length ? ', ' : ''}max_items=50)`).replace(`${ns}.${list.pyName.split('.').pop()}(`, `${ns}.${list.pyName.split('.').pop()}.pages(`);
+    ex.push(`rows = ${call}`);
+  }
+  if (ex.length) {
+    ex.push(`return {${[lookup ? '"one": one' : '', list ? '"count": len(rows)' : ''].filter(Boolean).join(', ')}}`);
+    lines.push('', 'Example:', ...ex.map((l) => `  ${l}`), '');
+  }
+  return lines.join('\n');
 }

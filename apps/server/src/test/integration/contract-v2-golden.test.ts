@@ -122,15 +122,15 @@ describe('contract v2 goldens (acme, mock)', () => {
     await call('call_tool_invalid', 'call_tool', { name: 'list_orders', arguments: { limit: 'x' } });
     await call('call_tool_bad_shape', 'call_tool', { arguments: {} });
     await call('call_tool_meta', 'call_tool', { name: 'search_tools', arguments: { query: 'orders' } });
-    // run_script: data is the return value; tool errors raise typed exceptions carrying the error object
+    // run_script: data is the return value; tool errors raise typed exceptions with a concise str(e) (P4)
     const ok = await call('script_ok', 'run_script', { code: 'o = acme.list_orders(limit=3)\nreturn [x["id"] for x in o["items"]]' });
     expect(ok.state).toMatchObject({ script_calls: 1, left: { calls: 199 } });
     const s404 = await call('script_not_found', 'run_script', { code: 'return acme.get_order(order_id="ord_nope")' });
     expect(s404.error).toMatchObject({ code: 'not_found', line: 1, next: [{ tool: 'run_script', args: { code: 'return acme.list_orders(limit=20)' } }] });
     const caught = await call('script_caught', 'run_script', { code: 'try:\n    acme.get_order(order_id="ord_nope")\nexcept LookupError as e:\n    return str(e)' });
-    expect(JSON.parse(caught.data)).toMatchObject({ code: 'not_found' });
+    expect(caught.data).toMatch(/^not_found: .* Next: acme\.list_orders\(limit=20\)$/);
     const inv = await call('script_invalid_args', 'run_script', { code: 'try:\n    acme.list_orders(limit=500)\nexcept ValueError as e:\n    return str(e)' });
-    expect(JSON.parse(inv.data)).toMatchObject({ code: 'invalid_args', next: [{ tool: 'run_script', args: { code: 'return acme.list_orders(limit=100)' } }] });
+    expect(inv.data).toMatch(/^invalid_args: .* Next: acme\.list_orders\(limit=100\)$/);
     await call('script_dry_run', 'run_script', { code: 'return acme.cancel_order(order_id="order_2", reason="other")', mode: 'dry_run' });
     await call('script_rejected', 'run_script', { code: 'import os\nreturn 1' });
     await call('script_type_error', 'run_script', { code: 'return acme.no_such_fn()' });

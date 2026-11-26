@@ -20,7 +20,11 @@ export const SCRIPT_BUILTIN_ALTERNATIVES: Record<string, string> = {
   open: 'scripts have no files or network; call the tool functions',
 };
 
+/** Contract 2 adds `getattr`/`hasattr` (contract-v2 §5; the pinned Monty has them, the v1 validator refused them). */
+export const SCRIPT_BUILTINS_V2 = [...SCRIPT_BUILTINS, 'getattr', 'hasattr'] as const;
+
 /** One line for docs and errors: what scripts can use. */
-export function scriptBuiltinsLine(): string {
+export function scriptBuiltinsLine(contract: 1 | 2 = 1): string {
+  if (contract === 2) return `Built-ins: ${SCRIPT_BUILTINS_V2.join(', ')} (type takes one argument). No map/filter (use comprehensions); tool results are dicts/lists (d["key"]).`;
   return `Built-ins: ${SCRIPT_BUILTINS.join(', ')} (type takes one argument). No map/filter (use comprehensions), no getattr/hasattr (results are dicts).`;
 }

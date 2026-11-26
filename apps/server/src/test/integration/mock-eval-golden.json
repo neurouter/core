@@ -1,6 +1,6 @@
 {
   "github": {
-    "headline": 74,
+    "headline": 75,
     "tasks": [
       {
         "key": "ambiguous-get_comment-1",
@@ -1037,7 +1037,7 @@
     ]
   },
   "petstore": {
-    "headline": 93,
+    "headline": 94,
     "tasks": [
       {
         "key": "ambiguous-get_pet_by_id-1",

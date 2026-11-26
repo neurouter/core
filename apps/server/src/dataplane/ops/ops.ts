@@ -115,7 +115,7 @@ export const OPS_DEFINITIONS: Record<OpsOp, Omit<OpsToolDefinition, 'name' | 'py
 };
 
 export function opsDefinition(op: OpsOp): OpsToolDefinition {
-  return { ...OPS_DEFINITIONS[op], name: opsMcpName(op), pyName: op === READ_RESULT || op === REPORT ? null : `ops.${op}`, op };
+  return { ...OPS_DEFINITIONS[op], name: opsMcpName(op), pyName: op === READ_RESULT ? null : `ops.${op}`, op };
 }
 
 /** Contract 2: whether `neurouter_report` is available (any kind's v1 toggle is on). */
@@ -132,7 +132,8 @@ export function opFor(ctx: RunContext, name: string): OpsOp | null {
   const raw = name.startsWith('neurouter_') ? name.slice('neurouter_'.length) : name.startsWith('ops.') ? name.slice(4) : null;
   if (!raw) return null;
   if (raw === READ_RESULT) return name.startsWith('ops.') ? null : READ_RESULT;
-  if (raw === REPORT) return !name.startsWith('ops.') && reportEnabled(ctx) ? REPORT : null;
+  // contract 2: `ops.report(kind, text, …)` in scripts is neurouter_report
+  if (raw === REPORT) return reportEnabled(ctx) ? REPORT : null;
   return (OPS_TOOLS as readonly string[]).includes(raw) && ctx.bundle.server.opsTools[raw as OpsTool] ? (raw as OpsTool) : null;
 }
 
