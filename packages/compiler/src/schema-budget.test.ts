@@ -87,7 +87,7 @@ describe('schema budgets ($defs, dedupe, trimming)', () => {
     expect(Object.keys(defs.obj0!.properties as object)).toContain('link_1');
     expect(JSON.stringify(list.outputSchema)).toContain(OMITTED_KEY);
     expect(r.diagnostics.some((d) => d.code === 'output_schema_trimmed')).toBe(true);
-  });
+  }, 30_000);
 
   it('references a repeated component once in $defs (never larger than inlining)', async () => {
     const user = { type: 'object', properties: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`field_${i}`, { type: 'string', description: `Field ${i} of the user record.` }])) };

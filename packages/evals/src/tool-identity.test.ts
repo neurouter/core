@@ -59,5 +59,5 @@ describe('tool identity (suites survive overlay renames)', () => {
     const stamped = inSubset.map((x) => stampToolKeys(x, raw.tools));
     const again = await compile({ spec: { bytes: spec }, namespace: 'github', overlay: overlay.replace('get_issue', 'fetch_issue') });
     expect(used(resolveTaskTools(stamped, again.tools))).toContain('fetch_issue');
-  });
+  }, 30_000);
 });

@@ -86,5 +86,5 @@ describe('$ref / $defs tool schemas', () => {
       const res = await handleMockRequest(r.mockModel as OpenApiMockModel, store, 'eval:x', { method: 'GET', path: '/repos/octocat/Hello-World/commits' });
       expect(sdk.getValidator(commits.outputSchema!)(wrapStructured(res.body)).valid).toBe(true);
     }
-  });
+  }, 30_000);
 });

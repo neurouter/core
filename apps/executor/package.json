@@ -1,6 +1,6 @@
 {
   "name": "@neurouter/executor",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Neurouter code-mode executor: sandboxed Python (Monty) for MCP code mode",
   "keywords": [
     "mcp",
