@@ -59,6 +59,8 @@ export interface EnvLimits {
   code: CodeLimits;
   /** agent-facing contract-2 search_tools result budget in characters (default `SEARCH_RESULT_CHARS`, 8,192) */
   searchResultChars?: number;
+  /** max in-flight upstream HTTP calls of the environment (0.3.3; absent: no cap) */
+  upstreamConcurrency?: number;
 }
 
 export const DEFAULT_CODE_LIMITS: CodeLimits = { maxToolCalls: 200, wallTimeSec: 30, cpuTimeSec: 10, maxMemoryMb: 64, maxConcurrentCalls: 8, maxResultBytes: 1024 * 1024 };
@@ -209,6 +211,7 @@ export function parseLimits(v: unknown): EnvLimits {
     maxResponseBytes: l.maxResponseBytes ?? DEFAULT_ENV_LIMITS.maxResponseBytes,
     code: { ...DEFAULT_CODE_LIMITS, ...(l.code ?? {}) },
     ...(typeof l.searchResultChars === 'number' ? { searchResultChars: l.searchResultChars } : {}),
+    ...(typeof l.upstreamConcurrency === 'number' && l.upstreamConcurrency > 0 ? { upstreamConcurrency: l.upstreamConcurrency } : {}),
   };
 }
 

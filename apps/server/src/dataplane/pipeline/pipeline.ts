@@ -28,6 +28,7 @@ import { InvokeError, type HttpInvoker, type MockUpstream, type UpstreamResponse
 import { buildHttpRequest, RequestBuildError, toSpecArgs, applyArgTransforms, hostAllowed } from '../http/request-builder.js';
 import type { RateLimiter } from '../rate-limit/limiter.js';
 import { sleepFor, takePaced, type PaceBudget } from '../rate-limit/pacer.js';
+import { UPSTREAM_RETRY, upstreamRetryAfterMs } from '../http/upstream-backoff.js';
 import type { ResultPages } from '../shaping/result-pages.js';
 import { looksLikeInjection, scanUntrusted, UNTRUSTED_PREFIX } from '../shaping/sanitize.js';
 import { errorDraft, okDraft, type Draft, type ErrorSpec } from '../envelope/draft.js';
@@ -504,6 +505,9 @@ export class Pipeline {
     let extraQuery: Record<string, string | string[]> = {};
     if (position && plan) extraQuery = applyPosition(tool, plan, specArgs, position).extraQuery;
     let urlTemplate = '';
+    // 0.3.3: a read retries a 429/503 that says when (bounded; within a script's wall time); writes never retry.
+    // `limits.upstreamConcurrency` caps in-flight upstream calls of the environment.
+    const upstreamOpts = { retry: tool.risk.write ? null : { ...UPSTREAM_RETRY, ...(opts.pace ? { deadline: opts.pace.deadline } : {}) }, maxConcurrent: lim.upstreamConcurrency ?? null };
     try {
       if (env.isMock) {
         step('routing', 'pass', 'mock');
@@ -529,14 +533,14 @@ export class Pipeline {
           urlTemplate = url.pathname;
           const variables = Object.fromEntries(tool.binding.variables.map((v) => [v.name, specArgs[v.arg]]).filter(([, v]) => v !== undefined));
           const body = JSON.stringify({ query: tool.binding.document, variables });
-          upstream = await this.traced(ctx, tool.name, (trace) => this.d.http.invoke(env.id, { method: 'POST', url, urlTemplate, headers: { accept: GRAPHQL_ACCEPT, 'content-type': 'application/json', 'user-agent': `neurouter/${this.d.version}`, ...lower(env.headers), ...cred.headers, ...trace }, body }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) }));
+          upstream = await this.traced(ctx, tool.name, (trace) => this.d.http.invoke(env.id, { method: 'POST', url, urlTemplate, headers: { accept: GRAPHQL_ACCEPT, 'content-type': 'application/json', 'user-agent': `neurouter/${this.d.version}`, ...lower(env.headers), ...cred.headers, ...trace }, body }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...upstreamOpts, ...(opts.signal ? { signal: opts.signal } : {}) }));
         } else {
           const req = buildHttpRequest(tool, specArgs, { baseUrl: env.baseUrl, headers: env.headers, allowedHosts: env.allowedHosts, credentials: cred, extraQuery }, this.d.version);
           urlTemplate = req.urlTemplate;
-          upstream = await this.traced(ctx, tool.name, (trace) => this.d.http.invoke(env.id, { ...req, headers: { ...req.headers, ...trace } }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...(opts.signal ? { signal: opts.signal } : {}) }));
+          upstream = await this.traced(ctx, tool.name, (trace) => this.d.http.invoke(env.id, { ...req, headers: { ...req.headers, ...trace } }, { timeoutMs: lim.timeoutMs, maxBytes: lim.maxResponseBytes, allowHttp: env.allowHttp, ...upstreamOpts, ...(opts.signal ? { signal: opts.signal } : {}) }));
         }
       }
-      step('upstream', 'pass', String(upstream.status));
+      step('upstream', 'pass', upstream.retries ? `${upstream.status} after ${upstream.retries} retr${upstream.retries === 1 ? 'y' : 'ies'} (${upstream.retryWaitMs} ms)` : String(upstream.status));
     } catch (err) {
       if (err instanceof RequestBuildError) {
         step('routing', 'fail', err.code);
@@ -560,13 +564,14 @@ export class Pipeline {
     const st = upstream.status;
     if (st < 200 || st >= 300 || (tool.binding.type === 'http' && tool.binding.successStatuses.length && !tool.binding.successStatuses.includes(st) && st >= 300)) {
       const excerpt = compactJson(upstream.body).slice(0, 1024);
-      const retryAfterMs = upstream.headers['retry-after'] ? Math.max(0, Number(upstream.headers['retry-after']) * 1000) || undefined : undefined;
+      const retryAfterMs = upstreamRetryAfterMs(st, upstream.headers, this.d.now()) || undefined;
       const a = { audit: upstreamMeta, spec: { upstream: { status: st, body: upstream.body } } };
       if (st === 401 || st === 403) return fail(decision, 'tool_error', 'upstream_auth', `The API answered ${st} for ${tool.name}.`, { status: st }, a);
       if (st === 404) return fail(decision, 'tool_error', 'upstream_not_found', `The API answered 404 for ${tool.name}: ${excerpt}`, { status: st }, a);
       if (st === 409) return fail(decision, 'tool_error', 'upstream_conflict', `The API reported a conflict: ${excerpt}`, { detail: excerpt }, a);
       if (st === 400 || st === 422) return fail(decision, 'tool_error', 'upstream_validation', `The API rejected the request: ${excerpt}`, { detail: excerpt }, a);
-      if (st === 429) return fail(decision, 'tool_error', 'upstream_rate_limited', 'The API answered 429 (rate limited).', { retryAfterSec: retryAfterMs ? Math.ceil(retryAfterMs / 1000) : 60 }, { ...a, ...(retryAfterMs ? { retryAfterMs } : {}) });
+      // 429, and a 503 that says when to come back: rate_limited with the wait (a write was not retried; a read was, within bounds)
+      if (st === 429 || (st === 503 && retryAfterMs)) return fail(decision, 'tool_error', 'upstream_rate_limited', `The API answered ${st} (rate limited).`, { retryAfterSec: retryAfterMs ? Math.ceil(retryAfterMs / 1000) : 60 }, { ...a, ...(retryAfterMs ? { retryAfterMs } : {}) });
       if (st >= 500) return fail(decision, 'upstream_error', 'upstream_error', `The API failed with ${st}: ${excerpt}`, { detail: `${st} ${excerpt.slice(0, 200)}` }, a);
       return fail(decision, 'tool_error', 'upstream_validation', `The API answered ${st}: ${excerpt}`, { detail: excerpt }, a);
     }
