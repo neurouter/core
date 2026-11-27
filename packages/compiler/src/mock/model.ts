@@ -36,7 +36,13 @@ export interface MockOperation {
   /** list ops: query params that filter by a range object (`amount[gte]=50`, `created[lt]=…`): param → field */
   rangeFilters?: Record<string, string>;
   /** list ops: sort params (`sort=updated`, `direction=asc`, `order=desc`) */
-  sort?: { param?: string; directionParam?: string; defaultDirection?: 'asc' | 'desc' };
+  sort?: { param?: string; directionParam?: string; defaultDirection?: 'asc' | 'desc'; defaultParam?: string };
+  /**
+   * list ops: the order without sort params, as the real API lists (0.3.2): newest first where the spec says so
+   * (`sort` default a date with `direction` default desc; "most recent … first" in the description) or by vendor
+   * convention (Stripe: every list with `starting_after` is newest first by `created`); overlay `mock.order` overrides.
+   */
+  defaultOrder?: { field: string; direction: 'asc' | 'desc'; source: 'sort_default' | 'description' | 'convention' | 'overlay' };
   example?: unknown;
 }
 
@@ -102,6 +108,11 @@ function schemaKey(s: JsonSchema | null | undefined): string | null {
   if (!isObj(s)) return null;
   if (typeof s['x-schema-name'] === 'string') return s['x-schema-name'] as string;
   return defRefName(s.$ref);
+}
+
+/** The entity an item schema describes: its schema name, else its `title` (compiled Stripe item schemas are inline, named by title). */
+function entityKey(s: JsonSchema | null | undefined): string | null {
+  return schemaKey(s) ?? (isObj(s) && typeof s.title === 'string' && s.title.trim() && isObj(s.properties) ? `title:${s.title.trim()}` : null);
 }
 
 function singular(word: string): string {
@@ -266,13 +277,13 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
   // nested collections of a top-level resource's objects share its seed (same id → same object)
   const canonical = new Map<string, MockResource>();
   for (const r of Object.values(resources)) {
-    const k = schemaKey(r.itemSchema);
+    const k = entityKey(r.itemSchema);
     if (!k) continue;
     const c = canonical.get(k);
     if (!c || r.scopeParams.length < c.scopeParams.length) canonical.set(k, r);
   }
   for (const r of Object.values(resources)) {
-    const c = canonical.get(schemaKey(r.itemSchema) ?? '');
+    const c = canonical.get(entityKey(r.itemSchema) ?? '');
     if (c && c !== r && c.idField === r.idField && c.name === r.name) r.seedKey = c.key;
   }
 
@@ -344,7 +355,10 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
         else if (['cursor', 'page_token', 'pagetoken', 'after'].includes(n)) base.paging.cursor = p.name;
         else if (n === 'starting_after') base.paging.startingAfter = p.name;
         else if (n === 'ending_before') base.paging.endingBefore = p.name;
-        else if (n === 'sort' || n === 'sort_by' || n === 'order_by') (base.sort ??= {}).param = p.name;
+        else if (n === 'sort' || n === 'sort_by' || n === 'order_by') {
+          (base.sort ??= {}).param = p.name;
+          if (typeof ps.default === 'string') base.sort.defaultParam = ps.default;
+        }
         else if (n === 'direction' || n === 'order' || n === 'sort_direction') {
           (base.sort ??= {}).directionParam = p.name;
           if (ps.default === 'asc' || ps.default === 'desc') base.sort.defaultDirection = ps.default;
@@ -361,6 +375,8 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
         const arrProp = Object.entries(out.properties as Obj).find(([, v]) => isObj(v) && derefSchema(v, outDefs).type === 'array');
         if (arrProp) base.listWrapper = { arrayProp: arrProp[0], schema: out };
       }
+      const order = newestFirst(base, Object.keys(objectProps(r.itemSchema)), t.description ?? '');
+      if (order) base.defaultOrder = order;
     }
     // default scope values from examples
     if (base.resource && t.examples[0]) {
@@ -375,6 +391,45 @@ export function buildMockModel(tools: ToolDef[]): OpenApiMockModel {
   // most specific first: more literal segments, then fewer params
   operations.sort((a, b) => specificity(b.pathTemplate) - specificity(a.pathTemplate));
   return { kind: 'openapi', resources, operations };
+}
+
+const CREATED_FIELDS = ['created', 'created_at', 'createdAt', 'creation_date'];
+const NEWEST_FIRST_TEXT = /\b(most recent|newest|latest)\b[^.]{0,80}\b(first|top)\b|reverse chronological|sorted by (creation|created) date, (with )?the (most recent|newest)/i;
+
+/** The newest-first order of a list op, when the spec or the vendor's convention says the API lists that way. */
+function newestFirst(op: MockOperation, fields: string[], description: string): MockOperation['defaultOrder'] | null {
+  // a documented sort default (GitHub `sort=created`, `direction=desc`): only when it is a date listed newest first
+  const d = op.sort?.defaultParam;
+  if (d) {
+    const field = [d, `${d}_at`, `${d}d_at`, d.replace(/d$/, '') + 'd_at'].find((k) => fields.includes(k));
+    const isDate = !!field && /(_at|created|updated|pushed)$/.test(field);
+    const dir = op.sort?.defaultDirection ?? (isDate ? 'desc' : 'asc');
+    return field && isDate && dir === 'desc' ? { field, direction: 'desc', source: 'sort_default' } : null;
+  }
+  const created = CREATED_FIELDS.find((f) => fields.includes(f));
+  if (!created) return null;
+  if (NEWEST_FIRST_TEXT.test(description)) return { field: created, direction: 'desc', source: 'description' };
+  // Stripe: all list endpoints return the newest objects first (id cursors `starting_after` / `ending_before`, `has_more`)
+  const props = op.listWrapper && isObj(op.listWrapper.schema.properties) ? Object.keys(op.listWrapper.schema.properties as Obj) : [];
+  if (op.paging.startingAfter && props.includes('has_more') && created === 'created') return { field: created, direction: 'desc', source: 'convention' };
+  return null;
+}
+
+/** Overlay `mock.order` on list tools: `"<field> asc|desc"` sets the order without sort params, `none` keeps insertion order. */
+export function applyMockOrder(model: OpenApiMockModel, tools: Array<Pick<ToolDef, 'binding'>>, order: (tool: Pick<ToolDef, 'binding'>) => string | undefined): void {
+  for (const t of tools) {
+    if (t.binding.type !== 'http') continue;
+    const o = order(t);
+    if (!o) continue;
+    const b = t.binding as HttpBinding;
+    const op = model.operations.find((x) => x.method === b.method && x.pathTemplate === b.pathTemplate && x.kind === 'list');
+    if (!op) continue;
+    if (o === 'none') delete op.defaultOrder;
+    else {
+      const [field, dir] = o.split(/\s+/);
+      op.defaultOrder = { field: field!, direction: dir === 'asc' ? 'asc' : 'desc', source: 'overlay' };
+    }
+  }
 }
 
 function specificity(p: string): number {

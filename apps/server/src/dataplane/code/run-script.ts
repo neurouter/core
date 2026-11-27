@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { generateOpsStub, generateOpsStubV2, generateStubs, NR_HOST_STUBS, pyArgMap, pyCallText, pyNameMap, scriptApi, scriptCommonTypeStubs, scriptErrorType, scriptPrelude, shapeResponse } from '@neurouter/compiler';
+import { generateOpsStub, generateOpsStubV2, generateStubs, NR_HOST_STUBS, pyArgMap, pyCallText, pyNameMap, scriptApi, scriptCommonTypeStubs, scriptErrorType, scriptPrelude, shapeResponse, fitJsonChars, cutJsonText } from '@neurouter/compiler';
 import type { Executor, HostCallResult, RunResult } from '@neurouter/executor';
 import { META_CALL_ID, META_PLANNED_CHANGES, META_RESULT_HANDLE, META_TASK_ID, META_TRUNCATED, opsMcpName, READ_RESULT, SCRIPT_BUILTIN_ALTERNATIVES, SCRIPT_RESULT_CHARS, scriptBuiltinsLine, type ErrorCode, type ScriptStatus, type ToolDef } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
@@ -366,15 +366,19 @@ export class ScriptRunner {
     const shaped = shapeResponse(value, {}, { maxBytes: chars });
     const t = shaped.truncated;
     if (!t) return null;
+    // H4: the list prefix and the field clip keep the structure and can stay over the budget; the final JSON fits
+    const fit = fitJsonChars(shaped.value, chars);
+    const returnedBytes = Buffer.byteLength(JSON.stringify(fit.value) ?? 'null');
+    const fields = [...new Set([...(t.fields ?? []), ...fit.fields])];
     const handle = await this.d.pages.store(ctx.tenantId, ctx.credentialKey, value);
     const truncated: Truncated = {
       ...(t.totalItems !== undefined && t.returnedItems !== undefined ? { items_omitted: t.totalItems - t.returnedItems } : {}),
-      ...(t.fields?.length ? { fields: t.fields.slice(0, 20) } : {}),
-      omitted_bytes: Math.max(0, t.totalBytes - t.returnedBytes),
+      ...(fields.length ? { fields: fields.slice(0, 20) } : {}),
+      omitted_bytes: Math.max(0, t.totalBytes - returnedBytes),
       next: { tool: opsMcpName(READ_RESULT), args: { handle } },
     };
-    const shown = t.totalItems !== undefined ? `${t.returnedItems} of ${t.totalItems} items` : `${t.returnedBytes} of ${t.totalBytes} bytes`;
-    return { value: shaped.value, truncated, hint: `Result cut to ${chars} chars (${shown}). Return less: filter or count in the script, pass fields=[…] to the calls, or page with fn.page(); truncated.next has the rest.` };
+    const shown = t.totalItems !== undefined && !fit.fields.length ? `${t.returnedItems} of ${t.totalItems} items` : `${returnedBytes} of ${t.totalBytes} bytes`;
+    return { value: fit.value, truncated, hint: `Result cut to ${chars} chars (${shown}). Return less: filter or count in the script, pass fields=[…] to the calls, or page with fn.page(); truncated.next has the rest.` };
   }
 
   /**
@@ -385,7 +389,7 @@ export class ScriptRunner {
   private scriptDraft(
     ctx: RunContext,
     status: ScriptStatus,
-    body: { error?: Record<string, unknown>; truncated?: boolean; preview?: unknown; valueBytes?: number; stdout?: string; agentCut?: AgentCut | null },
+    body: { error?: Record<string, unknown>; truncated?: boolean; preview?: unknown; valueBytes?: number; stdout?: string; agentCut?: AgentCut | null; resultChars?: number },
     value: unknown,
     mode: 'dry_run' | 'execute',
     planned: PlannedChange[],
@@ -410,8 +414,11 @@ export class ScriptRunner {
       // over the agent budget (B3): the first part, `truncated` with the stored whole value, and how to need less
       if (cut) return okDraft(data, { ...extra, truncated: cut.truncated, hint: cut.hint });
       if (!body.truncated) return okDraft(data, extra);
-      const shown = typeof body.preview === 'string' ? Buffer.byteLength(body.preview) : 0;
-      return okDraft(data, {
+      // H4: the executor's preview (JSON text, a string) is cut so its JSON form fits the budget too
+      const whole = typeof body.preview === 'string' ? body.preview : '';
+      const preview = body.resultChars && JSON.stringify(whole).length > body.resultChars ? cutJsonText(whole, body.resultChars) : whole;
+      const shown = Buffer.byteLength(preview);
+      return okDraft(mode === 'dry_run' ? { result: preview, plan, ...(next ? { next } : {}) } : preview, {
         ...extra,
         truncated: { omitted_bytes: Math.max(0, (body.valueBytes ?? shown) - shown), next: { tool: callAs.name, args: callAs.args } },
         hint: `The return value (${body.valueBytes ?? '?'} bytes) is over the script result limit; data is its first part. Return less: filter, count or slice inside the script.`,
@@ -607,7 +614,7 @@ export class ScriptRunner {
       const text = JSON.stringify(structured);
       const resultChars = lim.resultChars ?? SCRIPT_RESULT_CHARS;
       const agentCut = ctx.contract === 2 && status === 'ok' && !body.truncated ? await this.agentCut(ctx, value ?? null, resultChars) : null;
-      const draft = this.scriptDraft(ctx, status, { ...body, agentCut }, value ?? null, mode, planned, callAs, { calls, left: { calls: Math.max(0, lim.maxToolCalls - calls), seconds: Math.max(0, Math.floor((lim.wallTimeSec * 1000 - (ended - started)) / 1000)) } }, innerErrors, { [META_CALL_ID]: auditId, [META_TASK_ID]: taskId, 'dev.neurouter/script-run-id': runId }, { code, inputs });
+      const draft = this.scriptDraft(ctx, status, { ...body, agentCut, resultChars }, value ?? null, mode, planned, callAs, { calls, left: { calls: Math.max(0, lim.maxToolCalls - calls), seconds: Math.max(0, Math.floor((lim.wallTimeSec * 1000 - (ended - started)) / 1000)) } }, innerErrors, { [META_CALL_ID]: auditId, [META_TASK_ID]: taskId, 'dev.neurouter/script-run-id': runId }, { code, inputs });
       return { status, planned, result: v1Result(text.length > resultChars ? `${text.slice(0, resultChars - 42)}… (truncated preview)` : text, structured, meta, isError), draft };
     };
     /** contract 2: the error objects raised into the script (by JSON message), so an uncaught one becomes the run's error */

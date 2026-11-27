@@ -6,7 +6,7 @@ import type { JsonSchema } from '@neurouter/shared';
 import { isObj, type Obj } from '../util.js';
 import { generateValue, hashSeed, mockDataVersionOf, seededFaker, type MockDataVersion } from './generate.js';
 import { handleGraphqlMock } from './graphql.js';
-import type { MockModel, MockOperation, OpenApiMockModel } from './model.js';
+import type { MockModel, MockOperation, MockResource, OpenApiMockModel } from './model.js';
 import { asStateStore, DEFAULT_SEED, MockLimitError, newItem, toMockNs, type MockNs, type MockStateStore, type MockStore } from './store.js';
 import { defsOf } from '../openapi/schema.js';
 
@@ -220,7 +220,19 @@ export function applyListQuery(op: MockOperation, all: Obj[], query: MockRequest
   }
   const sortBy = op.sort?.param ? firstQuery(query, op.sort.param) : undefined;
   const dirRaw = op.sort?.directionParam ? firstQuery(query, op.sort.directionParam)?.toLowerCase() : undefined;
-  if (sortBy || dirRaw) {
+  const byDefault = !sortBy && !dirRaw ? op.defaultOrder : undefined;
+  if (byDefault && items.length && byDefault.field in items[0]!) {
+    // the order the real API lists in without sort params (newest first; 0.3.2)
+    const sign = byDefault.direction === 'asc' ? 1 : -1;
+    items = [...items].sort((a, b) => {
+      const x = comparable(a[byDefault.field]);
+      const y = comparable(b[byDefault.field]);
+      if (x === y) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return (x < y ? -1 : 1) * sign;
+    });
+  } else if (sortBy || dirRaw) {
     const sample = items[0] ?? {};
     const key = sortBy ? [sortBy, `${sortBy}_at`, `${sortBy}d_at`, sortBy.replace(/d$/, '') + 'd_at'].find((k) => k in sample) : ['created_at', 'created', 'updated_at'].find((k) => k in sample);
     if (key) {
@@ -262,10 +274,11 @@ async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: Mock
     return { status: op.successStatus, headers: JSON_HEADERS, body: generateValue(op.responseSchema, 'result', { faker, defs, depth: 0, index: 1, dv }) };
   }
   const scope = Object.fromEntries(resource.scopeParams.map((p) => [p, params[p] ?? '']));
+  const canon = canonicalOf(model, resource, scope);
 
   switch (op.kind) {
     case 'list': {
-      const items = applyListQuery(op, await store.list(ns, resource, scope), query);
+      const items = applyListQuery(op, canon ? await canon.unify(await store.list(ns, resource, scope)) : await store.list(ns, resource, scope), query);
       const total = items.length;
       const p = op.paging;
       const paged = p.limit || p.page || p.offset || p.cursor || p.startingAfter;
@@ -304,17 +317,20 @@ async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: Mock
         touch(it, store, true);
         return it;
       });
+      if (canon) await canon.mirror(item);
       return { status: op.successStatus === 200 ? 200 : op.successStatus, headers: JSON_HEADERS, body: item };
     }
     case 'read': {
-      const item = await store.get(ns, resource, scope, params[op.idParam!] ?? '');
+      const found = await store.get(ns, resource, scope, params[op.idParam!] ?? '');
+      const item = found && canon ? ((await canon.unify([found]))[0] ?? null) : found;
       if (!item) return problem(404, 'Not Found', `${resource.name} ${params[op.idParam!]} not found`);
       return { status: 200, headers: JSON_HEADERS, body: item };
     }
     case 'update':
     case 'replace': {
       const id = op.bodyId ? (isObj(body) ? String(body[resource.idField] ?? '') : '') : (params[op.idParam!] ?? '');
-      const prev = await store.get(ns, resource, scope, id);
+      const found = await store.get(ns, resource, scope, id);
+      const prev = found && canon ? ((await canon.unify([found]))[0] ?? null) : found;
       if (!prev) return problem(404, 'Not Found', `${resource.name} ${id} not found`);
       if (!isObj(body)) return problem(422, 'Unprocessable Entity', 'request body must be a JSON object');
       const next = op.kind === 'update' ? { ...prev, ...body } : { ...body };
@@ -322,12 +338,48 @@ async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: Mock
       touch(next, store, false);
       // last writer wins; a concurrent delete in between makes it a 404
       if (!(await store.put(ns, resource, scope, id, next))) return problem(404, 'Not Found', `${resource.name} ${id} not found`);
+      if (canon) await canon.mirror(next);
       return { status: op.successStatus === 204 ? 200 : op.successStatus, headers: JSON_HEADERS, body: next };
     }
     case 'delete': {
-      if (!(await store.remove(ns, resource, scope, params[op.idParam!] ?? ''))) return problem(404, 'Not Found', `${resource.name} ${params[op.idParam!]} not found`);
+      const id = params[op.idParam!] ?? '';
+      // under a scope a delete ends the membership (an issue's label), not the object
+      if (!(await store.remove(ns, resource, scope, id))) return problem(404, 'Not Found', `${resource.name} ${id} not found`);
       return { status: 204, headers: {}, body: null };
     }
   }
   return problem(500, 'Internal Server Error', 'unhandled mock operation');
+
+  /**
+   * One state per entity (0.3.2): a nested collection of a top-level resource's objects (`seedKey`:
+   * `/v1/charges/{charge}/refunds` → `/v1/refunds`) holds which ids belong to the scope; the state of each id is
+   * the canonical collection's, with the scope fields it was listed under (`charge: "demo"`). Creates and updates
+   * under the scope go to both (a delete under the scope only ends the membership); an id the canonical collection
+   * no longer has is gone from the scope too.
+   */
+  function canonicalOf(m: OpenApiMockModel, r: MockResource, sc: Record<string, string>) {
+    const c = r.seedKey ? m.resources[r.seedKey] : undefined;
+    if (!c || c === r || c.idField !== r.idField || !c.scopeParams.every((p) => p in sc)) return null;
+    const cScope = Object.fromEntries(c.scopeParams.map((p) => [p, sc[p]!]));
+    const idOf = (it: Obj) => String(it[r.idField]);
+    const stampOf = (it: Obj) => Object.fromEntries(r.scopeParams.filter((p) => p in it && !c.scopeParams.includes(p)).map((p) => [p, it[p]]));
+    return {
+      async unify(items: Obj[]): Promise<Obj[]> {
+        const byId = new Map((await store.list(ns, c, cScope)).map((it) => [idOf(it), it]));
+        const out: Obj[] = [];
+        for (const it of items) {
+          const cur = byId.get(idOf(it));
+          if (!cur) continue;
+          const stamp = stampOf(it);
+          const merged = { ...cur, ...stamp };
+          if (Object.entries(stamp).some(([k, v]) => cur[k] !== v)) await store.put(ns, c, cScope, idOf(it), merged);
+          out.push(merged);
+        }
+        return out;
+      },
+      async mirror(item: Obj): Promise<void> {
+        if (!(await store.put(ns, c, cScope, idOf(item), item))) await store.create(ns, c, cScope, () => ({ ...item }));
+      },
+    };
+  }
 }

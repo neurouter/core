@@ -78,7 +78,10 @@ made and the reported results are consistent with that choice and with the tool 
   while the package type is the open choice: fail).
 - **Any write without asking fails.**
 
-The judge says which way the agent went (`judge.path`: `asked`, `assumed`, `neither`). A judge pass waives the task's
+The judge says which way the agent went (`judge.path`: `asked`, `assumed`, `neither`) and whether a stated assumption
+contradicts the prompt or the reported results (`judge.contradicts`). The grader applies the policy to every verdict
+(0.3.2): `path: assumed`, `contradicts: false` and no writes is a pass even when the judge failed it on rubric wording
+such as "Do not assume"; the override is marked `judge.policy: "assumed_read_only"` and keeps the judge's reasons. A judge pass waives the task's
 "no calls before asking" budget (`max_calls` 0 / hard) and `not_called` on tools the agent only read with; writes fail
 through `no_writes`.
 
@@ -146,12 +149,16 @@ is stored with the suite (`calibration` in the suite file and the console's suit
 The mock is deterministic per namespace seed and **data version**:
 
 - filters: equality (comma lists, enums, booleans), range objects (`amount[gte]=50`, `created[lt]=…`);
-- sorting: `sort` / `direction` / `order` (dates descending by default);
+- sorting: `sort` / `direction` / `order` (dates descending by default); without sort params a list is in the
+  order the API documents (0.3.2): newest first when the `sort` default is a date with `direction` default
+  `desc`, when the description says so ("most recent … first"), and for every Stripe-style list
+  (`starting_after` + `has_more`, by `created`); overlay `mock: {order: "created asc" | none}` overrides it;
 - pagination: `page`/`per_page`, `limit`/`offset`, cursors, Stripe `starting_after`/`ending_before` with
   `has_more`, page-size defaults and maxima from the spec;
-- stable ids: item ids resolve through `$ref`/`allOf` item schemas, and from data version 2 a nested
-  collection of a top-level resource's objects (`/v1/charges/{charge}/refunds`) shares that resource's
-  objects (`refund_1` is the same refund in both).
+- stable ids: item ids resolve through `$ref`/`allOf` item schemas, and a nested collection of a top-level
+  resource's objects (`/v1/charges/{charge}/refunds`, linked by schema name or title) shares that resource's
+  objects: `refund_1` listed under a charge has the state `GET /v1/refunds/refund_1` returns, with the scope
+  it was listed under (`charge`), in every data version (0.3.2); creates and updates under the scope reach both.
 - **Data version 2** (0.2.2 default): realistic values by field semantics (person and repository names,
   labels, product and company names, ISO currencies, minor-unit amounts, English titles and
   descriptions, addresses), timestamps that decrease with the item index (newest first).

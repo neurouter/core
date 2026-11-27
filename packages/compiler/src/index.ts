@@ -9,7 +9,7 @@ export { parseOverlay, selectorLine, type ParsedOverlay } from './overlay/parse.
 export { applyOverlay, matchesSelector, selectorClass, compositeTool, type ApplyResult } from './overlay/apply.js';
 export { applyOverlayPatch, diffOverlays, OverlayPatchError, type PatchResult } from './overlay/patch.js';
 export { parsePath, formatPath, getAll, deleteAt, replaceAt, includePaths, flattenAt, validatePaths, PathSyntaxError, type PathSeg } from './overlay/paths.js';
-export { shapeResponse, shapeOutputSchema, wrapStructured, clipToFit, REDACTED_VALUE, type ShapeResult, type ShapeOptions, type TruncationInfo } from './shape.js';
+export { shapeResponse, shapeOutputSchema, wrapStructured, clipToFit, fitJsonChars, cutJsonText, REDACTED_VALUE, type ShapeResult, type ShapeOptions, type TruncationInfo } from './shape.js';
 export { generateStubs, generateOpsStub, pySignatureFor, pyArgMap, pyNameMap, pascalCase, MAX_TYPED_DICTS, type StubOptions, type PyArgOptions } from './stubs.js';
 export { scriptApi, scriptPrelude, scriptCommonTypeStubs, generateOpsStubV2, scriptErrorType, scriptErrorClass, pyCallText, pyValue, firstSentence, docstringV2, NR_HOST_STUBS, SCRIPT_ERROR_CLASSES, type ScriptApi, type ScriptApiOptions } from './script-api.js';
 export { lint, LINT_WEIGHTS, type LintOptions } from './lint.js';

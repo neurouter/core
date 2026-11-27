@@ -25,6 +25,8 @@ export const Limits = z.object({
   timeoutMs: z.number().int().min(100).max(300_000),
   maxResponseBytes: z.number().int().min(1024).max(64 * 1024 * 1024),
   code: CodeLimits,
+  /** What an agent gets back from one contract-2 search_tools call (characters); over it, hits lose detail, then the last hits are dropped. Default `SEARCH_RESULT_CHARS`. */
+  searchResultChars: z.number().int().min(1024).max(1_048_576).optional(),
 });
 export type Limits = z.infer<typeof Limits>;
 
@@ -35,6 +37,7 @@ export const LimitsInput = z.object({
   timeoutMs: Limits.shape.timeoutMs.optional(),
   maxResponseBytes: Limits.shape.maxResponseBytes.optional(),
   code: CodeLimits.partial().optional(),
+  searchResultChars: Limits.shape.searchResultChars,
 });
 export type LimitsInput = z.infer<typeof LimitsInput>;
 
@@ -53,6 +56,9 @@ export const DEFAULT_LIMITS: Limits = {
 /** Default agent-facing budget of a run_script result (characters; contract 1 has always cut its text here). */
 export const SCRIPT_RESULT_CHARS = 8192;
 
+/** Default agent-facing budget of one contract-2 search_tools result (characters of `data`). */
+export const SEARCH_RESULT_CHARS = 8192;
+
 /** Fixed code-mode limits that are not configurable per environment (§10.5). */
 export const CODE_FIXED_LIMITS = { maxSourceBytes: 16_384, maxLines: 400, maxNesting: 12, maxRecursionDepth: 200, maxPrintBytes: 16_384, maxConcurrentRunsPerPrincipal: 2 } as const;
 
@@ -66,6 +72,7 @@ export function mergeLimits(input: LimitsInput | null | undefined, base: Limits 
     timeoutMs: input?.timeoutMs ?? base.timeoutMs,
     maxResponseBytes: input?.maxResponseBytes ?? base.maxResponseBytes,
     code: { ...base.code, ...(input?.code ?? {}) },
+    ...((input?.searchResultChars ?? base.searchResultChars) !== undefined ? { searchResultChars: input?.searchResultChars ?? base.searchResultChars } : {}),
   };
 }
 

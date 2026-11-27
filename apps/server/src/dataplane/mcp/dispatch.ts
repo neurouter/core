@@ -1,4 +1,4 @@
-import { CALL_TOOL, META_CALL_ID, META_NEXT_TOOLS, META_TASK_ID, META_TOOL_NAMES, OPS_TOOLS, opsMcpName, READ_RESULT, REPORT, RUN_SCRIPT, scriptBuiltinsLine, SEARCH_TOOLS, type OpsTool, type ToolDef } from '@neurouter/shared';
+import { CALL_TOOL, META_CALL_ID, META_NEXT_TOOLS, META_TASK_ID, META_TOOL_NAMES, OPS_TOOLS, opsMcpName, READ_RESULT, REPORT, RUN_SCRIPT, scriptBuiltinsLine, SEARCH_RESULT_CHARS, SEARCH_TOOLS, type OpsTool, type ToolDef } from '@neurouter/shared';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type { RunContext } from '../pipeline/context.js';
@@ -304,8 +304,20 @@ export class Dispatcher {
       };
     });
     const has_more = hits.length > limit;
-    const data = { tools, total_matches: has_more ? null : tools.length };
-    if (tools.length) return okDraft(data, { page: { count: tools.length, total: has_more ? null : tools.length, has_more, next_cursor: null }, meta });
+    if (tools.length) {
+      const budget = ctx.bundle.environment.limits.searchResultChars ?? SEARCH_RESULT_CHARS;
+      const fit = fitSearchHits(tools, budget, full);
+      const more = has_more || fit.omitted > 0;
+      const data = { tools: fit.tools, total_matches: more ? null : fit.tools.length };
+      const page = { count: fit.tools.length, total: more ? null : fit.tools.length, has_more: more, next_cursor: null };
+      if (!fit.cut) return okDraft(data, { page, meta });
+      // H5: over the budget; the dropped detail of one hit (the first that lost it) is one exact call away
+      const next = { tool: SEARCH_TOOLS, args: { query: fit.cut.name, limit: 1, ...(full ? { detail: 'full' } : {}) } };
+      const truncated = { ...(fit.omitted ? { items_omitted: fit.omitted } : {}), ...(fit.fields.length ? { fields: fit.fields } : {}), omitted_bytes: Math.max(0, fit.fullChars - JSON.stringify(data).length), next };
+      const hint = `Cut to ${budget} chars: ${fit.detailed < fit.tools.length ? `full detail for the top ${fit.detailed} only` : 'shorter docs'}${fit.omitted ? `, ${fit.omitted} more hits omitted` : ''}. Use a narrower query or a smaller limit; truncated.next shows one tool in full.`;
+      return okDraft(data, { page, truncated, hint: hint.length <= BUDGET.hintChars ? hint : hint.slice(0, BUDGET.hintChars), meta });
+    }
+    const data = { tools, total_matches: 0 };
     const names = visibleTools(ctx).map((t) => t.name);
     const near = closestNames(query.replace(/\s+/g, '_'), names, 3);
     const report = reportEnabled(ctx) && ctx.bundle.server.opsTools.report_unmet_need ? ` If the API cannot do it: neurouter_report({"kind":"unmet_need","text":"…"}).` : '';
@@ -367,6 +379,59 @@ export class Dispatcher {
 }
 
 /** `def list_orders(*, status: … = None) -> ListOrdersResult` → `acme.list_orders(*, status: … = None) -> ListOrdersResult`. */
+/** Hits that keep their full detail (`doc`, `input_schema`, `returns`) and example when a search result is cut. */
+const SEARCH_TOP_HITS = 3;
+/** A top hit's docstring is cut to this many characters when the result is still over its budget. */
+const SEARCH_DOC_SHORT = 600;
+
+type SearchHitOut = { name: string; example?: string; doc?: string; input_schema?: unknown; returns?: unknown } & Record<string, unknown>;
+
+/**
+ * H5: fits contract-2 search hits into `budget` characters (the JSON of `{tools, total_matches}`), degrading in order:
+ * hits after the top 3 lose their full detail, then their examples; the top hits' docstrings are shortened; then
+ * hits are dropped from the end (at least one stays, losing its detail if it alone is over). `cut` is the first hit
+ * that lost detail (or the first dropped one), the subject of the "show one tool in full" next call.
+ */
+export function fitSearchHits<T extends SearchHitOut>(input: T[], budget: number, full: boolean): { tools: T[]; omitted: number; fields: string[]; detailed: number; fullChars: number; cut: { name: string } | null } {
+  const size = (ts: T[]) => JSON.stringify({ tools: ts, total_matches: null }).length;
+  const fullChars = size(input);
+  if (fullChars <= budget) return { tools: input, omitted: 0, fields: [], detailed: input.length, fullChars, cut: null };
+  const tools = input.map((t) => ({ ...t }));
+  const fields: string[] = [];
+  let cut: { name: string } | null = null;
+  const range = (from: number, to: number) => (to - from > 1 ? `tools[${from}-${to - 1}]` : `tools[${from}]`);
+  const strip = (from: number, keys: Array<keyof SearchHitOut>, label: string) => {
+    let hit = false;
+    for (const t of tools.slice(from)) for (const k of keys) if (t[k] !== undefined) {
+      delete t[k];
+      hit = true;
+      cut ??= { name: t.name };
+    }
+    if (hit) fields.push(`${range(from, tools.length)}.${label}`);
+  };
+  if (full) strip(SEARCH_TOP_HITS, ['doc', 'input_schema', 'returns'], 'doc');
+  if (size(tools) > budget) strip(SEARCH_TOP_HITS, ['example'], 'example');
+  if (size(tools) > budget) {
+    let hit = false;
+    for (const t of tools.slice(0, SEARCH_TOP_HITS)) if (typeof t.doc === 'string' && t.doc.length > SEARCH_DOC_SHORT) {
+      t.doc = `${t.doc.slice(0, SEARCH_DOC_SHORT)}…`;
+      hit = true;
+      cut ??= { name: t.name };
+    }
+    if (hit) fields.push(`${range(0, Math.min(SEARCH_TOP_HITS, tools.length))}.doc (shortened)`);
+  }
+  let omitted = 0;
+  while (tools.length > 1 && size(tools) > budget) {
+    const dropped = tools.pop()!;
+    omitted++;
+    if (!cut) cut = { name: dropped.name };
+  }
+  if (size(tools) > budget) strip(0, ['doc', 'input_schema', 'returns', 'example'], 'detail');
+  if (!cut && omitted) cut = { name: input[tools.length]!.name };
+  const detailed = full ? tools.filter((t) => t.doc !== undefined || t.input_schema !== undefined).length : tools.length;
+  return { tools, omitted, fields, detailed, fullChars, cut };
+}
+
 function pySignatureLine(sig: string, pyName: string): string {
   const first = sig.split('\n').find((l) => l.trim().startsWith('def ')) ?? sig.split('\n')[0]!;
   const m = /^\s*def\s+[A-Za-z_][A-Za-z0-9_]*\s*(\(.*)$/.exec(first);

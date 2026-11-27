@@ -61,6 +61,8 @@ export const OverlayToolEntry = z
     examples: z.array(OverlayExample).max(20),
     graphql: z.object({ selection: z.string() }).strict(),
     idempotencyHeader: z.string(),
+    /** The built-in mock (list tools): `order` without sort params, `"<field> asc|desc"` or `none` (insertion order); default: newest first where the API lists so. */
+    mock: z.object({ order: z.string().regex(/^(none|[A-Za-z_][A-Za-z0-9_]* (asc|desc))$/, 'order is "<field> asc", "<field> desc" or "none"') }).partial().strict(),
     /**
      * Contract 2 (writes): the read tool of the write's target, e.g. `get_order`. Dry-run plans and confirmations
      * name the target with a human label, and a write answers `{before, after, response}`. `label`: the fields of

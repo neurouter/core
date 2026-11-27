@@ -279,6 +279,7 @@ export class Views {
         timeoutMs: rt.limits.timeoutMs,
         maxResponseBytes: rt.limits.maxResponseBytes,
         code: rt.limits.code,
+        ...(rt.limits.searchResultChars !== undefined ? { searchResultChars: rt.limits.searchResultChars } : {}),
       },
       policies: rt.policies as EnvironmentDetail['policies'],
       discovery: rt.discoveryOverride,
