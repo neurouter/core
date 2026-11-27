@@ -2,8 +2,8 @@ apiVersion: v2
 name: neurouter-core
 description: Neurouter turns an OpenAPI or GraphQL API into a governed MCP server with code mode, ops tools and evals
 type: application
-version: 0.3.1
-appVersion: "0.3.1"
+version: 0.3.2
+appVersion: "0.3.2"
 license: Apache-2.0
 keywords: [mcp, model-context-protocol, openapi, graphql, ai-agents, code-mode, evals]
 sources:

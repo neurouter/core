@@ -9,7 +9,7 @@
   "serverInfo": {
    "name": "neurouter-acme",
    "title": "Acme Orders via Neurouter",
-   "version": "0.3.1"
+   "version": "0.3.2"
   },
   "instructions": "This MCP server exposes the Acme Orders API (mock, writes enabled) through Neurouter.\nStart every user request with neurouter_begin_task(goal) and finish with neurouter_end_task(outcome). If the user needs something no tool can do, call neurouter_report_unmet_need instead of guessing.\nFor multi-step work, prefer run_script: a short Python script (no imports, no I/O) that calls tools as acme.<fn>(...) and returns a small result. Get signatures with search_tools. Use mode=\"dry_run\" first for anything that writes.\nErrors include an error_id; neurouter_explain_error(error_id) tells you how to fix the call. Search \"neurouter\" to find the other helper tools."
  },
@@ -3469,7 +3469,7 @@
   "serverInfo": {
    "name": "neurouter-acme",
    "title": "Acme Orders via Neurouter",
-   "version": "0.3.1"
+   "version": "0.3.2"
   },
   "instructions": "This MCP server exposes the Acme Orders API (ro, read-only) through Neurouter.\nStart every user request with neurouter_begin_task(goal) and finish with neurouter_end_task(outcome). If the user needs something no tool can do, call neurouter_report_unmet_need instead of guessing.\nFor multi-step work, prefer run_script: a short Python script (no imports, no I/O) that calls tools as acme.<fn>(...) and returns a small result. Get signatures with search_tools. Use mode=\"dry_run\" first for anything that writes.\nErrors include an error_id; neurouter_explain_error(error_id) tells you how to fix the call. Search \"neurouter\" to find the other helper tools."
  },
