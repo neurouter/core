@@ -157,6 +157,10 @@ export interface JudgeResult {
   reasons: string[];
   /** Ambiguous tasks: how the agent handled the ambiguity (a clarifying question, an explicit assumption, neither). */
   path?: 'asked' | 'assumed' | 'neither';
+  /** Ambiguous tasks: the stated assumption contradicts the prompt, or the results reported are inconsistent with it. */
+  contradicts?: boolean;
+  /** The verdict was set by the ambiguous-task policy (`assumed_read_only`: explicit assumption, no writes), not the judge's own. */
+  policy?: 'assumed_read_only';
 }
 
 /** Every judge call behind a verdict (borderline verdicts are voted: up to 3 calls, majority). */

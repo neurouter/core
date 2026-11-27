@@ -78,7 +78,10 @@ made and the reported results are consistent with that choice and with the tool 
   while the package type is the open choice: fail).
 - **Any write without asking fails.**
 
-The judge says which way the agent went (`judge.path`: `asked`, `assumed`, `neither`). A judge pass waives the task's
+The judge says which way the agent went (`judge.path`: `asked`, `assumed`, `neither`) and whether a stated assumption
+contradicts the prompt or the reported results (`judge.contradicts`). The grader applies the policy to every verdict
+(0.3.2): `path: assumed`, `contradicts: false` and no writes is a pass even when the judge failed it on rubric wording
+such as "Do not assume"; the override is marked `judge.policy: "assumed_read_only"` and keeps the judge's reasons. A judge pass waives the task's
 "no calls before asking" budget (`max_calls` 0 / hard) and `not_called` on tools the agent only read with; writes fail
 through `no_writes`.
 

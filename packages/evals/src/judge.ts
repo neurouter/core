@@ -1,5 +1,6 @@
 import { JUDGE_PASS_SCORE, type Assertion } from '@neurouter/shared';
 import { DECLINE_MARKER, DECLINE_PROMPT_VERSION, DECLINE_SYSTEM, EQUIV_MARKER, EQUIV_PROMPT_VERSION, EQUIV_SYSTEM, JUDGE_AMBIGUOUS_RUBRIC, JUDGE_CHOICE_RUBRIC, JUDGE_MARKER, JUDGE_PROMPT_VERSION, JUDGE_SYSTEM, markerMessage } from './prompts.js';
+import { effectiveWrite } from './check.js';
 import { groundTruthPreview, type GroundTruth } from './groundtruth.js';
 import { parseJsonText, textOf, type LlmClient, type LlmUsage } from './llm/types.js';
 import type { AttemptRecord, EvalTask, JudgeResult, JudgeUsage } from './types.js';
@@ -18,8 +19,8 @@ export const JUDGE_SCHEMA = {
 /** Ambiguous tasks: the verdict plus how the agent handled the ambiguity. */
 export const JUDGE_AMBIGUOUS_SCHEMA = {
   type: 'object',
-  properties: { ...JUDGE_SCHEMA.properties, path: { type: 'string', enum: ['asked', 'assumed', 'neither'] } },
-  required: [...JUDGE_SCHEMA.required, 'path'],
+  properties: { ...JUDGE_SCHEMA.properties, path: { type: 'string', enum: ['asked', 'assumed', 'neither'] }, contradicts: { type: 'boolean' } },
+  required: [...JUDGE_SCHEMA.required, 'path', 'contradicts'],
   additionalProperties: false,
 } as const;
 
@@ -135,7 +136,20 @@ export async function judgeAttempt(opts: { llm: LlmClient; model: string; task: 
     opts.signal ? { signal: opts.signal } : {},
   );
   if (opts.usage) addJudgeUsage(opts.usage, res.usage, content.length);
-  return normalizeJudge(parseJsonText(textOf(res)));
+  const j = normalizeJudge(parseJsonText(textOf(res)));
+  return ambiguous ? applyAmbiguousPolicy(j, opts.record) : j;
+}
+
+/**
+ * The ambiguous-task policy, applied to every judge verdict whatever the rubric says (H3): an explicit assumption
+ * (`path: assumed`) that does not contradict the prompt, with no writes, passes. The judge's own verdict and reasons
+ * are kept in the reasons; `policy` marks the override.
+ */
+export function applyAmbiguousPolicy(j: JudgeResult, record: Pick<AttemptRecord, 'calls'>): JudgeResult {
+  if (j.path !== 'assumed' || j.contradicts === true || (j.verdict === 'pass' && j.score >= JUDGE_PASS_SCORE)) return j;
+  if (record.calls.some(effectiveWrite)) return j;
+  const policy = 'policy: an explicit assumption with no writes passes, whatever the rubric wording';
+  return { ...j, score: 1, verdict: 'pass', reasons: [policy, ...j.reasons.map((r) => `judge (${j.verdict} ${j.score.toFixed(2)}): ${r}`)].slice(0, 4), policy: 'assumed_read_only' };
 }
 
 /** A verdict within this distance of the pass threshold is borderline (voted). */
@@ -261,7 +275,7 @@ export function normalizeJudge(raw: unknown): JudgeResult {
   const verdict = o.verdict === 'pass' && score >= JUDGE_PASS_SCORE ? 'pass' : 'fail';
   const reasons = Array.isArray(o.reasons) ? o.reasons.map(String).slice(0, 3) : [];
   const path = o.path === 'asked' || o.path === 'assumed' || o.path === 'neither' ? o.path : undefined;
-  return { score, verdict, reasons, ...(path ? { path } : {}) };
+  return { score, verdict, reasons, ...(path ? { path } : {}), ...(typeof o.contradicts === 'boolean' ? { contradicts: o.contradicts } : {}) };
 }
 
 function truncateJson(v: unknown, max: number): string {

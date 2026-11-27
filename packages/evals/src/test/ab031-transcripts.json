@@ -1,0 +1,486 @@
+{
+ "_note": "Real attempts from the 0.3.1 A/B (npx neurouter@0.3.1, gpt-6-luna agent, gemini-3.5-flash-lite judge, 2026-11-27): .agent/reports/neurouter/ax/2026-11-27-ab-0.3.1/{github,stripe}/*-transcripts.json. Tool results are cut to 1,500 chars. tasks: the suite definitions (inputs/*-suite.ai.json).",
+ "tasks": {
+  "github_ambiguous_repo_activity_sort": {
+   "key": "github_ambiguous_repo_activity_sort",
+   "category": "ambiguous",
+   "prompt": "Show me octocat's most active repositories.",
+   "rubric": "Ask whether 'most active' means most recently updated or most recently pushed before choosing a sort order. Do not assume a meaning or fetch results before clarifying.",
+   "assertions": [
+    {
+     "type": "framing"
+    },
+    {
+     "type": "judge",
+     "criterion": "Clearly asks the user to clarify whether 'most active' should be measured by updated time or push time before taking action."
+    },
+    {
+     "type": "no_writes"
+    },
+    {
+     "type": "max_calls",
+     "n": 0,
+     "hard": true
+    },
+    {
+     "type": "not_called",
+     "tool": "repos_list_for_user",
+     "toolKey": "operationId:repos/list-for-user"
+    }
+   ],
+   "referenceCalls": [],
+   "seedState": {},
+   "tags": [],
+   "enabled": true
+  }
+ },
+ "attempts": {
+  "h3_assumed_judged_fail": {
+   "source": "github/github-code-c1-transcripts.json",
+   "taskKey": "github_ambiguous_repo_activity_sort",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "code",
+   "attempt": 2,
+   "passed": false,
+   "framingPassed": true,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "begin_task first, end_task last"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Clearly asks the user to clarify whether 'most active' should be measured by updated time or push time before taking action."
+     },
+     "passed": false,
+     "detail": "judge fail (0.00): The agent failed to ask a clarifying question before choosing a sort order.; The rubric explicitly states: 'Do not assume a meaning or fetch results before clarifying.'; The agent directly fetched the results and stated an assumption instead of asking."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": false,
+     "detail": "1 upstream calls (at most 0 allowed)",
+     "overBudget": true
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "repos_list_for_user",
+      "toolKey": "operationId:repos/list-for-user"
+     },
+     "passed": false,
+     "detail": "repos_list_for_user called 1×"
+    }
+   ],
+   "judge": {
+    "score": 0,
+    "verdict": "fail",
+    "reasons": [
+     "The agent failed to ask a clarifying question before choosing a sort order.",
+     "The rubric explicitly states: 'Do not assume a meaning or fetch results before clarifying.'",
+     "The agent directly fetched the results and stated an assumption instead of asking."
+    ],
+    "path": "assumed"
+   },
+   "judgeVotes": {
+    "rubric": [
+     {
+      "score": 0,
+      "verdict": "fail",
+      "reasons": [
+       "The agent failed to ask a clarifying question before choosing a sort order.",
+       "The rubric explicitly states: 'Do not assume a meaning or fetch results before clarifying.'",
+       "The agent directly fetched the results and stated an assumption instead of asking."
+      ],
+      "path": "assumed"
+     },
+     {
+      "score": 0,
+      "verdict": "fail",
+      "reasons": [
+       "The agent failed to ask a clarifying question before choosing a sort order.",
+       "The rubric explicitly states: 'Do not assume a meaning or fetch results before clarifying.'",
+       "The agent directly fetched the results and stated an assumption instead of asking."
+      ],
+      "path": "assumed"
+     }
+    ]
+   },
+   "failureCause": "gave_up",
+   "endReason": "end_turn",
+   "prompt": "Show me octocat's most active repositories.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Show me octocat's most active repositories."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_36c0647ac2ab49019f36a57f54ba42b5",
+     "name": "neurouter_begin_task",
+     "arguments": {
+      "goal": "Show octocat's most active repositories, using repository activity data available through the GitHub API."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_36c0647ac2ab49019f36a57f54ba42b5",
+     "name": "neurouter_begin_task",
+     "isError": false,
+     "text": "{\"task_id\":\"01a21c58-a05c-77c0-955a-0d64f1930ec5\",\"attached_calls\":0}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_38429d057f4b41a491b5fc1f47004485",
+     "name": "search_tools",
+     "arguments": {
+      "query": "github list repositories for a user, repository activity, sort by updated/pushed",
+      "limit": 8,
+      "include_schemas": true
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_38429d057f4b41a491b5fc1f47004485",
+     "name": "search_tools",
+     "isError": false,
+     "text": "# In run_script call these as api.<name>(...), e.g. api.repos_list_for_user(...); helpers as ops.<name>(...).\n# Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type, iter, next, repr, chr, ord, hex, print (type takes one argument). No map/filter (use comprehensions), no getattr/hasattr (results are dicts).\n\ndef repos_list_for_user(*, username: str, type: Literal[\"all\", \"owner\", \"member\"] = \"owner\", sort: Literal[\"created\", \"updated\", \"pushed\", \"full_name\"] = \"full_name\", direction: Literal[\"asc\", \"desc\"] | None = None, per_page: int = 30, page: int = 1) -> list[MinimalRepository]\n    \"\"\"List a user's public repositories, for example to identify a repository before calling a repository-specific tool. Use `sort: updated` or `sort: pushed` with `direction: desc` for the most recently updated or pushed first. Unlike `search_repos`, this lists that user's repositories rather than matchi\"\"\"\n\ndef repos_list_for_org(*, org: str, type: Literal[\"all\", \"public\", \"private\", \"forks\", \"sources\", \"member\"] = \"all\", sort: Literal[\"created\", \"updated\", \"pushed\", \"full_name\"] = \"created\", direction: Literal[\"asc\", \"desc\"] | None = None, per_page: int = 30, page: int = 1) -> list[MinimalRepository]\n    \"\"\"List organization repositories\"\"\"\n\ndef issues_list_for_repo(*, owner: str, repo: str, milestone: str | None = None, state: Literal[\"open\", \"closed\", \"all\"] = \"open\","
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_5a07f15769294ec8bd36c0617a98eefd",
+     "name": "run_script",
+     "arguments": {
+      "code": "repos = api.repos_list_for_user(username=\"octocat\", type=\"owner\", sort=\"pushed\", direction=\"desc\", per_page=30, page=1)\nreturn repos"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_5a07f15769294ec8bd36c0617a98eefd",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"status\":\"ok\",\"result\":[{\"id\":9,\"name\":\"now\",\"full_name\":\"amid rarely\",\"description\":\"Spiritus solutio stipes creta saepe tempore. Conservo vindico animadverto suppellex celo arbor contra autem celo.\",\"private\":false,\"fork\":false,\"language\":\"cohors\",\"default_branch\":\"absum\",\"updated_at\":\"2025-09-19T03:41:23.911Z\",\"pushed_at\":\"2026-01-14T14:24:53.339Z\",\"html_url\":\"https://soggy-teammate.com/\"},{\"id\":19,\"name\":\"who blah\",\"full_name\":\"as putrid\",\"description\":\"Natus atrox culpo alter tantum addo chirographum adeo tabesco.\",\"private\":true,\"fork\":true,\"language\":\"abstergo\",\"default_branch\":\"calculus\",\"updated_at\":\"2025-10-16T13:51:05.219Z\",\"pushed_at\":\"2026-01-06T16:14:20.396Z\",\"html_url\":\"https://exalted-yak.biz\"},{\"id\":17,\"name\":\"better intensely\",\"full_name\":\"abandoned\",\"description\":\"Cupressus tendo tenuis cupio dolorum vae. Angustus coniuratio approbo ultra uterque tardus facilis aveho stillicidium.\",\"private\":true,\"fork\":false,\"language\":\"barba\",\"default_branch\":\"accendo\",\"updated_at\":\"2025-11-24T12:39:25.603Z\",\"pushed_at\":\"2026-01-03T17:33:39.009Z\",\"html_url\":\"https://near-honesty.org\"},{\"id\":5,\"name\":\"pleasing\",\"full_name\":\"soon painfully\",\"description\":\"Studio cenaculum convoco aestas concido. Voluptates cito strues demulceo bibo bos.\",\"private\":true,\"fork\":false,\"language\":\"ustulo\",\"default_branch\":\"copia\",\"updated_at\":\"2025-12-23T08:50:01.058Z\",\"pushed_at\":\"2025-12-31T14:46:13.585Z\",\"html_url\":\"https://peppery-yarmulke.info/\"},{\"id\":6,\"name\":\"a abnegate\",\"full_name\":\"r"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_f4254fbe5eb74075befc820b16d589c2",
+     "name": "neurouter_end_task",
+     "arguments": {
+      "outcome": "success",
+      "notes": "Listed octocat's repositories sorted by most recently pushed; reported the leading entries."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_f4254fbe5eb74075befc820b16d589c2",
+     "name": "neurouter_end_task",
+     "isError": false,
+     "text": "{\"task_id\":\"01a21c58-a05c-77c0-955a-0d64f1930ec5\",\"calls\":1,\"errors\":0,\"duration_ms\":5084}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Sorted by most recent push, the top repositories returned were:\n\n| Repository | Last pushed |\n|---|---|\n| `now` | Jan 14, 2026 |\n| `who blah` | Jan 6, 2026 |\n| `better intensely` | Jan 3, 2026 |\n| `pleasing` | Dec 31, 2025 |\n| `a abnegate` | Dec 24, 2025 |\n| `dispense` | Dec 20, 2025 |\n\nI used recent push date as the measure of activity."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "neurouter_begin_task",
+     "arguments": {
+      "goal": "Show octocat's most active repositories, using repository activity data available through the GitHub API."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795771900016
+    },
+    {
+     "tool": "repos_list_for_user",
+     "arguments": {
+      "username": "octocat",
+      "type": "owner",
+      "sort": "pushed",
+      "direction": "desc",
+      "per_page": 30,
+      "page": 1
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a21c58-aaf1-7f54-89b9-7687f82aaf92",
+     "ts": 1795771902745
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "repos = api.repos_list_for_user(username=\"octocat\", type=\"owner\", sort=\"pushed\", direction=\"desc\", per_page=30, page=1)\nreturn repos",
+      "code_hash": "dc4a67796cc977f060025ead7f0b6ff65922f14157294a914dbd9ffbd2a64356",
+      "mode": "execute",
+      "inputs": {}
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a21c58-aaf1-7f54-89b9-7687f82aaf92",
+     "ts": 1795771902747
+    },
+    {
+     "tool": "neurouter_end_task",
+     "arguments": {
+      "outcome": "success",
+      "notes": "Listed octocat's repositories sorted by most recently pushed; reported the leading entries."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795771905080
+    }
+   ],
+   "inputTokens": 6247,
+   "outputTokens": 551,
+   "cacheReadTokens": 6338,
+   "cacheWriteTokens": 0
+  },
+  "h3_assumed_judged_pass": {
+   "source": "github/github-code-c1-transcripts.json",
+   "taskKey": "github_ambiguous_repo_activity_sort",
+   "category": "ambiguous",
+   "model": "gpt-6-luna",
+   "mode": "code",
+   "attempt": 3,
+   "passed": true,
+   "framingPassed": true,
+   "assertionResults": [
+    {
+     "assertion": {
+      "type": "framing"
+     },
+     "passed": true,
+     "detail": "begin_task first, end_task last"
+    },
+    {
+     "assertion": {
+      "type": "judge",
+      "criterion": "Clearly asks the user to clarify whether 'most active' should be measured by updated time or push time before taking action."
+     },
+     "passed": true,
+     "detail": "judge pass (1.00): The agent stated an explicit assumption regarding the ambiguity of 'most active' (ranked by most recent push)."
+    },
+    {
+     "assertion": {
+      "type": "no_writes"
+     },
+     "passed": true,
+     "detail": "no writes"
+    },
+    {
+     "assertion": {
+      "type": "max_calls",
+      "n": 0,
+      "hard": true
+     },
+     "passed": true,
+     "detail": "1 upstream calls (at most 0 allowed); waived: the agent stated an explicit assumption and wrote nothing (judge)",
+     "overBudget": true,
+     "waived": "ambiguous"
+    },
+    {
+     "assertion": {
+      "type": "not_called",
+      "tool": "repos_list_for_user",
+      "toolKey": "operationId:repos/list-for-user"
+     },
+     "passed": true,
+     "detail": "repos_list_for_user called 1× (reads only); waived: the agent stated an explicit assumption and wrote nothing (judge)",
+     "waived": "ambiguous"
+    }
+   ],
+   "judge": {
+    "score": 1,
+    "verdict": "pass",
+    "reasons": [
+     "The agent stated an explicit assumption regarding the ambiguity of 'most active' (ranked by most recent push)."
+    ],
+    "path": "assumed"
+   },
+   "judgeVotes": {
+    "rubric": [
+     {
+      "score": 1,
+      "verdict": "pass",
+      "reasons": [
+       "The agent stated an explicit assumption regarding the ambiguity of 'most active' (ranked by most recent push)."
+      ],
+      "path": "assumed"
+     },
+     {
+      "score": 1,
+      "verdict": "pass",
+      "reasons": [
+       "The agent stated an explicit assumption regarding the ambiguity of 'most active' (ranked by most recent push)."
+      ],
+      "path": "assumed"
+     }
+    ]
+   },
+   "failureCause": null,
+   "endReason": "end_turn",
+   "prompt": "Show me octocat's most active repositories.",
+   "transcript": [
+    {
+     "kind": "user",
+     "text": "Show me octocat's most active repositories."
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_0d12b1eb5c6844a7a4db7c375d5b4b1a",
+     "name": "neurouter_begin_task",
+     "arguments": {
+      "goal": "Find and show octocat's most active repositories."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_0d12b1eb5c6844a7a4db7c375d5b4b1a",
+     "name": "neurouter_begin_task",
+     "isError": false,
+     "text": "{\"task_id\":\"01a21c58-c350-7ac2-9729-80d82bfb9727\",\"attached_calls\":0}"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_1a6b213a3e664dc4850965957045b697",
+     "name": "search_tools",
+     "arguments": {
+      "query": "GitHub list repositories for user and repository activity metrics commits stars updated recently",
+      "include_schemas": true
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_1a6b213a3e664dc4850965957045b697",
+     "name": "search_tools",
+     "isError": false,
+     "text": "# In run_script call these as api.<name>(...), e.g. api.repos_list_for_user(...); helpers as ops.<name>(...).\n# Built-ins: len, range, enumerate, zip, sorted, reversed, min, max, sum, any, all, abs, round, divmod, pow, int, float, str, bool, list, dict, set, frozenset, tuple, isinstance, type, iter, next, repr, chr, ord, hex, print (type takes one argument). No map/filter (use comprehensions), no getattr/hasattr (results are dicts).\n\ndef repos_list_for_user(*, username: str, type: Literal[\"all\", \"owner\", \"member\"] = \"owner\", sort: Literal[\"created\", \"updated\", \"pushed\", \"full_name\"] = \"full_name\", direction: Literal[\"asc\", \"desc\"] | None = None, per_page: int = 30, page: int = 1) -> list[MinimalRepository]\n    \"\"\"List a user's public repositories, for example to identify a repository before calling a repository-specific tool. Use `sort: updated` or `sort: pushed` with `direction: desc` for the most recently updated or pushed first. Unlike `search_repos`, this lists that user's repositories rather than matchi\"\"\"\n\ndef repos_list_commits(*, owner: str, repo: str, sha: str | None = None, path: str | None = None, author: str | None = None, committer: str | None = None, since: str | None = None, until: str | None = None, per_page: int = 30, page: int = 1) -> list[Commit]\n    \"\"\"List commits in a repository, newest first. To show recent commits from a branch, pass that branch name in `sha`; omit `sha` to use the default branch. Filter by path, author, committer, or date range as nee"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_13936174306b4571bb35a2f95986460a",
+     "name": "run_script",
+     "arguments": {
+      "code": "repos = api.repos_list_for_user(username=\"octocat\", type=\"owner\", sort=\"pushed\", direction=\"desc\", per_page=10, page=1)\nreturn repos"
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_13936174306b4571bb35a2f95986460a",
+     "name": "run_script",
+     "isError": false,
+     "text": "{\"status\":\"ok\",\"result\":[{\"id\":9,\"name\":\"now\",\"full_name\":\"amid rarely\",\"description\":\"Spiritus solutio stipes creta saepe tempore. Conservo vindico animadverto suppellex celo arbor contra autem celo.\",\"private\":false,\"fork\":false,\"language\":\"cohors\",\"default_branch\":\"absum\",\"updated_at\":\"2025-09-19T03:41:23.911Z\",\"pushed_at\":\"2026-01-14T14:24:53.339Z\",\"html_url\":\"https://soggy-teammate.com/\"},{\"id\":19,\"name\":\"who blah\",\"full_name\":\"as putrid\",\"description\":\"Natus atrox culpo alter tantum addo chirographum adeo tabesco.\",\"private\":true,\"fork\":true,\"language\":\"abstergo\",\"default_branch\":\"calculus\",\"updated_at\":\"2025-10-16T13:51:05.219Z\",\"pushed_at\":\"2026-01-06T16:14:20.396Z\",\"html_url\":\"https://exalted-yak.biz\"},{\"id\":17,\"name\":\"better intensely\",\"full_name\":\"abandoned\",\"description\":\"Cupressus tendo tenuis cupio dolorum vae. Angustus coniuratio approbo ultra uterque tardus facilis aveho stillicidium.\",\"private\":true,\"fork\":false,\"language\":\"barba\",\"default_branch\":\"accendo\",\"updated_at\":\"2025-11-24T12:39:25.603Z\",\"pushed_at\":\"2026-01-03T17:33:39.009Z\",\"html_url\":\"https://near-honesty.org\"},{\"id\":5,\"name\":\"pleasing\",\"full_name\":\"soon painfully\",\"description\":\"Studio cenaculum convoco aestas concido. Voluptates cito strues demulceo bibo bos.\",\"private\":true,\"fork\":false,\"language\":\"ustulo\",\"default_branch\":\"copia\",\"updated_at\":\"2025-12-23T08:50:01.058Z\",\"pushed_at\":\"2025-12-31T14:46:13.585Z\",\"html_url\":\"https://peppery-yarmulke.info/\"},{\"id\":6,\"name\":\"a abnegate\",\"full_name\":\"r"
+    },
+    {
+     "kind": "tool_call",
+     "id": "call_2debdce9f399474282d1e4214d478eae",
+     "name": "neurouter_end_task",
+     "arguments": {
+      "outcome": "success",
+      "notes": "Listed octocat's repositories sorted by most recently pushed."
+     }
+    },
+    {
+     "kind": "tool_result",
+     "id": "call_2debdce9f399474282d1e4214d478eae",
+     "name": "neurouter_end_task",
+     "isError": false,
+     "text": "{\"task_id\":\"01a21c58-c350-7ac2-9729-80d82bfb9727\",\"calls\":1,\"errors\":0,\"duration_ms\":4688}"
+    },
+    {
+     "kind": "assistant",
+     "text": "Here are octocat’s most recently pushed repositories, ranked by last push:\n\n1. **now** — pushed Jan 14, 2026  \n2. **who blah** — pushed Jan 6, 2026  \n3. **better intensely** — pushed Jan 3, 2026  \n4. **pleasing** — pushed Dec 31, 2025  \n5. **a abnegate** — pushed Dec 24, 2025  \n\n“Most active” here means most recently pushed; it doesn’t measure commit volume."
+    }
+   ],
+   "calls": [
+    {
+     "tool": "neurouter_begin_task",
+     "arguments": {
+      "goal": "Find and show octocat's most active repositories."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795771908957
+    },
+    {
+     "tool": "repos_list_for_user",
+     "arguments": {
+      "username": "octocat",
+      "type": "owner",
+      "sort": "pushed",
+      "direction": "desc",
+      "per_page": 10,
+      "page": 1
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "script",
+     "write": false,
+     "scriptRunId": "01a21c58-cd93-7b9b-8c45-0a98755d5a6f",
+     "ts": 1795771911608
+    },
+    {
+     "tool": "run_script",
+     "arguments": {
+      "code": "repos = api.repos_list_for_user(username=\"octocat\", type=\"owner\", sort=\"pushed\", direction=\"desc\", per_page=10, page=1)\nreturn repos",
+      "code_hash": "187058877c485c3f66b971be51762203d68dab193147a215693691bd468e0537",
+      "mode": "execute",
+      "inputs": {}
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": "01a21c58-cd93-7b9b-8c45-0a98755d5a6f",
+     "ts": 1795771911611
+    },
+    {
+     "tool": "neurouter_end_task",
+     "arguments": {
+      "outcome": "success",
+      "notes": "Listed octocat's repositories sorted by most recently pushed."
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false,
+     "scriptRunId": null,
+     "ts": 1795771913632
+    }
+   ],
+   "inputTokens": 5037,
+   "outputTokens": 507,
+   "cacheReadTokens": 5079,
+   "cacheWriteTokens": 0
+  }
+ }
+}
