@@ -56,7 +56,9 @@ calls on the same mock data, only the arguments the prompt asks for are checked,
 meaning (booleans, numbers, minor units, dates, ids), and call budgets are soft (over budget is reported as
 efficiency, not failure). A suite is accepted only when every task's reference solution passes its own
 checks (calibration; `--calibrate-with <model>` adds a model pass that flags disagreements for review).
-`--max-run-tokens` caps a run's spend. Details, score definitions and the 0.2.1 suite converter
+`--max-run-tokens` caps a run's spend. Per-attempt limits (turns, tool calls, tokens including cached input,
+wall time, enforced during calls) can be overridden per suite or per task (`limits`). Exact values (numbers,
+amounts, ids) are never passed by the equivalence judge. Details, score definitions and the 0.2.1 suite converter
 (`--migrate-suite`) and offline re-grade (`--regrade`): [packages/evals/README.md](packages/evals/README.md).
 
 ## Agent contract
@@ -83,6 +85,11 @@ Tool results follow one of two contracts, chosen per session:
   `ops.error(e)` returns the structured error (`code`, `message`, `retry`, `next`, `fields`, `plan`). `print()` output
   comes back as `logs` (up to 2,000 characters); a return value over 8,192 characters (`limits.code.resultChars`) is
   cut with `truncated` (`truncated.next` reads the rest) and a hint to return less; the cut data always fits.
+  Inside a script, a call that hits the gateway rate limit waits for a token instead of failing (contracts 1 and
+  2). Each wait is bounded by the script's remaining wall time and by `limits.code.rateLimitWaitSec` (default 30 s;
+  0 fails at once). Only a wait that cannot fit raises `RateLimited` with `retry_after_ms`. The waits appear in the
+  run's stats (`rateLimitWaits`, `rateLimitWaitMs`). One tool result inside a script may be up to 16 MiB (results
+  over the executor's 2 MiB frame go in parts); over that, the call raises `response_too_large`.
   A `search_tools` result over 8,192 characters (`limits.searchResultChars`) keeps the full detail (`doc`, schema,
   example) for the top 3 hits only, then drops the last hits; `truncated` says what was cut and `truncated.next`
   is `search_tools` for one tool by name with its full detail.
@@ -101,6 +108,21 @@ decides. `NEUROUTER_NEW_SERVER_CONTRACT` (default `2`) sets the contract of new 
 is `envelope` (default: the shared envelope schema with an open `data`), `none`, or `typed` (the shaped upstream
 schema as `data`, validated before sending; a tool whose response does not match is re-listed without it and
 reported in the inbox).
+
+## Rate limits
+
+- **Gateway limits.** Neurouter limits calls per credential (`limits.rateLimit`) and per credential and tool
+  (`limits.toolRateLimit`). When an environment sets neither, the limiter applies 600/min (burst 120) and 300/min
+  (burst 60).
+- **Mock environment.** The built-in mock (`baseUrl: "mock:"`) has no gateway rate limit unless its limits or the API
+  key set one (0.3.3).
+- **Scripts.** Inside `run_script`, inner calls wait for a token (see above).
+- **Upstream backoff.** A read that gets 429 or 503 from the upstream is retried when the response says when to come
+  back: `Retry-After`, or `X-RateLimit-Remaining: 0` with `X-RateLimit-Reset`. It is retried at most twice, each
+  wait is at most 10 s, and inside a script no wait runs past its wall time. Writes are never retried: they return
+  `rate_limited` with `retry_after_ms`.
+- **Upstream concurrency.** `limits.upstreamConcurrency` caps an environment's in-flight upstream calls (default: no
+  cap).
 
 ## Development
 
