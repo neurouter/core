@@ -88,3 +88,22 @@ describe('shapeResponse', () => {
     expect((r.value as unknown[]).length).toBe(30);
   });
 });
+
+describe('fitJsonChars (H4: script values the field clip leaves over the budget)', () => {
+  it('replaces the deepest bulk first, keeps the outer keys, and always fits', async () => {
+    const { fitJsonChars } = await import('./shape.js');
+    const repo = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`f${i}`, `v${i}`.padEnd(30, 'x')]));
+    const v = Object.fromEntries(['npm', 'maven', 'docker', 'nuget', 'container', 'rubygems'].map((k) => [k, [{ id: 1, name: k, repository: repo }]]));
+    const r = fitJsonChars(v, 8192);
+    expect(JSON.stringify(r.value).length).toBeLessThanOrEqual(8192);
+    expect(Object.keys(r.value as object)).toEqual(Object.keys(v));
+    expect(r.fields.every((f) => f.endsWith('.repository'))).toBe(true);
+    expect((r.value as Record<string, Array<{ name: string }>>).npm[0]!.name).toBe('npm');
+    // only tiny keys: the last resort cuts the JSON text
+    const flat = Object.fromEntries(Array.from({ length: 3000 }, (_, i) => [`k${i}`, i]));
+    const t = fitJsonChars(flat, 500);
+    expect(typeof t.value).toBe('string');
+    expect(JSON.stringify(t.value).length).toBeLessThanOrEqual(500);
+    expect(fitJsonChars({ a: 1 }, 500)).toEqual({ value: { a: 1 }, fields: [] });
+  });
+});

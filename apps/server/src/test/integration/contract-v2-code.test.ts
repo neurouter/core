@@ -93,6 +93,43 @@ describe('contract 2: code mode (acme, mock)', () => {
     expect(small).toMatchObject({ data: 'order_1', truncated: null });
   });
 
+  it('H4: a value cut by field still fits the budget: the 0.3.1 A/B "cut to 8192 chars" result of 33,554 chars', async () => {
+    // github_ambiguous_org_package_type #3 (code, contract 2): six package listings, one package each with a large
+    // nested repository; the field clip left 33,554 chars of data under a hint saying "cut to 8192 chars"
+    const { readFileSync } = await import('node:fs');
+    const v = (JSON.parse(readFileSync(resolve(import.meta.dirname, '../fixtures/h4-package-listings.json'), 'utf8')) as { value: Record<string, unknown> }).value;
+    const c = mcp();
+    await c.initialize();
+    const res = (await c.call('run_script', { code: 'return v', inputs: { v } })).result as Env;
+    const r = assertEnvelope(res, 'run_script');
+    expect(r.ok, JSON.stringify(r.error)).toBe(true);
+    const dataChars = JSON.stringify(r.data).length;
+    expect(dataChars).toBeLessThanOrEqual(8192);
+    expect((res.content[0].text as string).length).toBeLessThan(8192 + 1500);
+    // the marker and handle stay accurate: the bytes shown and omitted match what data holds
+    const m = /Result cut to 8192 chars \((\d+) of (\d+) bytes\)/.exec(r.hint as string)!;
+    expect(m).not.toBeNull();
+    expect(Number(m[1])).toBe(Buffer.byteLength(JSON.stringify(r.data)));
+    expect(r.truncated.omitted_bytes).toBe(Number(m[2]) - Number(m[1]));
+    expect(r.truncated.fields.length).toBeGreaterThan(0);
+    // the keys of the return value stay, and the whole value is behind truncated.next
+    expect(Object.keys(r.data)).toEqual(Object.keys(v));
+    const rest = assertEnvelope((await c.call(r.truncated.next.tool, r.truncated.next.args)).result, 'neurouter_read_result');
+    expect(rest.ok, JSON.stringify(rest.error)).toBe(true);
+  });
+
+  it('H4: every cut path fits the budget: a list prefix next to a large field, and a value over the executor limit (preview)', async () => {
+    const wrapper = await run('return {"meta": "m" * 9000, "items": [{"id": i, "s": "x" * 400} for i in range(200)]}');
+    expect(wrapper.ok, JSON.stringify(wrapper.error)).toBe(true);
+    expect(JSON.stringify(wrapper.data).length).toBeLessThanOrEqual(8192);
+    expect(wrapper.truncated.next.tool).toBe('neurouter_read_result');
+    // over the executor's result limit (1 MiB): data is the preview, a JSON string with escaped quotes
+    const huge = await run('return [{"k": "x" * 100, "q": "\\"" * 20} for _ in range(12000)]');
+    expect(huge.ok, JSON.stringify(huge.error)).toBe(true);
+    expect(JSON.stringify(huge.data).length).toBeLessThanOrEqual(8192);
+    expect(huge.truncated.omitted_bytes).toBeGreaterThan(1_000_000);
+  });
+
   it('ops.pages stays as an alias for one release', async () => {
     expect(await ok('return len(ops.pages(fn="acme.list_orders", args={"limit": 6}, max_items=100))')).toBe(20);
   });

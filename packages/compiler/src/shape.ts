@@ -161,6 +161,55 @@ export function clipToFit(input: unknown, maxBytes: number): { value: unknown; f
   return { value, fields: [...fields].sort() };
 }
 
+/**
+ * Makes a value's JSON text fit `maxChars`, for values without a schema to keep (script return values): after
+ * `clipToFit`, the structure alone can stay far over the cap (one large nested object per list). Repeatedly
+ * replaces the largest subtree that has no dominant child (a child over half its size) with a short marker
+ * string, so the outer keys stay and the deepest bulk goes first; the paths are reported. As a last resort the
+ * JSON text itself is cut (a string). The result's JSON text is always ≤ `maxChars` (for `maxChars` ≥ 64).
+ */
+export function fitJsonChars(input: unknown, maxChars: number): { value: unknown; fields: string[] } {
+  const len = (v: unknown) => (JSON.stringify(v) ?? 'null').length;
+  if (len(input) <= maxChars) return { value: input, fields: [] };
+  const value = clone(input);
+  const fields: string[] = [];
+  type Node = { holder: Record<string, unknown> | unknown[]; key: string | number; path: string; size: number; dominated: boolean };
+  for (let round = 0; round < 200 && len(value) > maxChars; round++) {
+    const nodes: Node[] = [];
+    const walk = (v: unknown, holder: Node['holder'] | null, key: string | number, path: string, depth: number): number => {
+      const size = len(v);
+      if (depth > 32 || (!Array.isArray(v) && !isObj(v))) {
+        if (holder && typeof v === 'string' && size > 48) nodes.push({ holder, key, path, size, dominated: false });
+        return size;
+      }
+      let biggest = 0;
+      if (Array.isArray(v)) v.forEach((x, i) => (biggest = Math.max(biggest, walk(x, v, i, `${path}[${i}]`, depth + 1))));
+      else for (const [k, x] of Object.entries(v)) biggest = Math.max(biggest, walk(x, v, k, path ? `${path}.${k}` : k, depth + 1));
+      if (holder && size > 48) nodes.push({ holder, key, path, size, dominated: biggest * 2 > size });
+      return size;
+    };
+    walk(value, null, '', '', 0);
+    const pick = nodes.filter((n) => !n.dominated).sort((a, b) => b.size - a.size)[0];
+    if (!pick) break;
+    (pick.holder as Record<string | number, unknown>)[pick.key] = `… (${pick.size} chars cut)`;
+    fields.push(pick.path);
+  }
+  if (len(value) <= maxChars) return { value, fields };
+  return { value: cutJsonText(JSON.stringify(value), maxChars), fields: ['$'] };
+}
+
+/** The longest prefix of `text` (plus "…") whose JSON string form is ≤ `maxChars`. */
+export function cutJsonText(text: string, maxChars: number): string {
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (JSON.stringify(`${text.slice(0, mid)}…`).length <= maxChars) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${text.slice(0, lo)}…`;
+}
+
 /** MCP `structuredContent` must be an object: arrays → `{ items }`, scalars → `{ data }`. */
 export function wrapStructured(value: unknown): Record<string, unknown> {
   if (Array.isArray(value)) return { items: value };
