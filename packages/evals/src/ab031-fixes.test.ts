@@ -75,6 +75,8 @@ describe('H3: the ambiguous policy applies whatever the rubric says ("Do not ass
     const p = promptOf(llm.requests[0]!);
     expect(p).toContain('This policy overrides the rubric and the criteria');
     expect(p).toMatch(/wording such as \W+Do not assume\W+, .*does not make an explicit assumption with read-only behavior fail/);
+    // the live Gemini check of this attempt with an earlier wording labelled it "neither" ("not stated before fetching")
+    expect(p).toMatch(/a sentence anywhere in the answer that names the reading is \W+assumed\W+, also after the results/);
     expect(JSON.stringify(llm.requests[0]!.output_config)).toContain('"contradicts"');
   });
 });
