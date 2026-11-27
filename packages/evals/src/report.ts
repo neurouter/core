@@ -6,8 +6,8 @@ import type { JudgeUsage, ReadinessScore, SuiteCalibration, TaskRunResult } from
 export interface EvalReport {
   version: 1;
   server: { slug: string; name: string };
-  /** `contract`: the agent contract the eval server served (1 or 2). */
-  run: { id: string | null; models: string[]; modes: string[]; repeats: number; environment: string; buildHash: string | null; provider: string; startedAt: string; endedAt: string; contract?: 1 | 2 | null };
+  /** `contract`: the agent contract the eval server served (1 or 2). `judgeModel`: the model that judged the attempts. */
+  run: { id: string | null; models: string[]; modes: string[]; repeats: number; environment: string; buildHash: string | null; provider: string; startedAt: string; endedAt: string; contract?: 1 | 2 | null; judgeModel?: string | null };
   score: ReadinessScore;
   /** Per (model, mode, category): counted attempts (no provider refusals), passes, success, tokens per attempt. */
   categories: CategoryRow[];
@@ -117,7 +117,7 @@ export function renderMarkdown(rep: EvalReport): string {
     lines.push('');
   }
   lines.push(`- Recommended mode: **${s.recommendedMode ?? 'n/a'}** — ${s.recommendationText}`);
-  lines.push(`- Confidence: ${s.confidence}; models: ${rep.run.models.join(', ')}; modes: ${rep.run.modes.join(', ')}; repeats: ${rep.run.repeats}; environment: ${rep.run.environment}${rep.run.contract ? `; agent contract ${rep.run.contract}` : ''}${rep.run.provider === 'stub' ? ' (**stub provider — not a real model**)' : ''}`, '');
+  lines.push(`- Confidence: ${s.confidence}; models: ${rep.run.models.join(', ')}; modes: ${rep.run.modes.join(', ')}; repeats: ${rep.run.repeats}; environment: ${rep.run.environment}${rep.run.contract ? `; agent contract ${rep.run.contract}` : ''}${rep.run.judgeModel ? `; judge: ${rep.run.judgeModel}` : ''}${rep.run.provider === 'stub' ? ' (**stub provider — not a real model**)' : ''}`, '');
   lines.push('| Model | Mode | Score | Success | Avg tokens | of which cached | Tokens / multi-step task | Avg calls | Avg latency | Flaky |', '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|');
   for (const c of s.cells)
     lines.push(`| ${c.model} | ${c.mode}${c.best ? ' ★' : ''} | ${c.score} | ${Math.round(c.successRate * 100)}% | ${Math.round(c.avgTokens)} | ${Math.round(c.avgCachedTokens ?? 0)} | ${c.avgTokensMulti === null ? '–' : Math.round(c.avgTokensMulti)} | ${c.avgCalls.toFixed(1)} | ${Math.round(c.avgLatencyMs)} ms | ${c.flakyTasks} |`);

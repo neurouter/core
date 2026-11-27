@@ -205,9 +205,13 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     const prompts = Object.fromEntries(taskRows.map((t) => [t.key, { category: t.category, prompt: t.prompt }]));
     // suggestions store task-row ids; reports name the suite's task keys
     const keyById = new Map(taskRows.map((t) => [t.id, t.key]));
+    const runModels = JSON.parse(run.models) as string[];
+    // the judge the run used (the same choice the service made): judge usage is filed under it, not the agent model
+    const judgeModel = await s.evals.judgeModel(tenant, runModels[0]!);
     const report = buildReport({
       server: { slug, name: slug },
-      run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString(), contract },
+      run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString(), contract, judgeModel },
+      judgeModel,
       score,
       suggestions: suggestions.map((x) => ({ cause: x.cause as never, kind: x.kind, tools: JSON.parse(x.tools) as string[], affectedTaskKeys: (JSON.parse(x.affected_task_ids) as string[]).map((id) => keyById.get(id) ?? id), overlayPatch: (JSON.parse(x.overlay_patch) as { yaml: string }).yaml, overlayOps: [], specPatch: x.spec_patch, rationale: x.rationale, predictedDelta: x.predicted_delta })),
       results,
@@ -266,9 +270,9 @@ async function regrade(s: RunningServer['services'], tenant: string, serverId: s
     console.log(`${renderRegradeCategories(categories)}\n`);
     console.log(`re-graded ${sum.attempts} attempts: pass rate ${pct(sum.oldPassRate)} → ${pct(sum.newPassRate)} (${sum.flipsUp} fail→pass, ${sum.flipsDown} pass→fail, ${sum.excluded} provider refusals excluded, ${sum.overBudget} over budget, ${sum.matchedByJudge} matched by judge)`);
     const u = out.judgeUsage;
-    console.log(`judge usage: ${u.calls} calls, ${u.inputTokens + u.cacheReadTokens + u.outputTokens} tokens (cap ${maxJudgeTokens})`);
+    console.log(`judge usage${o.judgeModel ? ` (${o.judgeModel})` : ''}: ${u.calls} calls, ${u.inputTokens + u.cacheReadTokens + u.outputTokens} tokens (cap ${maxJudgeTokens})`);
     if (out.skippedTasks.length) console.log(`not re-graded (task not in the suite or disabled): ${out.skippedTasks.join(', ')}`);
-    if (o.out) writeFileSync(o.out, JSON.stringify({ contract, summary: sum, categories, judgeUsage: u, skippedTasks: out.skippedTasks, rows: out.rows }, null, 2));
+    if (o.out) writeFileSync(o.out, JSON.stringify({ contract, judgeModel: o.judgeModel ?? null, summary: sum, categories, judgeUsage: u, skippedTasks: out.skippedTasks, rows: out.rows }, null, 2));
   } finally {
     await runner.close();
   }

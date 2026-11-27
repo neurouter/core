@@ -150,6 +150,32 @@ describe('neurouter eval (in-process, stub provider)', () => {
     }
   }, 120_000);
 
+  it('reports judge usage under the judge model, not the agent model (H1: the deterministic Gemini judge was filed under gpt-6-luna)', async () => {
+    // the A/B evidence: agent gpt-6-luna (OpenAI), judge gemini-3.5-flash-lite (chosen because a Gemini key exists);
+    // here the stub plays both, the agent is the stub model and the Gemini key selects the Gemini judge model
+    process.env.NEUROUTER_EVAL_LLM = 'stub';
+    process.env.NEUROUTER_EXECUTOR_MODE = 'local';
+    process.env.GEMINI_API_KEY = 'test-key-never-called';
+    const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));
+    try {
+      const gen = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--generate', '--counts', '1,0,2,0', '--calibrate-only', '--save-suite', join(dir, 's.json')]);
+      expect(gen.code).toBeUndefined();
+      const r = await run(['eval', '--spec', join(ROOT, 'examples/petstore/openapi.yaml'), '--suite', join(dir, 's.json'), '--repeats', '1', '--modes', 'tool', '--out', join(dir, 'r.json'), '--md', join(dir, 'r.md')]);
+      expect(r.code).toBeUndefined();
+      const rep = JSON.parse(readFileSync(join(dir, 'r.json'), 'utf8')) as { run: { models: string[]; judgeModel?: string }; judgeUsage: Record<string, { calls: number }> };
+      expect(Object.keys(rep.judgeUsage)).toEqual(['gemini-3.5-flash-lite']);
+      expect(rep.judgeUsage['gemini-3.5-flash-lite']!.calls).toBeGreaterThan(0);
+      expect(rep.run.models).not.toContain('gemini-3.5-flash-lite');
+      expect(rep.run.judgeModel).toBe('gemini-3.5-flash-lite');
+      const md = readFileSync(join(dir, 'r.md'), 'utf8');
+      expect(md).toMatch(/Judge usage: gemini-3\.5-flash-lite: \d+ calls/);
+      expect(md).not.toMatch(/Judge usage: stub/);
+    } finally {
+      delete process.env.NEUROUTER_EXECUTOR_MODE;
+      delete process.env.GEMINI_API_KEY;
+    }
+  }, 120_000);
+
   it('--generate exits 2 without running when the generator produces no tasks', async () => {
     process.env.NEUROUTER_EVAL_LLM = 'stub';
     const dir = mkdtempSync(join(tmpdir(), 'nr-cli-'));
