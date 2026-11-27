@@ -396,7 +396,7 @@ export function fitSearchHits<T extends SearchHitOut>(input: T[], budget: number
   const size = (ts: T[]) => JSON.stringify({ tools: ts, total_matches: null }).length;
   const fullChars = size(input);
   if (fullChars <= budget) return { tools: input, omitted: 0, fields: [], detailed: input.length, fullChars, cut: null };
-  let tools = input.map((t) => ({ ...t }));
+  const tools = input.map((t) => ({ ...t }));
   const fields: string[] = [];
   let cut: { name: string } | null = null;
   const range = (from: number, to: number) => (to - from > 1 ? `tools[${from}-${to - 1}]` : `tools[${from}]`);

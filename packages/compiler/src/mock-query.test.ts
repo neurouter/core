@@ -240,7 +240,7 @@ describe('0.3.2 mock fixes: one state per entity; newest-first lists (P6 Stripe 
     const listed = (await get('/v1/charges/demo/refunds?limit=100')).body.data;
     for (const r of listed) expect((await get(`/v1/refunds/${r.id}`)).body).toEqual(r);
     const top = (await get('/v1/refunds?limit=100')).body.data;
-    for (const r of top) expect(listed.find((x) => x.id === r.id) ?? r).toEqual(r);
+    for (const r of top) expect(listed.find((x: { id: string }) => x.id === r.id) ?? r).toEqual(r);
   });
 
   it('a refund created under the top level and retrieved under its charge is one object', async () => {

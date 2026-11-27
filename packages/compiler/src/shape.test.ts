@@ -98,7 +98,7 @@ describe('fitJsonChars (H4: script values the field clip leaves over the budget)
     expect(JSON.stringify(r.value).length).toBeLessThanOrEqual(8192);
     expect(Object.keys(r.value as object)).toEqual(Object.keys(v));
     expect(r.fields.every((f) => f.endsWith('.repository'))).toBe(true);
-    expect((r.value as Record<string, Array<{ name: string }>>).npm[0]!.name).toBe('npm');
+    expect((r.value as Record<string, Array<{ name: string }>>).npm![0]!.name).toBe('npm');
     // only tiny keys: the last resort cuts the JSON text
     const flat = Object.fromEntries(Array.from({ length: 3000 }, (_, i) => [`k${i}`, i]));
     const t = fitJsonChars(flat, 500);
