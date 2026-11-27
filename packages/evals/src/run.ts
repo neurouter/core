@@ -21,6 +21,12 @@ export interface RunSettings {
   transcriptMaxChars?: number | null;
 }
 
+/**
+ * Per-attempt limits. `maxTotalTokens` counts every agent token: uncached input (cache writes included) + cached input
+ * read + output (0.3.3, L1; before, cached input was not counted). `wallMs` is enforced during LLM and tool calls: the
+ * call in flight is aborted at the deadline and the attempt ends `timeout` (L2); a final answer received before the
+ * deadline ends `end_turn`. Suites and tasks can override them (`limits`).
+ */
 export interface RunLimits {
   maxTurns: number;
   maxToolCalls: number;
@@ -29,6 +35,13 @@ export interface RunLimits {
 }
 
 export const DEFAULT_LIMITS: RunLimits = { maxTurns: 25, maxToolCalls: 60, maxTotalTokens: 200_000, wallMs: 5 * 60_000 };
+
+/** An attempt's effective limits: the defaults, then the run's (suite) limits, then the task's own overrides. */
+export function effectiveLimits(run: Partial<RunLimits> | null | undefined, task: Partial<RunLimits> | null | undefined): RunLimits {
+  const out = { ...DEFAULT_LIMITS };
+  for (const o of [run, task]) for (const k of Object.keys(DEFAULT_LIMITS) as Array<keyof RunLimits>) if (typeof o?.[k] === 'number') out[k] = o[k];
+  return out;
+}
 export const DEFAULT_SETTINGS: RunSettings = { effort: 'medium', fallbacks: true };
 export const TRANSCRIPT_ITEM_MAX = 4096;
 
@@ -62,6 +75,13 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
   const settings = { ...DEFAULT_SETTINGS, ...(opts.settings ?? {}) };
   const limits = { ...DEFAULT_LIMITS, ...(opts.limits ?? {}) };
   const started = now();
+  // L2: one deadline for the attempt; it aborts the LLM or tool call in flight
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), Math.max(0, limits.wallMs));
+  timer.unref?.();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, deadline.signal]) : deadline.signal;
+  const timedOut = () => deadline.signal.aborted && !opts.signal?.aborted;
+  const wallError = () => `wall limit ${limits.wallMs} ms reached during a call (aborted)`;
   const maxChars = settings.transcriptMaxChars === undefined ? TRANSCRIPT_ITEM_MAX : settings.transcriptMaxChars;
   const cut = (s: string) => cutTranscript(s, maxChars);
   const transcript: TranscriptItem[] = [{ kind: 'user', text: cut(opts.prompt) }];
@@ -86,6 +106,7 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     neurouterTaskId: null,
   };
   const finish = (reason: EndReason, error: string | null = null): AttemptRun => {
+    clearTimeout(timer);
     out.endReason = reason;
     out.error = error;
     out.latencyMs = now() - started;
@@ -93,7 +114,11 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     return out;
   };
 
-  const tools = (await opts.mcp.listTools()).map((t) => ({ name: t.name, ...(t.description ? { description: t.description } : {}), input_schema: t.inputSchema }));
+  const listed = await opts.mcp.listTools().catch((err: unknown) => {
+    clearTimeout(timer);
+    throw err;
+  });
+  const tools = listed.map((t) => ({ name: t.name, ...(t.description ? { description: t.description } : {}), input_schema: t.inputSchema }));
   out.framingAvailable = tools.some((t) => t.name === BEGIN_TASK_TOOL);
   out.toolsListBytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
   const messages: LlmMessageParam[] = [{ role: 'user', content: opts.prompt }];
@@ -104,7 +129,8 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     if (opts.signal?.aborted) return finish('cancelled', 'cancelled');
     if (out.turns >= limits.maxTurns) return finish('max_turns');
     if (now() - started > limits.wallMs) return finish('timeout');
-    if (out.inputTokens + out.outputTokens > limits.maxTotalTokens) return finish('over_budget');
+    if (timedOut()) return finish('timeout', wallError());
+    if (out.inputTokens + out.cacheReadTokens + out.outputTokens > limits.maxTotalTokens) return finish('over_budget');
     const req: LlmRequest = {
       model: opts.model,
       max_tokens: settings.maxTokens ?? 16000,
@@ -118,10 +144,14 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     };
     let res: LlmResponse;
     try {
-      res = await createWithRetry(opts.llm, req, { sleep, random, ...(opts.signal ? { signal: opts.signal } : {}) });
+      res = await createWithRetry(opts.llm, req, { sleep, random, signal });
     } catch (err) {
-      if (err instanceof LlmKeyError) throw err;
+      if (err instanceof LlmKeyError) {
+        clearTimeout(timer);
+        throw err;
+      }
       if (opts.signal?.aborted) return finish('cancelled', 'cancelled');
+      if (timedOut()) return finish('timeout', wallError());
       return finish('error', (err as Error).message);
     }
     out.turns++;
@@ -163,7 +193,7 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
         let isError: boolean;
         let content: string;
         try {
-          const r = await opts.mcp.callTool(u.name, args, opts.signal);
+          const r = await opts.mcp.callTool(u.name, args, signal);
           isError = !!r.isError;
           content = resultText(r);
           out.neurouterTaskId ??= taskIdFromResult(r);
@@ -179,6 +209,8 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
       }),
     );
     messages.push({ role: 'user', content: results });
+    if (opts.signal?.aborted) return finish('cancelled', 'cancelled');
+    if (timedOut()) return finish('timeout', wallError());
   }
 }
 
@@ -236,6 +268,7 @@ export interface RunSuiteOptions {
   judgeModel?: string;
   judgeLlm?: LlmClient;
   settings?: Partial<RunSettings>;
+  /** The run's (the suite's) limits over the defaults; a task's own `limits` win over them. */
   limits?: Partial<RunLimits>;
   concurrency?: number;
   signal?: AbortSignal;
@@ -388,6 +421,7 @@ export async function gradeAttempt(task: EvalTask, record: AttemptRecord, o: Gra
 
 async function runOne(opts: RunSuiteOptions, job: AttemptContext, gtOf: (task: EvalTask) => Promise<GroundTruth | null>): Promise<TaskRunResult> {
   const session = await opts.openSession(job);
+  const limits = effectiveLimits(opts.limits, job.task.limits);
   try {
     const run = await runAttempt({
       llm: opts.llm,
@@ -396,7 +430,7 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext, gtOf: (task: E
       model: job.model,
       mode: job.mode,
       ...(opts.settings ? { settings: opts.settings } : {}),
-      ...(opts.limits ? { limits: opts.limits } : {}),
+      limits,
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
     const calls = session.collectCalls ? await session.collectCalls(run) : callsFromAgent(run.agentCalls);
@@ -445,6 +479,7 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext, gtOf: (task: E
       judgeUsage: judgeUsage.calls ? judgeUsage : null,
       ...(check.judgeVotes ? { judgeVotes: check.judgeVotes } : {}),
       ...(run.toolsListBytes !== undefined ? { toolsListBytes: run.toolsListBytes } : {}),
+      limits,
     };
   } finally {
     await session.close?.().catch(() => {});

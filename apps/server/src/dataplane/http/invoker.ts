@@ -2,6 +2,8 @@ import type { MockNs } from '@neurouter/compiler';
 import type { FetchLike } from '../../kernel/lib/net/safe-fetch.js';
 import { CircuitBreaker } from './circuit-breaker.js';
 import type { BuiltRequest } from './request-builder.js';
+import { Gate, upstreamRetryAfterMs, type UpstreamRetry } from './upstream-backoff.js';
+import { sleepFor } from '../rate-limit/pacer.js';
 
 export interface UpstreamResponse {
   status: number;
@@ -11,6 +13,9 @@ export interface UpstreamResponse {
   /** Only Link, Retry-After and X-RateLimit-* survive (§9.9). */
   headers: Record<string, string>;
   latencyMs: number;
+  /** Retries after a 429/503 that said when (reads only), and the time waited for them. */
+  retries?: number;
+  retryWaitMs?: number;
 }
 
 export class InvokeError extends Error {
@@ -69,12 +74,54 @@ export function parseBody(buf: Buffer, contentType: string | null): unknown {
  */
 export class HttpInvoker {
   private readonly breakers = new Map<string, CircuitBreaker>();
+  private readonly gates = new Map<string, Gate>();
 
   constructor(
     private readonly fetchFor: (allowHttp: boolean) => FetchLike,
     private readonly now: () => number = Date.now,
     private readonly onCircuit?: (environmentId: string, open: boolean) => void,
+    private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void> = sleepFor,
   ) {}
+
+  /**
+   * One upstream call; with `retry` (reads), a 429/503 that says when to come back (Retry-After, X-RateLimit-Reset)
+   * is retried within the policy's bounds (0.3.3). `maxConcurrent` caps in-flight calls per environment
+   * (`limits.upstreamConcurrency`); the wait for a slot counts against the call's timeout only once it starts.
+   */
+  async invoke(environmentId: string, req: BuiltRequest, opts: { timeoutMs: number; maxBytes: number; signal?: AbortSignal; allowHttp: boolean; traceHeaders?: Record<string, string>; retry?: UpstreamRetry | null; maxConcurrent?: number | null }): Promise<UpstreamResponse> {
+    let gate: Gate | undefined;
+    if (opts.maxConcurrent && opts.maxConcurrent > 0) {
+      gate = this.gates.get(environmentId);
+      if (!gate) this.gates.set(environmentId, (gate = new Gate(opts.maxConcurrent)));
+      gate.max = opts.maxConcurrent;
+    }
+    let retries = 0;
+    let waited = 0;
+    for (;;) {
+      let release: (() => void) | undefined;
+      try {
+        release = gate ? await gate.acquire(opts.signal) : undefined;
+      } catch {
+        throw new InvokeError('cancelled', 'cancelled');
+      }
+      let res: UpstreamResponse;
+      try {
+        res = await this.once(environmentId, req, opts);
+      } finally {
+        release?.();
+      }
+      const r = opts.retry;
+      const wait = r && retries < r.maxRetries ? upstreamRetryAfterMs(res.status, res.headers, this.now()) : null;
+      if (wait === null || !r || wait > r.maxWaitMs || (r.deadline !== undefined && this.now() + wait > r.deadline)) return retries ? { ...res, retries, retryWaitMs: waited } : res;
+      try {
+        await this.sleep(wait, opts.signal);
+      } catch {
+        throw new InvokeError('cancelled', 'cancelled');
+      }
+      retries++;
+      waited += wait;
+    }
+  }
 
   breaker(environmentId: string): CircuitBreaker {
     let b = this.breakers.get(environmentId);
@@ -85,7 +132,7 @@ export class HttpInvoker {
     return b;
   }
 
-  async invoke(environmentId: string, req: BuiltRequest, opts: { timeoutMs: number; maxBytes: number; signal?: AbortSignal; allowHttp: boolean; traceHeaders?: Record<string, string> }): Promise<UpstreamResponse> {
+  private async once(environmentId: string, req: BuiltRequest, opts: { timeoutMs: number; maxBytes: number; signal?: AbortSignal; allowHttp: boolean; traceHeaders?: Record<string, string> }): Promise<UpstreamResponse> {
     const breaker = this.breaker(environmentId);
     if (!breaker.tryAcquire()) throw new InvokeError('upstream circuit open', 'circuit_open');
     const ac = new AbortController();

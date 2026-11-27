@@ -113,6 +113,12 @@ answer check passed on ground-truth values. A call with another value for a requ
      offsets; a date without a time matches the UTC date.
 3. **Judge**: when normalized matching fails, one equivalence-judge call per attempt gets the expected
    values and the answer; if it rules them stated, the check passes with `matchedBy: "judge"`.
+   **Exact values are never judged (0.3.3):** a number, a money amount or an id (an `id`/`*_id` field, or a value
+   with digits such as `coupon_3`) that fails normalized matching fails. Normalization already covers separators,
+   minor units, case and punctuation, so what is left is a different value. The judge is not asked about it, and an
+   "equivalent" ruling recorded before 0.3.3 is ignored on re-grade. The judge still rules on wording: text,
+   enum-like words (`apple_pay`), dates and booleans. `kind: text` on an assertion opts a value back in. This came
+   from a long-workflow probe where the judge accepted EUR 1,171,050 for 1,211,050 on both votes.
 
 `normalize: false` (or the legacy `caseInsensitive`) keeps a check literal.
 
@@ -216,6 +222,29 @@ multi-step tasks), then a cost rule: if the pick needs ≥ 2× the other mode's 
 while the other mode's success is within 10 points, the cheaper mode is recommended. Tool mode's cost
 grows with the size of `tools/list` (resent with every turn: bytes × turns), not the number of tools; the
 report shows the mean `tools/list` size per cell.
+
+## Attempt limits
+
+Every attempt runs under these limits. The defaults are 25 turns, 60 agent tool calls, 200,000 tokens and 5 minutes
+of wall time. Hitting a limit ends the attempt with the end reason `max_turns`, `max_tool_calls`, `over_budget` or
+`timeout`.
+
+- **Tokens (`maxTotalTokens`)** count uncached input (cache writes included), cached input and output (0.3.3).
+  Before 0.3.3, cached input was not counted, so a long tool-mode attempt could use 277k tokens under a "200k"
+  limit. Reports still show uncached and cached input separately.
+- **Wall time (`wallMs`)** is enforced during LLM and tool calls (0.3.3). At the deadline the call in flight is
+  aborted, and the attempt ends `timeout` with no final answer. A final answer that arrived before the deadline
+  ends `end_turn`, however long the attempt took to finish around it.
+- **Overrides.** A suite file's top-level `limits` and a task's own `limits` override the defaults; a task wins over
+  its suite. The fields are `maxTurns`, `maxToolCalls`, `maxTotalTokens` and `wallMs`:
+
+  ```json
+  { "version": 2, "server": "github", "limits": { "wallMs": 600000 },
+    "tasks": [{ "key": "github_lw_stale_prs_n200", "limits": { "maxToolCalls": 150, "maxTurns": 40 }, "…": "…" }] }
+  ```
+
+  Unknown names and out-of-range values are rejected when the suite loads. Each result keeps its effective limits.
+  The report records `run.limits` and, per task, the `limits` that differ from them (JSON and Markdown).
 
 ## Spend
 

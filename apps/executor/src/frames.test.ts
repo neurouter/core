@@ -63,3 +63,17 @@ describe('frame codec', () => {
     expect(() => parseFrame(ToExecutorFrame, { ...base, limits: { ...base.limits, maxMemoryMb: -1 } })).toThrow();
   });
 });
+
+describe('call_result parts (M2)', () => {
+  it('splits a JSON text into frames under the limit, never inside a surrogate pair, and joins back exactly', async () => {
+    const { callResultParts, CallResultPartFrame } = await import('./frames.js');
+    const json = JSON.stringify({ ok: true, value: Array.from({ length: 50 }, (_, i) => `${i}😀${'"\\é'.repeat(20_000)}`) });
+    const parts = callResultParts('r', 1, json, 1001);
+    expect(parts.map((p) => p.part).join('')).toBe(json);
+    expect(parts.at(-1)!.last).toBe(true);
+    expect(parts.every((p, i) => p.seq === i && CallResultPartFrame.safeParse(p).success)).toBe(true);
+    expect(parts.every((p) => !/[\uD800-\uDBFF]$/.test(p.part))).toBe(true);
+    const big = callResultParts('r', 1, json);
+    expect(big.every((p) => encodeFrame(p).length <= MAX_FRAME_BYTES)).toBe(true);
+  });
+});

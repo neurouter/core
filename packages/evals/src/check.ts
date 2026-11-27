@@ -1,7 +1,7 @@
 import { JUDGE_PASS_SCORE, type Assertion, type FailureCause } from '@neurouter/shared';
 import { isIncidentalArg, runawayCeiling, upstreamCalls } from './budget.js';
 import { groundTruthForCalls, hasWildcard, isFromRef, parseGroundTruthPath, resolveArgs, resolvePath, type GroundTruth } from './groundtruth.js';
-import { answerHas, normPunct, type MatchHow } from './normalize.js';
+import { answerHas, inferKind, normPunct, type MatchHow } from './normalize.js';
 import type { AssertionResult, AttemptRecord, CheckResult, EvalTask, JudgeResult, ObservedCall } from './types.js';
 
 export const UNMET_NEED_TOOL = 'neurouter_report_unmet_need';
@@ -208,7 +208,23 @@ function fieldOf(path: string, gt: GroundTruth): { field: string | null; minor: 
   return { field, minor };
 }
 
-/** answer_contains: ground-truth values (or literal hints), normalized, then the equivalence judge. */
+/**
+ * J1: exact-value kinds. A number, money amount or id that fails normalized matching is a different value (or a missing
+ * one), not another wording of it: normalization already covers separators, minor units, case and punctuation. The
+ * equivalence judge never rules on these (it accepted EUR 1,171,050 for 1,211,050 on both votes); `kind: text` on the
+ * assertion opts a value back in.
+ */
+const EXACT_KINDS = new Set(['id', 'number', 'money']);
+export function isExactValue(value: unknown, field: string | null, kind?: Extract<Assertion, { type: 'answer_contains' }>['kind']): boolean {
+  if (kind) return EXACT_KINDS.has(kind);
+  const k = inferKind(value, field);
+  // an inferred id is exact when it is one (an id field, or it has digits: coupon_3, ch_3Nx…); enum-like words
+  // (apple_pay, past_due) stay judgeable wording
+  if (k === 'id') return field === 'id' || /_id$/.test(field ?? '') || /\d/.test(String(value));
+  return EXACT_KINDS.has(k);
+}
+
+/** answer_contains: ground-truth values (or literal hints), normalized, then the equivalence judge (not for exact values, J1). */
 function checkAnswer(a: Extract<Assertion, { type: 'answer_contains' }>, idx: number, rec: AttemptRecord, opts: CheckOptions, gt: GroundTruth | null): AssertionResult {
   const r = (passed: boolean, detail: string, extra: Partial<AssertionResult> = {}): AssertionResult => ({ assertion: a, passed, detail, ...extra });
   const answer = rec.finalAnswer;
@@ -246,7 +262,12 @@ function checkAnswer(a: Extract<Assertion, { type: 'answer_contains' }>, idx: nu
     const how: MatchHow = hows.some((h) => h === 'normalized') ? 'normalized' : 'literal';
     return r(true, `answer states ${show(found.map((e) => e.value))} (${source}, ${how})`, { matchedBy: how, groundTruth: fromGt });
   }
+  const exactMissing = expected.filter((e, i) => hows[i] === null && isExactValue(e.value, e.field, a.kind)).map((e) => e.value);
   const eq = opts.equivalence?.[idx];
+  if (exactMissing.length && !literalOnly) {
+    const ignored = eq?.equivalent ? `; the equivalence judge's "equivalent" ruling is ignored for exact values` : '';
+    return r(false, `answer ${mode === 'all' ? 'misses' : 'states none of'} ${show(mode === 'all' ? missing : expected.map((e) => e.value))} (${source}; exact value: numbers, amounts and ids must match after normalization${ignored})`);
+  }
   if (eq?.equivalent && !literalOnly) return r(true, `judge: equivalent to ${show(expected.map((e) => e.value))} (${eq.reason})`, { matchedBy: 'judge', groundTruth: fromGt });
   return r(false, `answer ${mode === 'all' ? 'misses' : 'states none of'} ${show(mode === 'all' ? missing : expected.map((e) => e.value))} (${source})${eq ? `; judge: ${eq.reason}` : ''}`);
 }
@@ -263,6 +284,8 @@ export function failedAnswerExpectations(task: EvalTask, check: Pick<CheckResult
       field = fieldOf(p, gt).field;
     }
     if (!vals.length) vals = a.anyOf ?? [];
+    // J1: an exact value (number, amount, id) is never sent to the equivalence judge
+    if (vals.some((v) => isExactValue(v, field, a.kind))) return;
     if (vals.length) out.push({ index: i, expected: vals.slice(0, 40), field });
   });
   return out;

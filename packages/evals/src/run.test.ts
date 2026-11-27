@@ -74,6 +74,41 @@ describe('runAttempt', () => {
     expect((await runAttempt({ llm: mk(), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', now: () => (t += 100_000) })).endReason).toBe('timeout');
   });
 
+  it('L1: maxTotalTokens counts cached input too (uncached and cached are still reported apart)', async () => {
+    // long-workflows probe github-n200-code: 18,575 uncached + 251,401 cached + 6,788 output ran past a "200k" limit
+    const cachedTurn = () => ({ ...llmResponse([use(`c${Math.random()}`, 'list_pets', {})], { input: 1_000, output: 100 }), usage: { input_tokens: 1_000, output_tokens: 100, cache_read_input_tokens: 40_000 } });
+    const r = await runAttempt({ llm: new ScriptedLlmClient([], cachedTurn), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', limits: { maxTotalTokens: 200_000 } });
+    expect(r.endReason).toBe('over_budget');
+    expect(r.turns).toBe(5);
+    expect(r).toMatchObject({ inputTokens: 5_000, cacheReadTokens: 200_000, outputTokens: 500 });
+  });
+
+  it('L2: the wall limit aborts an LLM call in flight (timeout at the deadline, not after a 10-minute stall)', async () => {
+    // long-workflows probe stalled/ (stripe-n200-code, github-n100-tool): one LLM call hung 600–930 s after the tool results
+    let aborted = false;
+    const stall: LlmClient = {
+      provider: 'scripted',
+      create: (req, o) => {
+        if (req.messages.length === 1) return Promise.resolve(llmResponse([use('u1', 'list_pets', {})]));
+        return new Promise((_, reject) => o?.signal?.addEventListener('abort', () => { aborted = true; reject(new Error('Request was aborted.')); }));
+      },
+    } as LlmClient;
+    const t0 = Date.now();
+    const r = await runAttempt({ llm: stall, mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', limits: { wallMs: 150 } });
+    expect(aborted).toBe(true);
+    expect(r.endReason).toBe('timeout');
+    expect(r.error).toContain('wall limit');
+    expect(Date.now() - t0).toBeLessThan(2_000);
+  });
+
+  it('L2: a final answer that arrived before the deadline is never turned into a timeout', async () => {
+    let t = 0;
+    const llm = new ScriptedLlmClient([llmResponse([use('u1', 'list_pets', {})]), () => ((t = 299_000), llmResponse([text('EUR 1,211,050')]))]);
+    const r = await runAttempt({ llm, mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', now: () => t, limits: { wallMs: 300_000 } });
+    t = 400_000;
+    expect(r).toMatchObject({ endReason: 'end_turn', finalAnswer: 'EUR 1,211,050' });
+  });
+
   it('refusal ends the attempt as a failure; fallback-served answers are flagged', async () => {
     const r = await runAttempt({ llm: new ScriptedLlmClient([llmResponse([text('no')], { stop: 'refusal' })]), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool' });
     expect(r.endReason).toBe('refusal');
@@ -130,6 +165,19 @@ describe('runSuite', () => {
     });
     const results = await runSuite({ llm, tasks: [t], models: ['m'], modes: ['code'], repeats: 1, openSession: async () => ({ mcp: fakePetstore({ mode: 'code' }) }) });
     expect(results[0]).toMatchObject({ passed: true, toolCalls: 1 });
+  });
+
+  it('limits: per-suite and per-task overrides are honored per attempt and recorded with the result', async () => {
+    // long-workflows probe github-n200-tool: 88 candidate PRs need > 60 tool calls (default cap) → max_tool_calls
+    const loop = () => llmResponse([use(`x${Math.random()}`, 'list_pets', {})], { input: 10, output: 1 });
+    const base = task({ key: 'default' });
+    const big = task({ key: 'big', limits: { maxToolCalls: 150, maxTurns: 40 } });
+    const results = await runSuite({ llm: new ScriptedLlmClient([], loop), tasks: [base, big], models: ['m'], modes: ['tool'], repeats: 1, concurrency: 1, limits: { maxTurns: 30 }, openSession: async () => ({ mcp: fakePetstore() }) });
+    const by = Object.fromEntries(results.map((r) => [r.taskKey, r]));
+    expect(by.default).toMatchObject({ endReason: 'max_turns', limits: { maxTurns: 30, maxToolCalls: 60, maxTotalTokens: 200_000, wallMs: 300_000 } });
+    expect(by.default!.toolCalls).toBe(30);
+    expect(by.big).toMatchObject({ endReason: 'max_turns', limits: { maxTurns: 40, maxToolCalls: 150, maxTotalTokens: 200_000, wallMs: 300_000 } });
+    expect(by.big!.toolCalls).toBe(40);
   });
 
   it('aborts the whole run on key errors', async () => {

@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { chmodSync, existsSync, unlinkSync } from 'node:fs';
 import net from 'node:net';
-import { encodeFrame, FrameDecoder, FrameError, parseFrame, ToExecutorFrame, type RunFrame } from './frames.js';
+import { encodeFrame, FrameDecoder, FrameError, MAX_CALL_RESULT_BYTES, parseFrame, ToExecutorFrame, type RunFrame } from './frames.js';
 import type { MontyRunner } from './monty-runner.js';
 import { silentLogger } from './logger.js';
 import { PROTOCOL_VERSION, type ExecLogger, type HostCallResult, type RunResult } from './types.js';
@@ -21,6 +21,8 @@ interface RunState {
   ac: AbortController;
   nextCallId: number;
   pending: Map<number, (r: HostCallResult) => void>;
+  /** call_result_part frames received so far, per call (M2). */
+  parts: Map<number, { chunks: string[]; bytes: number; next: number }>;
 }
 
 function tokenEquals(a: string, b: string): boolean {
@@ -112,6 +114,7 @@ export class ExecutorServer {
             montyVersion: this.opts.runner.montyVersion,
             montyBinarySha256: this.opts.runner.binarySha256,
             poolMax: this.opts.runner.poolMax,
+            features: ['call_result_parts'],
           });
           continue;
         }
@@ -135,6 +138,44 @@ export class ExecutorServer {
             resolve(frame.ok ? { ok: true, value: frame.value } : { ok: false, error: frame.error });
             break;
           }
+          case 'call_result_part': {
+            // M2: a result over one frame, joined here (at most MAX_CALL_RESULT_BYTES per call)
+            const run = runs.get(frame.runId);
+            const resolve = run?.pending.get(frame.callId);
+            if (!run || !resolve) break;
+            const acc = run.parts.get(frame.callId) ?? { chunks: [], bytes: 0, next: 0 };
+            const done = (r: HostCallResult) => {
+              run.parts.delete(frame.callId);
+              run.pending.delete(frame.callId);
+              resolve(r);
+            };
+            if (frame.seq !== acc.next) {
+              done({ ok: false, error: { code: 'response_too_large', message: 'the tool result arrived out of order' } });
+              break;
+            }
+            acc.chunks.push(frame.part);
+            acc.bytes += Buffer.byteLength(frame.part);
+            acc.next++;
+            if (acc.bytes > MAX_CALL_RESULT_BYTES) {
+              done({ ok: false, error: { code: 'response_too_large', message: `the tool result is over the ${MAX_CALL_RESULT_BYTES}-byte limit for one call inside a script; ask for less (a smaller page size, fields or a filter)` } });
+              break;
+            }
+            run.parts.set(frame.callId, acc);
+            if (!frame.last) break;
+            const joined = ((): { ok?: unknown; value?: unknown; error?: unknown } | null => {
+              try {
+                const v: unknown = JSON.parse(acc.chunks.join(''));
+                return v && typeof v === 'object' ? (v as { ok?: unknown; value?: unknown; error?: unknown }) : null;
+              } catch {
+                return null;
+              }
+            })();
+            const err = joined && joined.ok === false && joined.error && typeof joined.error === 'object' ? (joined.error as { code?: unknown; message?: unknown }) : null;
+            if (joined && joined.ok === true) done({ ok: true, value: joined.value });
+            else if (err) done({ ok: false, error: { code: String(err.code ?? 'tool_error').slice(0, 200), message: String(err.message ?? '').slice(0, 64 * 1024) } });
+            else done({ ok: false, error: { code: 'response_too_large', message: 'the tool result could not be joined (malformed parts)' } });
+            break;
+          }
           case 'cancel':
             runs.get(frame.runId)?.ac.abort(frame.reason);
             break;
@@ -154,7 +195,7 @@ export class ExecutorServer {
   }
 
   private startRun(frame: RunFrame, runs: Map<string, RunState>, send: (f: object) => void): void {
-    const state: RunState = { capability: frame.capability, ac: new AbortController(), nextCallId: 1, pending: new Map() };
+    const state: RunState = { capability: frame.capability, ac: new AbortController(), nextCallId: 1, pending: new Map(), parts: new Map() };
     runs.set(frame.runId, state);
     const bridge = {
       call: (fn: string, kwargs: Record<string, unknown>) =>

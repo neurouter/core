@@ -40,6 +40,22 @@ export const EvalSuiteRow = z.object({
 });
 export type EvalSuiteRow = z.infer<typeof EvalSuiteRow>;
 
+/**
+ * Per-attempt limit overrides (0.3.3) for a suite or a task: the task's override wins over the suite's, the suite's over
+ * the run defaults (25 turns, 60 agent tool calls, 200,000 tokens incl. cached input, 5 minutes of wall time).
+ */
+export const EvalLimits = z
+  .object({
+    maxTurns: z.number().int().min(1).max(500),
+    maxToolCalls: z.number().int().min(1).max(5000),
+    /** Uncached input + cached input + output tokens of the attempt. */
+    maxTotalTokens: z.number().int().min(1000).max(50_000_000),
+    wallMs: z.number().int().min(1000).max(3_600_000),
+  })
+  .partial()
+  .strict();
+export type EvalLimits = z.infer<typeof EvalLimits>;
+
 export const EvalTaskRow = z.object({
   id: Id,
   key: z.string(),
@@ -49,6 +65,8 @@ export const EvalTaskRow = z.object({
   assertions: z.array(Assertion),
   referenceCalls: z.array(ReferenceCall),
   seedState: z.record(z.string(), z.unknown()).nullable(),
+  /** Per-attempt limit overrides of this task (0.3.3). */
+  limits: EvalLimits.nullable().optional(),
   tags: z.array(z.string()),
   enabled: z.boolean(),
   source: z.enum(['generated', 'manual']),
@@ -76,6 +94,8 @@ export const EvalTaskCreate = z.object({
   assertions: z.array(Assertion).default([]),
   referenceCalls: z.array(ReferenceCall).default([]),
   seedState: z.record(z.string(), z.unknown()).optional(),
+  /** Per-attempt limit overrides of this task (0.3.3). */
+  limits: EvalLimits.optional(),
   tags: z.array(z.string()).default([]),
 });
 export type EvalTaskCreate = z.infer<typeof EvalTaskCreate>;
@@ -93,6 +113,8 @@ export const SuiteFile = z.object({
   calibration: z.unknown().optional(),
   coverage: z.record(z.string(), z.number()).optional(),
   migration: z.unknown().optional(),
+  /** Per-attempt limit overrides for every task of the suite (0.3.3); a task's own `limits` win. */
+  limits: EvalLimits.optional(),
   tasks: z.array(EvalTaskCreate.extend({ enabled: z.boolean().default(true) })),
 });
 export type SuiteFile = z.infer<typeof SuiteFile>;

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SocketExecutor, parseExecutorUrl } from './client.js';
-import { encodeFrame, FrameDecoder } from './frames.js';
+import { encodeFrame, FrameDecoder, MAX_CALL_RESULT_BYTES } from './frames.js';
 import { MontyRunner } from './monty-runner.js';
 import { ExecutorServer } from './server.js';
 import { resolveMontyBinary, sha256File } from './monty-info.js';
@@ -64,6 +64,25 @@ describe('ExecutorServer + SocketExecutor over a Unix socket', () => {
     expect(r.status).toBe('crashed');
     expect(r.error?.type).toBe('executor_unavailable');
     await bad.close();
+  });
+
+  it('M2: a tool result over the 2 MiB frame reaches the script whole (split into call_result parts)', async () => {
+    // long-workflows calibration 2026-11-27: full GitHub objects at per_page=100 failed with
+    // "response_too_large: tool result exceeds the executor frame limit"
+    const items = Array.from({ length: 100 }, (_, i) => ({ number: i + 1, body: `é${'x'.repeat(30_000)}"\n`, emoji: '😀' }));
+    const host = fakeHost(() => ({ ok: true, value: items }));
+    expect(Buffer.byteLength(JSON.stringify(items))).toBeGreaterThan(2.5 * 1024 * 1024);
+    const r = await client.run(request('rows = github.list_issues(owner="o", repo="r")\nreturn [len(rows), sum([len(x["body"]) for x in rows]), rows[99]["emoji"], rows[0]["body"][:2]]', { limits: { cpuTimeSec: 10, wallTimeSec: 30, maxMemoryMb: 256, maxToolCalls: 200, maxConcurrentCalls: 8, maxResultBytes: 1024 * 1024 } }), host, signal());
+    expect(r.error, JSON.stringify(r.error)).toBeUndefined();
+    expect(r).toMatchObject({ status: 'ok', value: [100, 100 * 30_003, '😀', 'éx'] });
+  });
+
+  it('M2: a tool result over the hard per-call limit fails with a clear error the script can catch', async () => {
+    const big = 'x'.repeat(MAX_CALL_RESULT_BYTES + 10);
+    const host = fakeHost(() => ({ ok: true, value: { big } }));
+    const r = await client.run(request('try:\n    github.list_issues(owner="o", repo="r")\nexcept Exception as e:\n    return str(e)[:200]\nreturn "no error"'), host, signal());
+    expect(r.status).toBe('ok');
+    expect(r.value).toMatch(/^response_too_large: the tool result is \d+ bytes, over the 16777216-byte limit for one call inside a script/);
   });
 
   it('parses executor URLs', () => {

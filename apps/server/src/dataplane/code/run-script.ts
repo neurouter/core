@@ -27,6 +27,7 @@ import { CursorError, isNeurouterCursor, type CursorCodec, type CursorPayload } 
 import { exampleArgs, propsOf } from '../envelope/relations.js';
 import { boundArgs, itemsOf, pagingPlan } from '../paging/plan.js';
 import { wrapScript } from './wrap.js';
+import { DEFAULT_RATE_LIMIT_WAIT_SEC, newPaceBudget, type PaceBudget } from '../rate-limit/pacer.js';
 
 /** A contract-2 run_script value cut to the agent budget (B3). */
 interface AgentCut {
@@ -467,6 +468,7 @@ export class ScriptRunner {
     planned: PlannedChange[],
     signal: AbortSignal | undefined,
     onBlocked: () => void,
+    pace: PaceBudget | null,
   ): Promise<HostCallResult> {
     const name = typeof kwargs.fn === 'string' ? kwargs.fn : '';
     const t = byFn.get(name);
@@ -510,7 +512,7 @@ export class ScriptRunner {
         return refuse(await errorInfoFor(ctx, { code: 'invalid_args', message: '', text, name: t.name, tool: t, args, issues: [{ path: '/cursor', keyword: 'cursor', params: {}, message: problem }], next: [...keep, { tool: t.name, args }] }));
       }
     }
-    const out = await this.d.pipeline.invoke(ctx, t.name, args, { planned, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
+    const out = await this.d.pipeline.invoke(ctx, t.name, args, { planned, pace, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
     if (!out.ok) {
       if (out.decision.startsWith('denied_')) onBlocked();
       if (out.draft.error) return refuse(await errorInfoFor(ctx, out.draft.error), planOf(out.draft.data));
@@ -571,7 +573,7 @@ export class ScriptRunner {
     const ns = ctx.server.slug.replace(/-/g, '_');
     const finish = async (status: ScriptStatus, body: { value?: unknown; error?: Record<string, unknown>; stats?: Record<string, unknown>; stdout?: string; truncated?: boolean; preview?: unknown; valueBytes?: number }): Promise<{ status: ScriptStatus; result: McpToolResult; planned: PlannedChange[]; draft: Draft }> => {
       const ended = this.d.now();
-      const stats = { wallMs: ended - started, toolCalls: calls, blockedCalls: blocked, suspensions: calls, ...(body.stats ?? {}) };
+      const stats = { wallMs: ended - started, toolCalls: calls, blockedCalls: blocked, suspensions: calls, ...(body.stats ?? {}), ...(pace.waits ? { rateLimitWaits: pace.waits, rateLimitWaitMs: pace.waitedMs } : {}) };
       let handle: string | null = null;
       let value = body.value;
       if (body.truncated) {
@@ -619,6 +621,8 @@ export class ScriptRunner {
     };
     /** contract 2: the error objects raised into the script (by JSON message), so an uncaught one becomes the run's error */
     const innerErrors = new Map<string, InnerError>();
+    // R1: inner calls wait for a rate-limit token within the script's wall time (max wait per call: limits.code.rateLimitWaitSec)
+    const pace = newPaceBudget({ now: started, wallMs: lim.wallTimeSec * 1000, maxWaitMs: (lim.rateLimitWaitSec ?? DEFAULT_RATE_LIMIT_WAIT_SEC) * 1000 });
     let calls = 0;
     let blocked = 0;
 
@@ -671,7 +675,7 @@ export class ScriptRunner {
             return { ok: true, value: { ok: false, py: scriptErrorType(info.code), text, error } };
           };
           const unknownFn = async (name: string): Promise<ErrorInfo> => errorInfoFor(ctx, { code: 'unknown_tool', message: '', text: `No function ${name} in this script's namespaces; nothing was called.`, name, closest: closestNames(name, [...byFn.keys()]), next: [{ tool: 'search_tools', args: { query: name.split('.').pop() ?? name } }] });
-          if (fn === '_nr.call' && v2) return this.nrCall(ctx, kwargs, byFn, refuse, unknownFn, planned, signal, () => blocked++);
+          if (fn === '_nr.call' && v2) return this.nrCall(ctx, kwargs, byFn, refuse, unknownFn, planned, signal, () => blocked++, pace);
           if (fn.startsWith('ops.')) {
             const op = opFor(ctx, fn);
             if (!op || !(surface.opsFunctions as readonly string[]).includes(op)) return v2 ? raise(await unknownFn(fn)) : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
@@ -686,7 +690,7 @@ export class ScriptRunner {
           const map = pyArgMap(t, { snake: v2 });
           const argsIn: Record<string, unknown> = {};
           for (const [k, val] of Object.entries(kwargs)) argsIn[map[k] ?? k] = val;
-          const out = await this.d.pipeline.invoke(ctx, t.name, argsIn, { planned, ...(signal ? { signal } : {}) });
+          const out = await this.d.pipeline.invoke(ctx, t.name, argsIn, { planned, pace, ...(signal ? { signal } : {}) });
           if (!out.ok) {
             blocked += out.decision.startsWith('denied_') ? 1 : 0;
             if (v2 && out.draft.error) return raise(await errorInfoFor(ctx, out.draft.error), planOf(out.draft.data));
