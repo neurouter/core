@@ -16,7 +16,9 @@ const SPECS = { github: 'examples/github/github-subset.json', petstore: 'example
 /**
  * Recorded on the in-memory `MockStore`. Data version 1 (`dv1` namespaces): first on v0.1.1, re-recorded in
  * 0.2.1 for schema-valid values and scope-independent seeds, and frozen since (suites frozen on 0.2.1 name
- * its values). Data version 2 (0.2.2 default): realistic values, newest-first timestamps.
+ * its values). Data version 2 (0.2.2 default): realistic values, newest-first timestamps. Both re-recorded in 0.3.2:
+ * a nested collection answers with the canonical object's state (one state per id) and lists are ordered as the
+ * API documents (newest first); the generated values are unchanged.
  */
 const GOLDEN_FILES = { 1: resolve(import.meta.dirname, 'mock-session.golden.json'), 2: resolve(import.meta.dirname, 'mock-session-v2.golden.json') } as const;
 type Golden = Record<string, Array<{ ns: string; req: string; status: number; sha: string }>>;
@@ -71,7 +73,7 @@ describe('mock store parity (golden ↔ memory ↔ DB, data versions 1 and 2)', 
     for (const spec of Object.keys(SPECS)) {
       it(`${spec} (data v${dv}): memory store matches the golden`, async () => {
         const got = digest(await replay(models[spec]!, new MemoryMockStateStore({ now: FIXED }), dv));
-        // RECORD_GOLDEN=2 re-records the version-2 golden after an intended change of the mock data; version 1 is frozen
+        // RECORD_GOLDEN=1|2 re-records a golden after an intended change of the mock (version-1 values stay frozen)
         if (process.env.RECORD_GOLDEN === String(dv)) writeFileSync(GOLDEN_FILES[dv], JSON.stringify({ ...readGolden(dv), [spec]: got }, null, 1) + '\n');
         else expect(got).toEqual(readGolden(dv)[spec]);
       });

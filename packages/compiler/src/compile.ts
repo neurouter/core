@@ -9,10 +9,10 @@ import type { CompileInput, Diagnostic, LintReport, SpecFormat, ToolDef } from '
 import { compileGraphql, loadGraphqlSchema } from './graphql/compile-graphql.js';
 import { checkExamples } from './describe.js';
 import { lint } from './lint.js';
-import { buildMockModel, type MockModel } from './mock/model.js';
+import { applyMockOrder, buildMockModel, type MockModel } from './mock/model.js';
 import { pyIdent } from './naming.js';
 import { compileOpenApi } from './openapi/compile-openapi.js';
-import { applyOverlay } from './overlay/apply.js';
+import { applyOverlay, matchesSelector } from './overlay/apply.js';
 import { parseOverlay, selectorLine } from './overlay/parse.js';
 import { shapeOutputSchema } from './shape.js';
 import { generateStubs, pySignatureFor } from './stubs.js';
@@ -180,6 +180,12 @@ export async function compile(input: CompileInput): Promise<CompileResult> {
       const applied = applyOverlay(base.tools, parsed.overlay, { namespace, graphqlSchema: gqlSchema, lineOf: (s) => selectorLine(overlayText, s) });
       diagnostics.push(...applied.diagnostics);
       overlayResult = applied;
+      // overlay `mock.order` on list tools (the mock model is built from the pre-overlay tools)
+      const orders = Object.entries(parsed.overlay.tools ?? {}).filter(([, e]) => e.mock?.order);
+      if (mockModel?.kind === 'openapi' && orders.length) {
+        const mm = mockModel;
+        applyMockOrder(mm, base.tools, (t) => orders.filter(([sel]) => matchesSelector(t as ToolDef, sel)).pop()?.[1].mock?.order);
+      }
     }
   }
 
