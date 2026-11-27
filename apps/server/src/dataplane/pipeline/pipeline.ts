@@ -360,10 +360,11 @@ export class Pipeline {
     }
     step('policy', 'pass');
 
-    // 7 rate limits (principal, principal × tool)
+    // 7 rate limits (principal, principal × tool); an eval reference session computes ground truth (harness work,
+    // not agent traffic: a long-workflow reference script walks every item) and is not throttled
     const lim = ctx.bundle.environment.limits;
     const principalLimit = ctx.principal.type === 'api_key' && ctx.principal.rateLimit ? ctx.principal.rateLimit : lim.rateLimit;
-    const rl = await this.d.limiter.take(this.d.limiter.checksFor({ environmentId: ctx.environment.id, credentialKey: ctx.credentialKey, tool: tool.name, principalLimit, toolLimit: lim.toolRateLimit }));
+    const rl = ctx.fullObjects ? { allowed: true as const } : await this.d.limiter.take(this.d.limiter.checksFor({ environmentId: ctx.environment.id, credentialKey: ctx.credentialKey, tool: tool.name, principalLimit, toolLimit: lim.toolRateLimit }));
     if (!rl.allowed) {
       step('rate_limit', 'fail', rl.scope);
       const secs = Math.max(1, Math.ceil(rl.retryAfterMs / 1000));

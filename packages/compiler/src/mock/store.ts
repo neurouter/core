@@ -9,7 +9,7 @@
  */
 import type { JsonSchema } from '@neurouter/shared';
 import { isObj, sha256Hex, type Obj } from '../util.js';
-import { generateValue, hashSeed, MOCK_DATA_VERSION, mockDataVersionOf, SEED_ITEMS, seededFaker, type MockDataVersion } from './generate.js';
+import { generateValue, hashSeed, MOCK_DATA_VERSION, mockDataVersionOf, mockScaleOf, scaledCount, SEED_ITEMS, seededFaker, type MockDataVersion, type MockScale } from './generate.js';
 import type { MockResource, OpenApiMockModel } from './model.js';
 
 export { SEED_ITEMS };
@@ -104,16 +104,29 @@ export function toMockNs(ns: MockNs | string): MockNs {
  * data version 2 a nested collection of a top-level resource's objects uses that resource's seed
  * (`seedKey`), so `refund_1` listed under a charge is the `refund_1` that `GET /v1/refunds/refund_1` returns.
  */
-export function collectionSeed(r: MockResource, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION): number {
-  return hashSeed(nsSeed, dv >= 2 && r.seedKey ? r.seedKey : r.key);
+export function collectionSeed(r: MockResource, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION, scale?: MockScale | null, scope?: MockScope): number {
+  const base = hashSeed(nsSeed, dv >= 2 && r.seedKey ? r.seedKey : r.key);
+  // a scaled namespace seeds each scope of a nested collection on its own (scope values case-insensitive);
+  // a collection that shares a top-level resource's objects (`seedKey`) keeps sharing them
+  if (!scale || !r.scopeParams.length || (dv >= 2 && r.seedKey) || !scope) return base;
+  return hashSeed(base, ...r.scopeParams.map((p) => String(scope[p] ?? '').toLowerCase()));
 }
 
-/** The 20 seed items of a collection (exactly what both stores hold before any write). `dv`: mock data version. */
-export function seedItems(r: MockResource, scope: MockScope, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION): Obj[] {
-  const seed = collectionSeed(r, nsSeed, dv);
+/**
+ * The seed items of a collection (exactly what both stores hold before any write): `SEED_ITEMS` (20), or
+ * the count a scaled namespace asks for (`scale`, see `MockScale`). `dv`: mock data version.
+ */
+export function seedItems(r: MockResource, scope: MockScope, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION, scale?: MockScale | null): Obj[] {
+  const seed = collectionSeed(r, nsSeed, dv, scale, scope);
+  const n = scaledCount(scale, r.name, seed);
   const items: Obj[] = [];
-  for (let i = 1; i <= SEED_ITEMS; i++) items.push(newItem(r, hashSeed(seed, i), i, scope, dv));
+  for (let i = 1; i <= n; i++) items.push(newItem(r, hashSeed(seed, i), i, scope, dv));
   return items;
+}
+
+/** The seed items of a collection in a namespace (its data version and scale come from the name). */
+export function seedItemsFor(r: MockResource, scope: MockScope, nsSeed: number, namespace: string): Obj[] {
+  return seedItems(r, scope, nsSeed, mockDataVersionOf(namespace), mockScaleOf(namespace));
 }
 
 export interface Collection {
@@ -187,7 +200,8 @@ export class MockStore {
     const key = `${resource.key}|${scopeKeyOf(resource, scope)}`;
     let c = s.collections.get(key);
     if (!c) {
-      c = { items: seedItems(resource, scope, s.seed, mockDataVersionOf(namespace)), nextId: SEED_ITEMS + 1 };
+      const items = seedItemsFor(resource, scope, s.seed, namespace);
+      c = { items, nextId: Math.max(SEED_ITEMS, items.length) + 1 };
       s.collections.set(key, c);
     }
     return c;

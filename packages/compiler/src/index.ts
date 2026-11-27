@@ -23,6 +23,7 @@ export {
   defaultScopeValue,
   newItem,
   seedItems,
+  seedItemsFor,
   collectionSeed,
   scopeKeyOf,
   collectionKeyOf,
@@ -43,7 +44,7 @@ export {
 } from './mock/store.js';
 export { handleMockRequest, applyListQuery, MOCK_PAGING_HEADER, type MockRequest, type MockResponse } from './mock/handler.js';
 export { handleGraphqlMock } from './mock/graphql.js';
-export { generateValue, seededFaker, hashSeed, stringFits, exampleFits, mockDataVersionOf, withMockDataVersion, MOCK_DATA_VERSION, type MockDataVersion } from './mock/generate.js';
+export { generateValue, seededFaker, hashSeed, stringFits, exampleFits, mockDataVersionOf, withMockDataVersion, MOCK_DATA_VERSION, mockScaleOf, withMockScale, mockScaleSegment, normalizeMockScale, scaledCount, MOCK_SCALE_MAX, MOCK_SCALE_PAGE_MAX, type MockDataVersion, type MockScale } from './mock/generate.js';
 export { sha256Hex, jcsHash } from './util.js';
 
 import type { MockStore } from './mock/store.js';
