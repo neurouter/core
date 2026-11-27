@@ -180,12 +180,53 @@ describe('answer_contains: ground truth, normalization, judge fallback', () => {
   });
 
   it('a failed normalized match passes when the equivalence judge rules it stated (matched_by: judge)', async () => {
-    const a: Assertion = { type: 'answer_contains', from: 'ref[0].data.id' };
-    const failed = await check(a, 'the third coupon');
+    const a: Assertion = { type: 'answer_contains', from: 'ref[0].data.wallet' };
+    const failed = await check(a, 'paid with the Apple wallet');
     expect(failed.passed).toBe(false);
-    expect(failedAnswerExpectations(t(a), failed, gt)).toEqual([{ index: 0, expected: ['coupon_3'], field: 'id' }]);
-    const judged = await check(a, 'the third coupon', { equivalence: { 0: { equivalent: true, reason: 'names coupon 3' } } });
+    expect(failedAnswerExpectations(t(a), failed, gt)).toEqual([{ index: 0, expected: ['apple_pay'], field: 'wallet' }]);
+    const judged = await check(a, 'paid with the Apple wallet', { equivalence: { 0: { equivalent: true, reason: 'names Apple Pay' } } });
     expect(judged.results[0]).toMatchObject({ passed: true, matchedBy: 'judge' });
+  });
+
+  it('J1: an exact value (id, number, money) that fails normalized matching is never overruled by the equivalence judge', async () => {
+    // ids: "the third coupon" is not coupon_3; the judge is not asked, and a recorded "equivalent" ruling is ignored
+    const id: Assertion = { type: 'answer_contains', from: 'ref[0].data.id' };
+    const failed = await check(id, 'the third coupon');
+    expect(failedAnswerExpectations(t(id), failed, gt)).toEqual([]);
+    const judged = await check(id, 'the third coupon', { equivalence: { 0: { equivalent: true, reason: 'names coupon 3' } } });
+    expect(judged.results[0]).toMatchObject({ passed: false });
+    expect(judged.results[0]!.detail).toContain('exact value');
+    // kind: text opts a value back into the judge
+    const asText: Assertion = { type: 'answer_contains', from: 'ref[0].data.id', kind: 'text' };
+    expect((await check(asText, 'the third coupon', { equivalence: { 0: { equivalent: true, reason: 'names coupon 3' } } })).results[0]).toMatchObject({ passed: true, matchedBy: 'judge' });
+  });
+
+  it('J1 (long-workflows probe, stripe-n200-tool): EUR 1,171,050 vs ground truth 1,211,050 fails although the judge ruled it equivalent twice', async () => {
+    // ground truth and final answer copied from probe/stripe-n200-tool{.json,-transcripts.json} (2026-11-27)
+    const truth: GroundTruth = {
+      refs: [{ tool: 'run_script', ok: true, data: { by_currency: [
+        { currency: 'usd', amount: 1351500 }, { currency: 'eur', amount: 1211050 }, { currency: 'gbp', amount: 1152400 }, { currency: 'aud', amount: 778700 },
+        { currency: 'sek', amount: 689100 }, { currency: 'jpy', amount: 571450 }, { currency: 'chf', amount: 366400 }, { currency: 'cad', amount: 213850 },
+      ], largest: 'usd', charges: 200 } }],
+    };
+    const answer = [
+      'Across all 200 charges, failed-charge totals are:', '', '| Currency | Total (minor units) |', '|---|---:|',
+      '| CAD | 213,850 |', '| EUR | 1,171,050 |', '| AUD | 778,700 |', '| USD | 1,351,500 |', '| CHF | 366,400 |', '| SEK | 689,100 |', '| GBP | 1,152,400 |', '| JPY | 571,450 |',
+      '', '**USD has the largest failed total: 1,351,500 minor units.**',
+    ].join('\n');
+    const lw = task({
+      assertions: [{ type: 'answer_contains', from: 'ref[0].data.by_currency[*].amount', match: 'all' }, { type: 'answer_contains', from: 'ref[0].data.largest' }, { type: 'no_writes' }],
+      referenceCalls: [{ tool: 'run_script', arguments: { code: 'return 1' } }],
+    });
+    const rec = record({ finalAnswer: answer });
+    const equivalence = { 0: { equivalent: true, reason: 'The answer states all expected values for the failed amounts across currencies and correctly identifies USD as the largest.' } };
+    const r = await checkAttempt(lw, rec, { groundTruth: truth, equivalence });
+    expect(r.passed).toBe(false);
+    expect(r.results[0]).toMatchObject({ passed: false });
+    expect(r.results[0]!.detail).toContain('1211050');
+    expect(r.results[1]).toMatchObject({ passed: true });
+    // the equivalence judge is not even asked about the amounts
+    expect(failedAnswerExpectations(lw, await checkAttempt(lw, rec, { groundTruth: truth }), truth)).toEqual([]);
   });
 });
 
