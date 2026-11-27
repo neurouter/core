@@ -211,7 +211,8 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     const transcriptMaxChars = o.transcriptMaxChars !== undefined ? Math.floor(Number(o.transcriptMaxChars)) : o.transcripts ? null : undefined;
     const run = await s.evals.createRun(tenant, { serverId, suiteId, environmentId: envRow.id, models: o.models ? o.models.split(',').map((m) => m.trim()) : null, modes, repeats: Number(o.repeats), trigger: 'cli', createdBy: null, wait: true, ...(transcriptMaxChars !== undefined ? { transcriptMaxChars } : {}), ...(maxRunTokens ? { maxRunTokens } : {}) });
     if (run.status !== 'succeeded') throw new Error(`eval run ${run.status}: ${run.error ?? ''}`);
-    const score = s.evals.score(run)!;
+    // B3: the suggestion step's LLM usage is stored with the score; the report lists it on its own
+    const { suggestUsage, ...score } = s.evals.score(run)!;
     const results = await s.evals.taskResults(tenant, run.id);
     const suggestions = await s.dbs.main.db.selectFrom('suggestions').selectAll().where('run_id', '=', run.id).execute();
     const taskRows = await s.evals.suiteTasks(tenant, suiteId);
@@ -227,6 +228,7 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
       run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString(), contract, judgeModel, limits: runLimits },
       judgeModel,
       score,
+      suggestUsage: suggestUsage ?? null,
       suggestions: suggestions.map((x) => ({ cause: x.cause as never, kind: x.kind, tools: JSON.parse(x.tools) as string[], affectedTaskKeys: (JSON.parse(x.affected_task_ids) as string[]).map((id) => keyById.get(id) ?? id), overlayPatch: (JSON.parse(x.overlay_patch) as { yaml: string }).yaml, overlayOps: [], specPatch: x.spec_patch, rationale: x.rationale, predictedDelta: x.predicted_delta })),
       results,
       prompts,

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { clusterFailures, opsToOverlayYaml, predictedDelta, selectVerifyTasks, suggest, type SuggestTool } from './suggest.js';
+import { clusterFailures, opsToOverlayYaml, predictedDelta, selectVerifyTasks, suggest, suggestDetailed, type SuggestTool } from './suggest.js';
 import { ScriptedLlmClient, llmResponse } from './llm/fake.js';
 import { call, result, task } from './test/fixtures.js';
+import { buildReport, renderMarkdown, renderTable } from './report.js';
+import { scoreRun } from './score.js';
 
 const tools: SuggestTool[] = [
   { name: 'get_pet_by_id', key: 'operationId:getPetById', description: 'Find pet by ID.', inputSchema: { type: 'object', properties: { petId: { type: 'integer' } }, required: ['petId'] }, hidden: false, tags: [], write: false, sourceRef: { method: 'GET', path: '/pet/{petId}' } },
@@ -66,6 +68,39 @@ describe('suggest', () => {
     const out = await suggest({ results: fails.slice(0, 2), tasks, tools, llm, model: 'm', validatePatch: async () => ({ ok: true, diagnostics: [] }) });
     expect(out[0]!.rationale).toBe('LLM said so');
     expect(out[0]!.overlayPatch).toContain('Get one pet by its numeric id');
+  });
+
+  it('B3: suggestion LLM calls are metered (per call: uncached + cache writes, cached, output) under the model called', async () => {
+    // 0.3.3 probe: two suggestion calls after the failed Stripe attempts, their usage recorded nowhere
+    const cached = { ...llmResponse([{ type: 'text', text: '{}' }], { input: 300, output: 40 }), usage: { input_tokens: 300, output_tokens: 40, cache_read_input_tokens: 1000, cache_creation_input_tokens: 5 } };
+    const llm = new ScriptedLlmClient([], () => cached);
+    const out = await suggestDetailed({ results: fails, tasks, tools, llm, model: 'sug-model', validatePatch: async () => ({ ok: true, diagnostics: [] }) });
+    expect(llm.requests).toHaveLength(2);
+    expect(out.usage).toEqual({ model: 'sug-model', calls: 2, inputTokens: 610, outputTokens: 80, cacheReadTokens: 2000, skipped: 0, budgetTokens: null });
+    expect(out.suggestions.length).toBeGreaterThan(0);
+  });
+
+  it('B3: a token budget (what --max-run-tokens leaves) is never crossed: calls that could cross it are skipped', async () => {
+    const llm = new ScriptedLlmClient([], () => llmResponse([{ type: 'text', text: '{}' }], { input: 5000, output: 100 }));
+    // nothing left: no call, the deterministic suggestions still come
+    const none = await suggestDetailed({ results: fails, tasks, tools, llm, model: 'm', maxTokens: 0, validatePatch: async () => ({ ok: true, diagnostics: [] }) });
+    expect(llm.requests).toHaveLength(0);
+    expect(none.usage).toMatchObject({ calls: 0, skipped: 2, budgetTokens: 0 });
+    expect(none.suggestions.length).toBeGreaterThan(0);
+    // room for one call (estimated input + its 4,000 max output); after it spent 5,100, the next could cross 8,000
+    const one = await suggestDetailed({ results: fails, tasks, tools, llm, model: 'm', maxTokens: 8000, validatePatch: async () => ({ ok: true, diagnostics: [] }) });
+    expect(llm.requests).toHaveLength(1);
+    expect(one.usage).toMatchObject({ calls: 1, skipped: 1, inputTokens: 5000, outputTokens: 100 });
+    expect(one.usage.inputTokens + one.usage.cacheReadTokens + one.usage.outputTokens).toBeLessThanOrEqual(8000);
+  });
+
+  it('B3: the report lists suggestion usage apart from agent and judge usage', () => {
+    const results = [result({ taskKey: 'a', passed: false, failureCause: 'wrong_tool' })];
+    const suggestUsage = { model: 'sug-model', calls: 2, inputTokens: 610, outputTokens: 80, cacheReadTokens: 2000, skipped: 1, budgetTokens: 9000 };
+    const rep = buildReport({ server: { slug: 's', name: 's' }, run: { id: null, models: ['gpt'], modes: ['tool'], repeats: 1, environment: 'mock', buildHash: null, provider: 'openai', startedAt: '', endedAt: '' }, score: scoreRun({ tasks: [task({ key: 'a' })], results, models: ['gpt'], modes: ['tool'], lintScore: 90 }), suggestUsage, suggestions: [], results, prompts: {} });
+    expect(rep.suggestUsage).toEqual(suggestUsage);
+    expect(renderMarkdown(rep)).toContain('Suggestion usage: sug-model: 2 calls, 2690 tokens (input 610, cached 2000, output 80); 1 call(s) skipped for the run token cap (9000 left).');
+    expect(renderTable(rep)).toContain('suggestion tokens: 2690');
   });
 
   it('toolset too big → hide by default + pins', async () => {

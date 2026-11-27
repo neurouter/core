@@ -33,7 +33,7 @@ The action runs the `neurouter` CLI of its own version: the tag you reference (`
 or the CLI version in the repository at that ref when you pin a branch or commit. Set `neurouter-version`
 to override it.
 
-`max-run-tokens` caps the run's spend (agent and judge tokens): no new attempt starts once it is reached and
+`max-run-tokens` caps the run's spend (agent, judge and fix-suggestion tokens): no new attempt starts once it is reached and
 the report marks the run incomplete.
 
 Outputs: `score`, `recommended-mode`, `report-path`. The step fails when the CLI exits non-zero

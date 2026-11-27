@@ -1,0 +1,577 @@
+{
+ "source": "long-workflow probe on released 0.3.3 (2026-11-27), probe/stripe-n{100,200}-tool-transcripts.json and calibration/stripe-n{100,200}-probe.calibrated.json",
+ "attempts": [
+  {
+   "size": 100,
+   "task": {
+    "key": "stripe_lw_failed_charges_by_currency_n100",
+    "category": "multi",
+    "prompt": "Across all charges, what is the total amount of charges with status \"failed\", per currency (in minor units)? Also say which currency has the largest failed total.",
+    "assertions": [
+     {
+      "type": "answer_contains",
+      "from": "ref[0].data.by_currency[*].amount",
+      "match": "all"
+     },
+     {
+      "type": "answer_contains",
+      "from": "ref[0].data.largest"
+     },
+     {
+      "type": "no_writes"
+     }
+    ],
+    "referenceCalls": [
+     {
+      "tool": "run_script",
+      "arguments": {
+       "code": "charges = api.get_charges.pages(limit=100, max_items=1000)\nby = {}\nfor c in charges:\n    if c[\"status\"] == \"failed\":\n        by[c[\"currency\"]] = by.get(c[\"currency\"], 0) + c[\"amount\"]\nrows = sorted([{\"currency\": k, \"amount\": by[k]} for k in sorted(by.keys())], key=lambda r: r[\"amount\"], reverse=True)\nreturn {\"by_currency\": rows, \"largest\": rows[0][\"currency\"], \"charges\": len(charges)}"
+      }
+     }
+    ]
+   },
+   "endReason": "end_turn",
+   "finalAnswer": "Failed-charge totals across all 100 charges, in minor units:\n\n| Currency | Total |\n|---|---:|\n| AUD | 435,300 |\n| CAD | 213,850 |\n| CHF | 366,400 |\n| EUR | 251,900 |\n| GBP | 495,350 |\n| JPY | 299,400 |\n| SEK | 242,150 |\n| USD | 538,100 |\n\n**USD has the largest failed total: 538,100 minor units.**",
+   "toolCallsByAgent": 5,
+   "calls": [
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    }
+   ],
+   "agentCalls": [
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status",
+       "created",
+       "has_more"
+      ]
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAyMjIseyJrIjoiciIsImgiOiJyaF9WZ2dnc2RPVVJQcjJ6WHdRS0VmNlhTIiwibiI6MjAsInQiOjEwMH0seyJsaW1pdCI6MTAwfV0.09c4EI3N_ydW6SjN"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAyMjQseyJrIjoiciIsImgiOiJyaF9WZ2dnc2RPVVJQcjJ6WHdRS0VmNlhTIiwibiI6NDAsInQiOjEwMH0seyJsaW1pdCI6MTAwfV0.PIROiafzKQLCVitG"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAyMjUseyJrIjoiciIsImgiOiJyaF9WZ2dnc2RPVVJQcjJ6WHdRS0VmNlhTIiwibiI6NjAsInQiOjEwMH0seyJsaW1pdCI6MTAwfV0.U4eObw8f_A0vg6VD"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAyMjcseyJrIjoiciIsImgiOiJyaF9WZ2dnc2RPVVJQcjJ6WHdRS0VmNlhTIiwibiI6ODAsInQiOjEwMH0seyJsaW1pdCI6MTAwfV0.Fk-TtdSeO5qJxhCJ"
+     },
+     "isError": false,
+     "latencyMs": 0
+    }
+   ],
+   "groundTruthRefs": [
+    {
+     "tool": "run_script",
+     "ok": true,
+     "data": {
+      "by_currency": [
+       {
+        "currency": "aud",
+        "amount": 563500
+       },
+       {
+        "currency": "usd",
+        "amount": 538100
+       },
+       {
+        "currency": "gbp",
+        "amount": 495350
+       },
+       {
+        "currency": "chf",
+        "amount": 366400
+       },
+       {
+        "currency": "jpy",
+        "amount": 299400
+       },
+       {
+        "currency": "eur",
+        "amount": 251900
+       },
+       {
+        "currency": "sek",
+        "amount": 242150
+       },
+       {
+        "currency": "cad",
+        "amount": 213850
+       }
+      ],
+      "largest": "aud",
+      "charges": 100
+     }
+    }
+   ],
+   "recorded": {
+    "failureCause": "gave_up",
+    "assertionResults": [
+     {
+      "passed": false,
+      "detail": "answer misses [563500] (ground truth; exact value: numbers, amounts and ids must match after normalization)"
+     },
+     {
+      "passed": true,
+      "detail": "answer states [\"aud\"] (ground truth, normalized)"
+     },
+     {
+      "passed": true,
+      "detail": "no writes"
+     }
+    ]
+   }
+  },
+  {
+   "size": 200,
+   "task": {
+    "key": "stripe_lw_failed_charges_by_currency_n200",
+    "category": "multi",
+    "prompt": "Across all charges, what is the total amount of charges with status \"failed\", per currency (in minor units)? Also say which currency has the largest failed total.",
+    "assertions": [
+     {
+      "type": "answer_contains",
+      "from": "ref[0].data.by_currency[*].amount",
+      "match": "all"
+     },
+     {
+      "type": "answer_contains",
+      "from": "ref[0].data.largest"
+     },
+     {
+      "type": "no_writes"
+     }
+    ],
+    "referenceCalls": [
+     {
+      "tool": "run_script",
+      "arguments": {
+       "code": "charges = api.get_charges.pages(limit=100, max_items=1000)\nby = {}\nfor c in charges:\n    if c[\"status\"] == \"failed\":\n        by[c[\"currency\"]] = by.get(c[\"currency\"], 0) + c[\"amount\"]\nrows = sorted([{\"currency\": k, \"amount\": by[k]} for k in sorted(by.keys())], key=lambda r: r[\"amount\"], reverse=True)\nreturn {\"by_currency\": rows, \"largest\": rows[0][\"currency\"], \"charges\": len(charges)}"
+      }
+     }
+    ]
+   },
+   "endReason": "end_turn",
+   "finalAnswer": "Failed-charge totals across all 200 charges, in minor units:\n\n| Currency | Total |\n|---|---:|\n| AUD | 693,300 |\n| CAD | 213,850 |\n| CHF | 366,400 |\n| EUR | 1,211,050 |\n| GBP | 1,152,400 |\n| JPY | 375,550 |\n| SEK | 689,100 |\n| USD | 1,351,500 |\n\n**USD has the largest failed total: 1,351,500 minor units.**",
+   "toolCallsByAgent": 10,
+   "calls": [
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "starting_after": "charge_100"
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    },
+    {
+     "tool": "get_charges",
+     "arguments": {
+      "limit": 100
+     },
+     "status": "ok",
+     "decision": "allowed",
+     "via": "eval",
+     "write": false
+    }
+   ],
+   "agentCalls": [
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ]
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzNzEseyJrIjoiciIsImgiOiJyaF93UjN6SEdyNmFycjlxTGt5WkE0NGtsIiwibiI6MjAsInQiOjIwMCwidGhlbiI6eyJrIjoidSIsInYiOiJjaGFyZ2VfMTAwIn19LHsibGltaXQiOjEwMH1d.fyT60ptIUdB70xAj"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzNzMseyJrIjoiciIsImgiOiJyaF93UjN6SEdyNmFycjlxTGt5WkE0NGtsIiwibiI6NDAsInQiOjIwMCwidGhlbiI6eyJrIjoidSIsInYiOiJjaGFyZ2VfMTAwIn19LHsibGltaXQiOjEwMH1d.VuQGfR8ip3C49VUr"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzNzUseyJrIjoiciIsImgiOiJyaF93UjN6SEdyNmFycjlxTGt5WkE0NGtsIiwibiI6NjAsInQiOjIwMCwidGhlbiI6eyJrIjoidSIsInYiOiJjaGFyZ2VfMTAwIn19LHsibGltaXQiOjEwMH1d.iFIKCd8pe-xzR7yJ"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzNzcseyJrIjoiciIsImgiOiJyaF93UjN6SEdyNmFycjlxTGt5WkE0NGtsIiwibiI6ODAsInQiOjIwMCwidGhlbiI6eyJrIjoidSIsInYiOiJjaGFyZ2VfMTAwIn19LHsibGltaXQiOjEwMH1d.-lJqG5fd2uTII-Lr"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzNzkseyJrIjoidSIsInYiOiJjaGFyZ2VfMTAwIn0seyJsaW1pdCI6MTAwfV0.FVZU4AgOs7zjGK_w"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzODEseyJrIjoiciIsImgiOiJyaF9UM244U0xrYlBUZm92NE9nT2Z1TTdYIiwibiI6MjAsInQiOjIwMH0seyJsaW1pdCI6MTAwfV0._o1xIEy0VfXuZEHd"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzODIseyJrIjoiciIsImgiOiJyaF9UM244U0xrYlBUZm92NE9nT2Z1TTdYIiwibiI6NDAsInQiOjIwMH0seyJsaW1pdCI6MTAwfV0.AQ8YWNSK4uddJrnF"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzODUseyJrIjoiciIsImgiOiJyaF9UM244U0xrYlBUZm92NE9nT2Z1TTdYIiwibiI6NjAsInQiOjIwMH0seyJsaW1pdCI6MTAwfV0.figyH6riEQvhxBkP"
+     },
+     "isError": false,
+     "latencyMs": 0
+    },
+    {
+     "name": "get_charges",
+     "arguments": {
+      "limit": 100,
+      "fields": [
+       "id",
+       "amount",
+       "currency",
+       "status"
+      ],
+      "cursor": "c_WzE3OTU4MjAzODYseyJrIjoiciIsImgiOiJyaF9UM244U0xrYlBUZm92NE9nT2Z1TTdYIiwibiI6ODAsInQiOjIwMH0seyJsaW1pdCI6MTAwfV0.pMNzcjHR6UVDjTxt"
+     },
+     "isError": false,
+     "latencyMs": 0
+    }
+   ],
+   "groundTruthRefs": [
+    {
+     "tool": "run_script",
+     "ok": true,
+     "data": {
+      "by_currency": [
+       {
+        "currency": "usd",
+        "amount": 1351500
+       },
+       {
+        "currency": "eur",
+        "amount": 1211050
+       },
+       {
+        "currency": "gbp",
+        "amount": 1152400
+       },
+       {
+        "currency": "aud",
+        "amount": 778700
+       },
+       {
+        "currency": "sek",
+        "amount": 689100
+       },
+       {
+        "currency": "jpy",
+        "amount": 571450
+       },
+       {
+        "currency": "chf",
+        "amount": 366400
+       },
+       {
+        "currency": "cad",
+        "amount": 213850
+       }
+      ],
+      "largest": "usd",
+      "charges": 200
+     }
+    }
+   ],
+   "recorded": {
+    "failureCause": "gave_up",
+    "assertionResults": [
+     {
+      "passed": false,
+      "detail": "answer misses [778700,571450] (ground truth; exact value: numbers, amounts and ids must match after normalization)"
+     },
+     {
+      "passed": true,
+      "detail": "answer states [\"usd\"] (ground truth, normalized)"
+     },
+     {
+      "passed": true,
+      "detail": "no writes"
+     }
+    ]
+   }
+  }
+ ]
+}

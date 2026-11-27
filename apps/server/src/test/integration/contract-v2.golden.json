@@ -5090,14 +5090,14 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":true,\"data\":{\"task_id\":\"<uuid>\",\"attached_calls\":24},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":38}}"
+    "text": "{\"ok\":true,\"data\":{\"task_id\":\"<uuid>\",\"attached_calls\":23},\"page\":null,\"truncated\":null,\"error\":null,\"state\":{\"task\":\"t_<id>\",\"call\":38}}"
    }
   ],
   "structuredContent": {
    "ok": true,
    "data": {
     "task_id": "<uuid>",
-    "attached_calls": 24
+    "attached_calls": 23
    },
    "page": null,
    "truncated": null,
@@ -5616,7 +5616,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"not_found\",\"message\":\"No order 'ord_nope' in mock. Nothing changed.\",\"retry\":\"after_fix\",\"next\":[{\"tool\":\"run_script\",\"args\":{\"code\":\"return acme.list_orders(limit=20)\"}}],\"upstream\":{\"status\":404,\"detail\":\"order ord_nope not found\"},\"error_id\":\"err_<id>\",\"line\":1},\"state\":{\"task\":\"t_<id>\",\"call\":51,\"left\":{\"calls\":199,\"seconds\":0},\"script_calls\":1,\"flags\":[\"dry_run\"]}}"
+    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"not_found\",\"message\":\"No order 'ord_nope' in mock. Nothing changed.\",\"retry\":\"after_fix\",\"next\":[{\"tool\":\"run_script\",\"args\":{\"code\":\"return acme.list_orders(limit=20)\"}}],\"upstream\":{\"status\":404,\"detail\":\"order ord_nope not found\"},\"error_id\":\"err_<id>\",\"line\":1},\"state\":{\"task\":\"t_<id>\",\"call\":51,\"left\":{\"calls\":199,\"seconds\":0},\"script_calls\":1}}"
    }
   ],
   "structuredContent": {
@@ -5650,10 +5650,7 @@
      "calls": 199,
      "seconds": 0
     },
-    "script_calls": 1,
-    "flags": [
-     "dry_run"
-    ]
+    "script_calls": 1
    }
   },
   "isError": true
@@ -5796,7 +5793,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"script_error\",\"message\":\"Script rejected: Imports are not allowed Tools are already available as acme.<fn> and ops.<fn>; remove the import.\",\"retry\":\"after_fix\",\"next\":[],\"line\":1},\"state\":{\"task\":\"t_<id>\",\"call\":55,\"left\":{\"calls\":200,\"seconds\":0},\"script_calls\":0,\"flags\":[\"dry_run\"]}}"
+    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"script_error\",\"message\":\"Script rejected: Imports are not allowed Tools are already available as acme.<fn> and ops.<fn>; remove the import.\",\"retry\":\"after_fix\",\"next\":[],\"line\":1},\"state\":{\"task\":\"t_<id>\",\"call\":55,\"left\":{\"calls\":200,\"seconds\":0},\"script_calls\":0}}"
    }
   ],
   "structuredContent": {
@@ -5818,10 +5815,7 @@
      "calls": 200,
      "seconds": 0
     },
-    "script_calls": 0,
-    "flags": [
-     "dry_run"
-    ]
+    "script_calls": 0
    }
   },
   "isError": true
@@ -5835,7 +5829,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"script_error\",\"message\":\"Type error: acme has no function no_such_fn. Closest: acme.list_shipments, acme.get_shipment. Find functions with search_tools.\",\"retry\":\"after_fix\",\"next\":[],\"line\":1},\"state\":{\"task\":\"t_<id>\",\"call\":56,\"left\":{\"calls\":200,\"seconds\":0},\"script_calls\":0,\"flags\":[\"dry_run\"]}}"
+    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"script_error\",\"message\":\"Type error: acme has no function no_such_fn. Closest: acme.list_shipments, acme.get_shipment. Find functions with search_tools.\",\"retry\":\"after_fix\",\"next\":[],\"line\":1},\"state\":{\"task\":\"t_<id>\",\"call\":56,\"left\":{\"calls\":200,\"seconds\":0},\"script_calls\":0}}"
    }
   ],
   "structuredContent": {
@@ -5857,10 +5851,7 @@
      "calls": 200,
      "seconds": 0
     },
-    "script_calls": 0,
-    "flags": [
-     "dry_run"
-    ]
+    "script_calls": 0
    }
   },
   "isError": true
@@ -5874,7 +5865,7 @@
   "content": [
    {
     "type": "text",
-    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"script_error\",\"message\":\"KeyError: missing\",\"retry\":\"after_fix\",\"next\":[],\"line\":2},\"state\":{\"task\":\"t_<id>\",\"call\":57,\"left\":{\"calls\":200,\"seconds\":0},\"script_calls\":0,\"flags\":[\"dry_run\"]}}"
+    "text": "{\"ok\":false,\"data\":null,\"page\":null,\"truncated\":null,\"error\":{\"code\":\"script_error\",\"message\":\"KeyError: missing\",\"retry\":\"after_fix\",\"next\":[],\"line\":2},\"state\":{\"task\":\"t_<id>\",\"call\":57,\"left\":{\"calls\":200,\"seconds\":0},\"script_calls\":0}}"
    }
   ],
   "structuredContent": {
@@ -5896,10 +5887,7 @@
      "calls": 200,
      "seconds": 0
     },
-    "script_calls": 0,
-    "flags": [
-     "dry_run"
-    ]
+    "script_calls": 0
    }
   },
   "isError": true

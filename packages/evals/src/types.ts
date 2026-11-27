@@ -294,6 +294,23 @@ export interface ReadinessScore {
   breakdown: ReadinessComponent[];
   /** The run stopped early (`--max-run-tokens`): scores cover only the attempts that ran. */
   incomplete?: { reason: string; attemptsRun: number; attemptsPlanned: number } | null;
+  /** LLM usage of the fix-suggestion step after the run (0.3.4, B3), stored with the run's score. */
+  suggestUsage?: SuggestUsage | null;
+}
+
+/**
+ * Fix-suggestion LLM usage (B3): `model` = the model the suggester called; tokens as for attempts (input = uncached +
+ * cache writes). `budgetTokens`: what `--max-run-tokens` left for it (null: no cap); `skipped`: calls not made because
+ * they could have crossed it (those suggestions use the deterministic text).
+ */
+export interface SuggestUsage {
+  model: string | null;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  skipped: number;
+  budgetTokens: number | null;
 }
 
 /* ------------------------------------------------------------------ generator I/O */

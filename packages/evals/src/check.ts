@@ -391,9 +391,9 @@ export function isProviderRefusal(rec: Pick<AttemptRecord, 'endReason' | 'error'
 
 /**
  * Failure cause (§15.5, first match): policy_blocked → bad_arguments → wrong_tool → hallucinated →
- * missing_capability → no_framing (only framing failed; does not fail the run) → over_budget (incl.
- * a finished attempt whose only misses are max_calls) →
- * gave_up → error. A provider refusal (policy filter) is `provider_refusal` first (excluded from
+ * missing_capability → no_framing (only framing failed; does not fail the run) → wrong_answer (0.3.4, B2: a
+ * finished attempt whose answer checks fail: it answered, and the answer is wrong) → over_budget (incl. a finished
+ * attempt whose only misses are max_calls) → gave_up → error. A provider refusal (policy filter) is `provider_refusal` first (excluded from
  * scoring), other refusals and transport errors `error`.
  */
 export function classifyFailure(task: EvalTask, rec: AttemptRecord, check: Pick<CheckResult, 'passed' | 'results' | 'framingPassed'>): FailureCause | null {
@@ -411,6 +411,11 @@ export function classifyFailure(task: EvalTask, rec: AttemptRecord, check: Pick<
   if (task.category !== 'impossible' && rec.calls.some((c) => isUnmetNeedReport(c.tool, c.arguments))) return 'missing_capability';
   const nonFraming = check.results.filter((x) => x.assertion.type !== 'framing');
   if (nonFraming.every((x) => x.passed) && check.framingPassed === false) return 'no_framing';
+  // B2: the agent finished with an answer (not a decline) and only answer checks failed (with call budgets at most):
+  // the answer is wrong (a miscounted sum, the wrong "largest"); it did not give up, and no tool description is at fault
+  const failed = nonFraming.filter((x) => !x.passed);
+  const isAnswer = (x: AssertionResult) => x.assertion.type === 'answer_contains' || x.assertion.type === 'answer_matches';
+  if (rec.endReason === 'end_turn' && rec.finalAnswer.trim() && !declinedInText(rec.finalAnswer) && failed.some(isAnswer) && failed.every((x) => isAnswer(x) || x.assertion.type === 'max_calls')) return 'wrong_answer';
   // the agent finished, and the only misses are call budgets: inefficient, not given up
   if (rec.endReason === 'end_turn' && nonFraming.some((x) => !x.passed) && nonFraming.every((x) => x.passed || x.assertion.type === 'max_calls')) return 'over_budget';
   if (rec.endReason === 'over_budget' || rec.endReason === 'max_turns' || rec.endReason === 'max_tool_calls' || rec.endReason === 'timeout' || rec.endReason === 'max_tokens') return 'over_budget';

@@ -4,7 +4,7 @@ import { parseJsonText, textOf, type LlmClient } from './llm/types.js';
 import { firstSentence, mulberry32, shuffle, tokens } from './rng.js';
 import { apiCalls, UNMET_NEED_TOOL } from './check.js';
 import { toYaml } from './yaml-emit.js';
-import type { EvalTask, TaskRunResult } from './types.js';
+import type { EvalTask, SuggestUsage, TaskRunResult } from './types.js';
 
 /** A tool of the evaluated build, as the suggester needs it. */
 export interface SuggestTool {
@@ -54,7 +54,15 @@ export interface SuggestOptions {
   /** Search over hidden tools for an unmet-need intent (missing_capability → unhide). */
   findHiddenTool?: (intent: string) => Promise<string | null>;
   signal?: AbortSignal;
+  /**
+   * B3: tokens the suggestion LLM may spend (what `--max-run-tokens` leaves; null/undefined: no cap). A call whose
+   * estimated input plus its max output could cross it is not made; that suggestion keeps the deterministic text.
+   */
+  maxTokens?: number | null;
 }
+
+/** Max output tokens of one suggestion call. */
+const SUGGEST_MAX_TOKENS = 4000;
 
 export interface Cluster {
   cause: FailureCause;
@@ -63,6 +71,7 @@ export interface Cluster {
   taskKeys: string[];
 }
 
+/** Causes a tool fix can address. Not `wrong_answer` (B2): the agent used the tools right and mis-added; no description fixes that. */
 const ACTIONABLE: FailureCause[] = ['wrong_tool', 'bad_arguments', 'missing_capability', 'over_budget', 'gave_up'];
 
 /** Step 1: failed attempts clustered by (failure cause, primary tool). Largest clusters first. */
@@ -92,6 +101,12 @@ export function selectVerifyTasks(affected: string[], passing: string[], ratio =
 }
 
 export async function suggest(opts: SuggestOptions): Promise<Suggestion[]> {
+  return (await suggestDetailed(opts)).suggestions;
+}
+
+/** `suggest` plus the LLM usage of the suggestion calls (B3). */
+export async function suggestDetailed(opts: SuggestOptions): Promise<{ suggestions: Suggestion[]; usage: SuggestUsage }> {
+  const usage: SuggestUsage = { model: opts.llm && opts.model ? opts.model : null, calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, skipped: 0, budgetTokens: opts.maxTokens ?? null };
   const total = opts.tasks.filter((t) => t.enabled !== false).length;
   const byName = new Map(opts.tools.map((t) => [t.name, t]));
   const tasks = new Map(opts.tasks.map((t) => [t.key, t]));
@@ -112,7 +127,7 @@ export async function suggest(opts: SuggestOptions): Promise<Suggestion[]> {
   for (const c of clusters) {
     const tool = c.tool ? byName.get(c.tool) : undefined;
     const prompts = c.taskKeys.map((k) => tasks.get(k)?.prompt ?? '').filter(Boolean);
-    const llmText = opts.llm ? await askLlm(opts, c, tool, prompts).catch(() => null) : null;
+    const llmText = opts.llm ? await askLlm(opts, c, tool, prompts, usage).catch(() => null) : null;
     let s: Suggestion | null = null;
     switch (c.cause) {
       case 'wrong_tool': {
@@ -197,7 +212,7 @@ export async function suggest(opts: SuggestOptions): Promise<Suggestion[]> {
     const v = await opts.validatePatch(s.overlayPatch, s.overlayOps).catch((e: Error) => ({ ok: false, diagnostics: [e.message] }));
     if (v.ok) valid.push(s);
   }
-  return valid.sort((a, b) => b.predictedDelta - a.predictedDelta);
+  return { suggestions: valid.sort((a, b) => b.predictedDelta - a.predictedDelta), usage };
 }
 
 function make(cause: Suggestion['cause'], kind: SuggestionKind, tools: string[], affected: string[], ops: SuggestOp[], spec: object[] | null, rationale: string, total: number): Suggestion {
@@ -272,21 +287,36 @@ const SUGGEST_SCHEMA = {
   },
 } as const;
 
-async function askLlm(opts: SuggestOptions, c: Cluster, tool: SuggestTool | undefined, prompts: string[]): Promise<LlmSuggestText | null> {
+async function askLlm(opts: SuggestOptions, c: Cluster, tool: SuggestTool | undefined, prompts: string[], usage: SuggestUsage): Promise<LlmSuggestText | null> {
   if (!opts.llm || !opts.model || (c.cause !== 'wrong_tool' && c.cause !== 'bad_arguments' && c.cause !== 'gave_up')) return null;
   const involved = new Set<string>([...(tool ? [tool.name] : []), ...c.results.flatMap((r) => apiCalls(r.calls).map((x) => x.tool))]);
   const tools = opts.tools.filter((t) => involved.has(t.name)).slice(0, 6).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
   const failures = c.results.slice(0, 5).map((r) => ({ task: r.taskKey, called: apiCalls(r.calls).map((x) => ({ tool: x.tool, args: x.arguments, status: x.status })) }));
+  const content = markerMessage(SUGGEST_MARKER, SUGGEST_PROMPT_VERSION, { cause: c.cause, expectedTool: tool?.name ?? null, tools, prompts: prompts.slice(0, 5), failures }, 'Propose better tool and argument descriptions so agents succeed on these tasks.');
+  // B3: never start a call that could cross the budget (input estimated at 4 characters per token, plus the max output)
+  if (opts.maxTokens !== undefined && opts.maxTokens !== null) {
+    const spent = usage.inputTokens + usage.cacheReadTokens + usage.outputTokens;
+    const estimate = Math.ceil((SUGGEST_SYSTEM.length + JSON.stringify(content).length + JSON.stringify(SUGGEST_SCHEMA).length) / 4) + SUGGEST_MAX_TOKENS;
+    if (spent + estimate > opts.maxTokens) {
+      usage.skipped++;
+      return null;
+    }
+  }
   const res = await opts.llm.create(
     {
       model: opts.model,
-      max_tokens: 4000,
+      max_tokens: SUGGEST_MAX_TOKENS,
       system: SUGGEST_SYSTEM,
-      messages: [{ role: 'user', content: markerMessage(SUGGEST_MARKER, SUGGEST_PROMPT_VERSION, { cause: c.cause, expectedTool: tool?.name ?? null, tools, prompts: prompts.slice(0, 5), failures }, 'Propose better tool and argument descriptions so agents succeed on these tasks.') }],
+      messages: [{ role: 'user', content }],
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: SUGGEST_SCHEMA as unknown as Record<string, unknown> } },
     },
     opts.signal ? { signal: opts.signal } : {},
   );
+  usage.calls++;
+  // as for attempts: cache writes are billed input (Anthropic's input_tokens excludes them)
+  usage.inputTokens += (res.usage.input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
+  usage.outputTokens += res.usage.output_tokens ?? 0;
+  usage.cacheReadTokens += res.usage.cache_read_input_tokens ?? 0;
   const j = parseJsonText(textOf(res)) as LlmSuggestText;
   const clean = (m?: Record<string, string>) => (m ? Object.fromEntries(Object.entries(m).filter(([, v]) => typeof v === 'string' && v.trim().length >= 10).map(([k, v]) => [k, v.slice(0, 1024)])) : undefined);
   const descriptions = clean(j.descriptions);
