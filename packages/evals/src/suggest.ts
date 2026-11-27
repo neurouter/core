@@ -63,6 +63,7 @@ export interface Cluster {
   taskKeys: string[];
 }
 
+/** Causes a tool fix can address. Not `wrong_answer` (B2): the agent used the tools right and mis-added; no description fixes that. */
 const ACTIONABLE: FailureCause[] = ['wrong_tool', 'bad_arguments', 'missing_capability', 'over_budget', 'gave_up'];
 
 /** Step 1: failed attempts clustered by (failure cause, primary tool). Largest clusters first. */
