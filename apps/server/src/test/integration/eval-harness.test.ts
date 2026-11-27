@@ -118,6 +118,25 @@ describe('eval harness (calibration, redaction, run cap)', () => {
     expect(ev.score(run)!.incomplete).toMatchObject({ attemptsRun: 4, attemptsPlanned: 5 });
   }, 120_000);
 
+  it('B3: suggestion LLM usage is recorded with the run, and --max-run-tokens covers it', async () => {
+    const ev = s.services.evals;
+    const srv = (await s.services.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!;
+    const env = (await s.services.servers.environments(srv.id)).find((e) => e.slug === 'dev')!;
+    // a task the stub agent fails with bad arguments (it asks for pet 1): an actionable cause, so the suggester asks the LLM
+    const t = task({ key: 'pet7', prompt: 'Find pet 1 (use pet_id=1)', referenceCalls: [{ tool: 'get_pet_by_id', arguments: { pet_id: 1 } }], assertions: [{ type: 'called', tool: 'get_pet_by_id', args: { pet_id: 7 } }] });
+    const suite = await ev.saveSuite(DEFAULT_TENANT_ID, srv.id, null, [t], { mockDataVersion: 2 }, null, true);
+    const run = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 1, trigger: 'cli', createdBy: null, wait: true });
+    expect(run.status).toBe('succeeded');
+    const fresh = await ev.run(DEFAULT_TENANT_ID, run.id);
+    const u = ev.score(fresh)!.suggestUsage!;
+    expect(u).toMatchObject({ model: await ev.model(DEFAULT_TENANT_ID), calls: 1, skipped: 0, budgetTokens: null });
+    expect(u.inputTokens + u.outputTokens).toBeGreaterThan(0);
+    // the run cap: the attempt spends it all, so the suggester makes no LLM call
+    const capped = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 1, trigger: 'cli', createdBy: null, wait: true, maxRunTokens: 1 });
+    const cu = ev.score(await ev.run(DEFAULT_TENANT_ID, capped.id))!.suggestUsage!;
+    expect(cu).toMatchObject({ calls: 0, skipped: 1, budgetTokens: 0 });
+  }, 120_000);
+
   it('0.3.3: suite and task limits are stored, honored per attempt and kept with the results', async () => {
     const ev = s.services.evals;
     const srv = (await s.services.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!;

@@ -217,6 +217,10 @@ Each (model, mode) cell; weights renormalize when a component is missing.
 Excluded from scoring and counted separately: attempts served by a fallback model, and **provider
 refusals** (`failureCause: provider_refusal`: the model provider's policy filter refused the prompt).
 
+**`wrong_answer`** (0.3.4): the agent finished with an answer (not a decline) and only its answer checks failed
+(`answer_contains`, `answer_matches`; call budgets aside), for example a miscounted sum. It was `gave_up` before. No
+fix is suggested for it: the tools were used right.
+
 **Recommended mode**: the higher cell (within 3 points, tool mode unless code mode is ≥ 10 points better on
 multi-step tasks), then a cost rule: if the pick needs ≥ 2× the other mode's tokens per multi-step task
 while the other mode's success is within 10 points, the cheaper mode is recommended. Tool mode's cost
@@ -249,10 +253,13 @@ of wall time. Hitting a limit ends the attempt with the end reason `max_turns`, 
 ## Spend
 
 - `--max-generator-tokens`: budget for suite generation (default 400,000).
-- `--max-run-tokens`: hard cap for the run (agent and judge tokens). No new attempt starts once it is
-  reached (attempts in flight finish); the run is marked incomplete and its scores cover the attempts
-  that ran.
+- `--max-run-tokens`: hard cap for the run (agent, judge and fix-suggestion tokens). No new attempt starts once it
+  is reached (attempts in flight finish); the run is marked incomplete and its scores cover the attempts
+  that ran. The fix-suggestion step after the run gets what is left: a suggestion LLM call that could cross the
+  cap (estimated input plus its 4,000 max output) is not made, and that suggestion keeps its deterministic text.
 - Judge usage (rubric and equivalence judge) is counted per attempt and reported per judge model.
+- Suggestion usage (0.3.4) is reported as `suggestUsage` (JSON) and "Suggestion usage" (Markdown): the model the
+  suggester called, its calls and tokens, and the calls skipped for the cap.
 - Suggestions name the suite's task keys.
 
 ## Suite files and migration

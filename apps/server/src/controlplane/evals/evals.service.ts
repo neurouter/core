@@ -23,7 +23,7 @@ import {
   scoreRun,
   selectVerifyTasks,
   STUB_RUN_MODEL,
-  suggest,
+  suggestDetailed,
   type EvalTask,
   type EvalLimitsOverride,
   type GenTool,
@@ -684,7 +684,9 @@ export class EvalsService {
         .set({ status: 'succeeded', score: toJsonColumn(score), headline: score.headline, recommended_mode: score.recommendedMode, confidence: score.confidence, usage: toJsonColumn(usage), progress: toJsonColumn({ done: total, total }), ended_at: this.d.clock.now() })
         .where('id', '=', runId)
         .execute();
-      if (run.trigger !== 'suggestion_verify') await this.createSuggestions(tenantId, runId).catch((err: unknown) => this.d.log.warn({ err, runId }, 'suggestion generation failed'));
+      // B3: the suggestion LLM spends from the same --max-run-tokens cap as the attempts and judges
+      const suggestBudget = opts.maxRunTokens ? Math.max(0, opts.maxRunTokens - outcome.tokensUsed) : null;
+      if (run.trigger !== 'suggestion_verify') await this.createSuggestions(tenantId, runId, { maxTokens: suggestBudget }).catch((err: unknown) => this.d.log.warn({ err, runId }, 'suggestion generation failed'));
       else await this.finishVerify(tenantId, runId);
     } catch (err) {
       const msg = err instanceof AppError ? err.message : (err as Error).message;
@@ -769,7 +771,11 @@ export class EvalsService {
     return (await this.d.builds.overlayYaml(s.published_overlay_revision_id)) ?? 'overlay: 1\n';
   }
 
-  async createSuggestions(tenantId: string, runId: string): Promise<SuggestionRowDb[]> {
+  /**
+   * Fix suggestions for a finished run (§15.7). B3: the suggestion LLM's usage is stored with the run's score
+   * (`suggestUsage`), and `maxTokens` (what --max-run-tokens left) bounds it.
+   */
+  async createSuggestions(tenantId: string, runId: string, opts: { maxTokens?: number | null } = {}): Promise<SuggestionRowDb[]> {
     const run = await this.run(tenantId, runId);
     const results = await this.taskResults(tenantId, runId);
     if (!results.some((r) => !r.passed)) return [];
@@ -779,12 +785,13 @@ export class EvalsService {
     const base = await this.publishedYaml(tenantId, run.server_id);
     const lint = parseJsonColumn<{ rules: Array<{ rule: string; weight: number; score: number; passed: boolean; detail: string }> }>((await this.d.db.selectFrom('builds').where('tenant_id', '=', tenantId).select('lint').where('id', '=', run.build_id).executeTakeFirst())?.lint);
     const llm: LlmClient | null = await this.llm(tenantId).catch(() => null);
-    const out = await suggest({
+    const { suggestions: out, usage } = await suggestDetailed({
       results,
       tasks,
       tools: st,
       llm,
       model: await this.model(tenantId),
+      ...(opts.maxTokens !== undefined && opts.maxTokens !== null ? { maxTokens: opts.maxTokens } : {}),
       ...(lint ? { lint: lint as never } : {}),
       validatePatch: async (_yaml, ops) => {
         try {
@@ -805,6 +812,8 @@ export class EvalsService {
         return best?.name ?? null;
       },
     });
+    const score = this.score(run);
+    if (score) await this.d.db.updateTable('eval_runs').where('tenant_id', '=', tenantId).set({ score: toJsonColumn({ ...score, suggestUsage: usage }) }).where('id', '=', runId).execute();
     const now = this.d.clock.now();
     const taskIds = new Map((await this.suiteTasks(tenantId, run.suite_id)).map((t) => [t.key, t.id]));
     for (const sgg of out) {

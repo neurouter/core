@@ -1,6 +1,6 @@
 import { attemptTokens } from './score.js';
 import type { Suggestion } from './suggest.js';
-import type { JudgeUsage, ReadinessScore, SuiteCalibration, TaskRunResult } from './types.js';
+import type { JudgeUsage, ReadinessScore, SuggestUsage, SuiteCalibration, TaskRunResult } from './types.js';
 
 /** CLI/CI report (`EvalReport` ≈ EvalRunDetail + suggestions, §15.8). */
 export interface EvalReport {
@@ -21,6 +21,8 @@ export interface EvalReport {
   generator?: { model: string; usage: { calls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; totalTokens: number; budgetTokens: number }; tasks: number; diagnostics: number; coverage?: Record<string, number> };
   /** Judge LLM usage of the run (rubric + answer-equivalence judge), per judge model. */
   judgeUsage: Record<string, JudgeUsage>;
+  /** Fix-suggestion LLM usage after the run (0.3.4, B3), under the model the suggester called; counted in `--max-run-tokens`. */
+  suggestUsage?: SuggestUsage | null;
   /** Attempts the model provider refused (policy filter): excluded from scoring. */
   providerRefusals: number;
   /** The run stopped at `--max-run-tokens`. */
@@ -76,6 +78,7 @@ export function buildReport(
     incomplete?: EvalReport['incomplete'];
     calibration?: EvalReport['calibration'];
     judgeModel?: string;
+    suggestUsage?: SuggestUsage | null;
   } & { results: TaskRunResult[]; prompts: Record<string, { category: string; prompt: string }> },
 ): EvalReport {
   const byTask = new Map<string, TaskRunResult[]>();
@@ -119,6 +122,11 @@ export function buildReport(
   return { version: 1, ...rest, categories: categoryRows(input.results), tasks, topFailures, usage, judgeUsage, providerRefusals };
 }
 
+/** Tokens of the suggestion LLM calls (uncached + cached input + output). */
+export function suggestTokens(u: SuggestUsage): number {
+  return u.inputTokens + u.cacheReadTokens + u.outputTokens;
+}
+
 export function renderMarkdown(rep: EvalReport): string {
   const s = rep.score;
   const lines: string[] = [];
@@ -143,6 +151,8 @@ export function renderMarkdown(rep: EvalReport): string {
   if (rep.incomplete) lines.push('', `**Incomplete run:** ${rep.incomplete.reason}; ${rep.incomplete.attemptsRun} of ${rep.incomplete.attemptsPlanned} attempts ran. Scores cover only those.`);
   const ju = Object.entries(rep.judgeUsage ?? {});
   if (ju.length) lines.push('', `Judge usage: ${ju.map(([m, u]) => `${m}: ${u.calls} calls, ${u.inputTokens + u.cacheReadTokens + u.outputTokens} tokens (input ${u.inputTokens}, cached ${u.cacheReadTokens}, output ${u.outputTokens})`).join('; ')}.`);
+  const su = rep.suggestUsage;
+  if (su && (su.calls || su.skipped)) lines.push('', `Suggestion usage: ${su.model ?? 'no model'}: ${su.calls} calls, ${suggestTokens(su)} tokens (input ${su.inputTokens}, cached ${su.cacheReadTokens}, output ${su.outputTokens})${su.skipped ? `; ${su.skipped} call(s) skipped for the run token cap (${su.budgetTokens} left)` : ''}.`);
   if (rep.calibration) {
     const c = rep.calibration;
     lines.push('', `Calibration (mock data v${c.mockDataVersion}): ${c.passed} tasks passed with their own reference solution, ${c.rejected} rejected (not run), ${c.flagged} flagged for review${c.model ? ` by ${c.model}` : ''}.`);
@@ -183,6 +193,7 @@ export function renderTable(rep: EvalReport): string {
     rep.incomplete ? `INCOMPLETE: ${rep.incomplete.reason} (${rep.incomplete.attemptsRun}/${rep.incomplete.attemptsPlanned} attempts)` : '',
     rep.providerRefusals ? `${rep.providerRefusals} provider refusal(s) excluded` : '',
     judge ? `judge tokens: ${judge}` : '',
+    rep.suggestUsage?.calls ? `suggestion tokens: ${suggestTokens(rep.suggestUsage)}` : '',
     rep.calibration?.rejected ? `${rep.calibration.rejected} task(s) rejected by calibration` : '',
   ].filter(Boolean);
   return `${catTable}${table}\n\nHeadline: ${s.headline}/100 (${s.band}) · recommended: ${s.recommendedMode ?? 'n/a'} · ${s.recommendationText}${notes.length ? `\n${notes.join(' · ')}` : ''}${fails ? `\nTop failures:\n${fails}` : ''}\n`;

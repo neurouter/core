@@ -56,7 +56,7 @@ calls on the same mock data, only the arguments the prompt asks for are checked,
 meaning (booleans, numbers, minor units, dates, ids), and call budgets are soft (over budget is reported as
 efficiency, not failure). A suite is accepted only when every task's reference solution passes its own
 checks (calibration; `--calibrate-with <model>` adds a model pass that flags disagreements for review).
-`--max-run-tokens` caps a run's spend. Per-attempt limits (turns, tool calls, tokens including cached input,
+`--max-run-tokens` caps a run's spend (agent, judge and fix-suggestion tokens). Per-attempt limits (turns, tool calls, tokens including cached input,
 wall time, enforced during calls) can be overridden per suite or per task (`limits`). Exact values (numbers,
 amounts, ids) are never passed by the equivalence judge. Details, score definitions and the 0.2.1 suite converter
 (`--migrate-suite`) and offline re-grade (`--regrade`): [packages/evals/README.md](packages/evals/README.md).
