@@ -57,6 +57,96 @@ export function withMockDataVersion(name: string, dv: MockDataVersion): string {
   return parts.length >= 3 ? [...parts.slice(0, 2), `dv${dv}`, ...parts.slice(2)].join(':') : `${name}:dv${dv}`;
 }
 
+/**
+ * Mock scale (long-workflow evals): how many items a scaled namespace seeds per collection. `items` is the
+ * default for every collection (default `SEED_ITEMS`); `resources` overrides it for scoped collections by resource
+ * name (`issue`, `refund`; `-` and `.` read as `_`), as an exact count or a `[min, max]` range drawn per collection
+ * (deterministic per seed and scope), so nested collections can vary in size (some pull requests without
+ * reviews). A scaled namespace also seeds each scope of a nested collection separately (the issues of two
+ * repositories differ; a nested list of a top-level resource's objects lists a per-scope subset of them) and caps
+ * page sizes at 100, as the real APIs do.
+ */
+export interface MockScale {
+  items?: number;
+  resources?: Record<string, number | [number, number]>;
+}
+
+/** Largest count a scale may ask for (the store's collection limit). */
+export const MOCK_SCALE_MAX = 1000;
+/** Page-size cap of a scaled namespace (GitHub `per_page`, Stripe `limit`: 100). */
+export const MOCK_SCALE_PAGE_MAX = 100;
+
+const SCALE_SEG_RE = /(^|[:/])ms(\d+)((?:-[A-Za-z0-9_]+-\d+(?:to\d+)?)*)(?=:|$)/;
+const scaleName = (n: string) => n.replace(/[^A-Za-z0-9_]/g, '_').toLowerCase();
+const clampCount = (n: number) => Math.max(0, Math.min(MOCK_SCALE_MAX, Math.floor(n)));
+
+/** Validates and normalizes a scale (`null` when it asks for nothing). Throws on malformed input. */
+export function normalizeMockScale(input: unknown): MockScale | null {
+  if (input === undefined || input === null) return null;
+  if (typeof input === 'number') input = { items: input };
+  if (!isObj(input)) throw new Error('mockScale must be a number or {items, resources}');
+  const out: MockScale = {};
+  const count = (v: unknown, what: string) => {
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > MOCK_SCALE_MAX) throw new Error(`mockScale ${what} must be an integer 0..${MOCK_SCALE_MAX}`);
+    return v;
+  };
+  if (input.items !== undefined) out.items = count(input.items, 'items');
+  if (input.resources !== undefined) {
+    if (!isObj(input.resources)) throw new Error('mockScale.resources must be an object');
+    const res: Record<string, number | [number, number]> = {};
+    for (const [k, v] of Object.entries(input.resources)) {
+      if (Array.isArray(v)) {
+        const [lo, hi] = [count(v[0], `resources.${k}[0]`), count(v[1], `resources.${k}[1]`)];
+        if (v.length !== 2 || lo > hi) throw new Error(`mockScale resources.${k} must be [min, max]`);
+        res[scaleName(k)] = lo === hi ? lo : [lo, hi];
+      } else res[scaleName(k)] = count(v, `resources.${k}`);
+    }
+    if (Object.keys(res).length) out.resources = res;
+  }
+  return out.items === undefined && !out.resources ? null : out;
+}
+
+/** The namespace segment of a scale: `ms200`, `ms20-issue-150-review-0to2`. */
+export function mockScaleSegment(scale: MockScale): string {
+  const res = Object.entries(scale.resources ?? {})
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `-${k}-${Array.isArray(v) ? `${v[0]}to${v[1]}` : v}`);
+  return `ms${scale.items ?? SEED_ITEMS}${res.join('')}`;
+}
+
+/** The scale a namespace name carries (`ms…` segment), or `null` (the default: `SEED_ITEMS` per collection). */
+export function mockScaleOf(namespace: string): MockScale | null {
+  const m = SCALE_SEG_RE.exec(namespace);
+  if (!m) return null;
+  const resources: Record<string, number | [number, number]> = {};
+  const parts = (m[3] ?? '').split('-').slice(1);
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const r = /^(\d+)(?:to(\d+))?$/.exec(parts[i + 1]!)!;
+    resources[parts[i]!] = r[2] !== undefined ? [clampCount(Number(r[1])), clampCount(Number(r[2]))] : clampCount(Number(r[1]));
+  }
+  return { items: clampCount(Number(m[2])), ...(Object.keys(resources).length ? { resources } : {}) };
+}
+
+/** A namespace name carrying a scale (`ms…` segment after the prefix's first two segments, like the data version). */
+export function withMockScale(name: string, scale: MockScale | null | undefined): string {
+  if (!scale) return name;
+  const seg = mockScaleSegment(scale);
+  const parts = name.split(':');
+  return parts.length >= 3 ? [...parts.slice(0, 2), seg, ...parts.slice(2)].join(':') : `${name}:${seg}`;
+}
+
+/**
+ * Items a collection of `resource` seeds under `scale` (`seed`: the collection's seed, picks a count within a range).
+ * Per-resource overrides apply to scoped collections (`/repos/{owner}/{repo}/issues`, `/v1/charges/{charge}/refunds`);
+ * a top-level collection (`/v1/refunds`) has `items`.
+ */
+export function scaledCount(scale: MockScale | null | undefined, resourceName: string, seed: number, scoped = true): number {
+  if (!scale) return SEED_ITEMS;
+  const v = scoped ? scale.resources?.[scaleName(resourceName)] : undefined;
+  if (Array.isArray(v)) return v[0] + (hashSeed(seed, 'count') % (v[1] - v[0] + 1));
+  return v ?? scale.items ?? SEED_ITEMS;
+}
+
 export interface GenCtx {
   faker: Faker;
   defs: Obj;

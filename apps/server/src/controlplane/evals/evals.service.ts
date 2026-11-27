@@ -1,9 +1,11 @@
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { Kysely, Selectable } from 'kysely';
-import { applyOverlayPatch, withMockDataVersion, type MockDataVersion, type MockNs } from '@neurouter/compiler';
+import { applyOverlayPatch, mockScaleSegment, sha256Hex, withMockDataVersion, withMockScale, type MockDataVersion, type MockNs, type MockScale } from '@neurouter/compiler';
 import {
   calibrateTask,
   computeGroundTruth,
+  hasScriptReference,
+  taskMockScale,
   createMcpHttpClient,
   generateSuite,
   outcomeFromResult,
@@ -115,6 +117,23 @@ interface SuiteMeta {
   mockDataVersion?: number;
   calibration?: SuiteCalibration | null;
   pending?: boolean;
+}
+
+/** API key scopes of a reference session: script references (long-workflow tasks) also need `code:run`. */
+function refScopes(tasks: EvalTask[]): Array<'tools:read' | 'tools:write' | 'code:run'> {
+  return tasks.some(hasScriptReference) ? ['tools:read', 'tools:write', 'code:run'] : ['tools:read', 'tools:write'];
+}
+
+/**
+ * An attempt's mock namespace: `eval:<runId>:[dv1:][ms…:]<attempt key>` (the name stays within the 150
+ * characters the data plane accepts; a scaled task's long key keeps a hash of the rest, so attempts stay apart).
+ */
+export function attemptNamespace(runId: string, attemptKey: string, dv: MockDataVersion, scale: MockScale | null): string {
+  const key = attemptKey.replace(/[^A-Za-z0-9:_-]/g, '_');
+  if (!scale) return withMockDataVersion(`eval:${runId}:${key.slice(0, 140)}`, dv);
+  const room = Math.max(24, 140 - mockScaleSegment(scale).length - 1);
+  const short = key.length <= room ? key : `${key.slice(0, room - 13)}_${sha256Hex(key).slice(0, 12)}`;
+  return withMockScale(withMockDataVersion(`eval:${runId}:${short}`, dv), scale);
 }
 
 const gz = (v: unknown) => gzipSync(Buffer.from(JSON.stringify(v), 'utf8'));
@@ -241,12 +260,13 @@ export class EvalsService {
    * namespace (the key's own, G13) with the suite's data version, over MCP with tool exposure, so the
    * reference outcome goes through the same pipeline (shaping, contract) as the agent's calls.
    */
-  private refOpener(server: { slug: string }, env: { id: string; slug: string; tenant_id: string }, key: { id: string; token: string }, dv: MockDataVersion, build?: string | null): () => Promise<RefSession> {
+  private refOpener(server: { slug: string }, env: { id: string; slug: string; tenant_id: string }, key: { id: string; token: string }, dv: MockDataVersion, build?: string | null, opts: { scale?: MockScale | null; code?: boolean } = {}): () => Promise<RefSession> {
     return async () => {
-      const name = withMockDataVersion(`gen:${key.id}:gt-${newId()}`, dv);
+      const name = withMockScale(withMockDataVersion(`gen:${key.id}:gt-${newId()}`, dv), opts.scale);
       const ns: MockNs = { tenantId: env.tenant_id, environmentId: env.id, name };
-      // full objects (B7): ground-truth paths may name fields the overlay's default projection leaves out
-      const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: 'tools', [HEADER_REFERENCE]: '1' };
+      // full objects (B7): ground-truth paths may name fields the overlay's default projection leaves out;
+      // a script reference (long-workflow task) runs with code-mode exposure
+      const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: opts.code ? 'code' : 'tools', [HEADER_REFERENCE]: '1' };
       if (build) headers[HEADER_BUILD] = build;
       const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
       return {
@@ -257,6 +277,11 @@ export class EvalsService {
         },
       };
     };
+  }
+
+  /** A task's ground truth: its reference calls on a fresh namespace with the suite's data version and the task's mock scale. */
+  private taskGroundTruth(server: { slug: string }, env: { id: string; slug: string; tenant_id: string }, key: { id: string; token: string }, dv: MockDataVersion, build?: string | null) {
+    return (task: EvalTask) => computeGroundTruth(task.referenceCalls, this.refOpener(server, env, key, dv, build, { scale: taskMockScale(task), code: hasScriptReference(task) }));
   }
 
   /** Mock data version of a suite: recorded at generation/import; suites from before 0.2.2 use version 1. */
@@ -361,15 +386,15 @@ export class EvalsService {
     const buildId = env.build_id ?? server.latest_build_id;
     if (!buildId) throw AppError.conflict('The server has no build');
     const tasks = resolveTaskTools((await this.suiteTasks(tenantId, suiteId)).map(taskFromRow), await this.d.builds.tools(buildId));
-    const key = await this.evalKey(tenantId, serverId, env.id, ['tools:read', 'tools:write'], 'eval calibration');
+    const key = await this.evalKey(tenantId, serverId, env.id, refScopes(tasks), 'eval calibration');
     const openKeys = new Set<string>();
     try {
-      const open = this.refOpener(server, env, key, meta.mockDataVersion);
+      const groundTruthOf = this.taskGroundTruth(server, env, key, meta.mockDataVersion);
       const results: TaskCalibration[] = [];
       const gts = new Map<string, GroundTruth>();
       for (const t of tasks) {
         try {
-          const gt = await computeGroundTruth(t.referenceCalls, open);
+          const gt = await groundTruthOf(t);
           gts.set(t.key, gt);
           results.push(await calibrateTask(t, gt));
         } catch (err) {
@@ -387,7 +412,7 @@ export class EvalsService {
           repeats: 1,
           judgeModel: opts.calibrateWith,
           groundTruth: async (t) => gts.get(t.key) ?? null,
-          openSession: async (ctx) => this.attemptSession(tenantId, serverId, server, env, ctx.mode, (k) => withMockDataVersion(`gen:${k}:cal-${newId()}`, meta.mockDataVersion), null, openKeys),
+          openSession: async (ctx) => this.attemptSession(tenantId, serverId, server, env, ctx.mode, (k) => withMockScale(withMockDataVersion(`gen:${k}:cal-${newId()}`, meta.mockDataVersion), taskMockScale(ctx.task)), null, openKeys),
         });
         for (const r of out.results) {
           if (r.passed || r.failureCause === 'provider_refusal') continue;
@@ -421,11 +446,10 @@ export class EvalsService {
     const buildId = env.build_id ?? server.latest_build_id;
     if (!buildId) throw AppError.conflict('The server has no build');
     const buildTools = await this.d.builds.tools(buildId);
-    const key = await this.evalKey(tenantId, serverId, env.id, ['tools:read', 'tools:write'], 'eval reference runner');
-    const open = this.refOpener(server, env, key, dv);
+    const key = await this.evalKey(tenantId, serverId, env.id, ['tools:read', 'tools:write', 'code:run'], 'eval reference runner');
     return {
       resolve: (tasks: EvalTask[]) => resolveTaskTools(tasks, buildTools),
-      groundTruth: (task: EvalTask) => computeGroundTruth(task.referenceCalls, open),
+      groundTruth: this.taskGroundTruth(server, env, key, dv),
       tools: buildTools.map((t) => ({ name: t.name, key: t.key, inputSchema: t.inputSchema, write: t.risk.write, ...(t.binding.type === 'http' ? { method: t.binding.method, path: t.binding.pathTemplate } : {}) })),
       close: () => this.d.keys.revoke(tenantId, key.id, null),
     };
@@ -585,9 +609,9 @@ export class EvalsService {
       const isTemp = (await db.selectFrom('builds').where('tenant_id', '=', tenantId).select('temporary').where('id', '=', run.build_id).executeTakeFirst())?.temporary === 1;
       const pinned = env.build_id;
       // ground truth: each task's reference calls on a fresh namespace with the attempts' seed and data version
-      refKey = await this.evalKey(tenantId, run.server_id, env.id, ['tools:read', 'tools:write'], `eval ${runId.slice(-6)} ground truth`);
+      refKey = await this.evalKey(tenantId, run.server_id, env.id, refScopes(tasks), `eval ${runId.slice(-6)} ground truth`);
       const buildHeader = isTemp || (pinned && pinned !== run.build_id) ? run.build_id : null;
-      const openRef = this.refOpener(server, env, refKey, meta.mockDataVersion, buildHeader);
+      const groundTruthOf = this.taskGroundTruth(server, env, refKey, meta.mockDataVersion, buildHeader);
       const outcome = await runSuiteDetailed({
         llm,
         tasks,
@@ -598,9 +622,9 @@ export class EvalsService {
         settings: { effort, fallbacks: fallbacks === 'default', ...(opts.transcriptMaxChars !== undefined ? { transcriptMaxChars: opts.transcriptMaxChars } : {}) },
         signal: ac.signal,
         hasResult: (k) => existing.has(k),
-        groundTruth: (task) => computeGroundTruth(task.referenceCalls, openRef),
+        groundTruth: groundTruthOf,
         ...(opts.maxRunTokens ? { maxRunTokens: opts.maxRunTokens } : {}),
-        openSession: async (ctx) => this.attemptSession(tenantId, run.server_id, server, env, ctx.mode, () => withMockDataVersion(`eval:${runId}:${ctx.key.replace(/[^A-Za-z0-9:_-]/g, '_').slice(0, 140)}`, meta.mockDataVersion), buildHeader, openKeys),
+        openSession: async (ctx) => this.attemptSession(tenantId, run.server_id, server, env, ctx.mode, () => attemptNamespace(runId, ctx.key, meta.mockDataVersion, taskMockScale(ctx.task)), buildHeader, openKeys),
         onResult: async (r) => {
           const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
           u.inputTokens += r.inputTokens;

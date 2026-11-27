@@ -165,6 +165,27 @@ The mock is deterministic per namespace seed and **data version**:
 - **Data version 1**: the 0.2.1 values, kept unchanged for suites frozen on 0.2.1 (their prompts name
   those values). Version-1 suite files (and suites stored before 0.2.2) run on data version 1.
 
+### Mock scale (long-workflow tasks)
+
+By default every collection holds 20 items. A task can ask for more with `seedState.mockScale`; its attempts and its
+ground truth then run on a namespace carrying the scale (an `ms…` segment, like `dv1`):
+
+```json
+"seedState": { "mockScale": { "items": 200, "resources": { "review": [0, 2], "repo": 8 } } }
+```
+
+- `items`: items per collection (0–1000); `resources`: per resource name (`issue`, `refund`), an exact count or a
+  `[min, max]` range drawn per collection, deterministically (some pull requests have no reviews). `mockScale: 200`
+  is short for `{items: 200}`.
+- A scaled namespace seeds each scope of a nested collection separately (the issues of two repositories differ; the
+  scope values are case-insensitive) and caps page sizes at 100 (GitHub `per_page`, Stripe `limit`), so long lists
+  need paging. The first 20 items of a top-level collection are the default ones. Tasks without `mockScale` are
+  unchanged.
+- **Script references.** When ground truth needs a loop over a variable number of items (every page, every item's
+  sub-resource), the reference is one `run_script` call (`arguments.code`) that returns the expected values;
+  assertions name them by path (`ref[0].data.top[*].id`). Its reference session opens with code-mode exposure and,
+  like every reference session, is not rate-limited (ground truth is harness work, not agent traffic).
+
 ## Topic balance
 
 For large APIs the generator samples one topic (tag/resource cluster) per task, weighted by importance:

@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import { collectionFull, collectionKeyOf, collectionSeed, DEFAULT_SEED, itemJson, MOCK_MAX_ITEMS, mockDataVersionOf, SEED_ITEMS, seedItems, type MockNs, type MockResource, type MockScope, type MockStateStore } from '@neurouter/compiler';
+import { collectionFull, collectionKeyOf, collectionSeed, DEFAULT_SEED, itemJson, MOCK_MAX_ITEMS, mockDataVersionOf, mockScaleOf, SEED_ITEMS, seedItemsFor, type MockNs, type MockResource, type MockScope, type MockStateStore } from '@neurouter/compiler';
 import type { MainDB } from '../../kernel/db/schema.js';
 import { parseJsonColumn } from '../../kernel/lib/json.js';
 
@@ -67,7 +67,7 @@ export class DbMockStateStore implements MockStateStore {
         .onConflict((oc) => oc.columns(['tenant_id', 'environment_id', 'namespace']).doNothing())
         .execute();
       const nsRow = await trx.selectFrom('mock_namespaces').select('seed').where('tenant_id', '=', ns.tenantId).where('environment_id', '=', ns.environmentId).where('namespace', '=', ns.name).executeTakeFirstOrThrow();
-      const items = seedItems(r, scope, Number(nsRow.seed), mockDataVersionOf(ns.name)).map((it) => ({ it, ...itemJson(r, it) }));
+      const items = seedItemsFor(r, scope, Number(nsRow.seed), ns.name).map((it) => ({ it, ...itemJson(r, it) }));
       // only the inserter seeds; a concurrent first reader waits on the PK (PG) or the writer lock (SQLite)
       const inserted = await trx
         .insertInto('mock_collections')
@@ -76,8 +76,8 @@ export class DbMockStateStore implements MockStateStore {
           environment_id: ns.environmentId,
           namespace: ns.name,
           collection_key: key,
-          seed: collectionSeed(r, Number(nsRow.seed), mockDataVersionOf(ns.name)),
-          next_id: SEED_ITEMS + 1,
+          seed: collectionSeed(r, Number(nsRow.seed), mockDataVersionOf(ns.name), mockScaleOf(ns.name), scope),
+          next_id: Math.max(SEED_ITEMS, items.length) + 1,
           item_count: items.length,
           bytes: items.reduce((n, x) => n + x.bytes, 0),
           created_at: now,

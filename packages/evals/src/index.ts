@@ -19,3 +19,4 @@ export * from './budget.js';
 export * from './calibrate.js';
 export * from './migrate.js';
 export * from './regrade.js';
+export * from './mockscale.js';

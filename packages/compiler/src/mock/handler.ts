@@ -4,7 +4,7 @@
  */
 import type { JsonSchema } from '@neurouter/shared';
 import { isObj, type Obj } from '../util.js';
-import { generateValue, hashSeed, mockDataVersionOf, seededFaker, type MockDataVersion } from './generate.js';
+import { generateValue, hashSeed, MOCK_SCALE_PAGE_MAX, mockDataVersionOf, mockScaleOf, seededFaker, type MockDataVersion } from './generate.js';
 import { handleGraphqlMock } from './graphql.js';
 import type { MockModel, MockOperation, MockResource, OpenApiMockModel } from './model.js';
 import { asStateStore, DEFAULT_SEED, MockLimitError, newItem, toMockNs, type MockNs, type MockStateStore, type MockStore } from './store.js';
@@ -282,7 +282,8 @@ async function dispatch(model: OpenApiMockModel, store: MockStateStore, ns: Mock
       const total = items.length;
       const p = op.paging;
       const paged = p.limit || p.page || p.offset || p.cursor || p.startingAfter;
-      const maxLimit = Math.min(1000, p.maxLimit ?? 1000);
+      // a scaled namespace caps page sizes like the real APIs (100), so long lists need paging
+      const maxLimit = Math.min(mockScaleOf(ns.name) ? MOCK_SCALE_PAGE_MAX : 1000, p.maxLimit ?? 1000);
       const limit = Math.max(1, Math.min(maxLimit, Number(firstQuery(query, p.limit) ?? (paged ? (p.defaultLimit ?? 30) : total || 1)) || (p.defaultLimit ?? 30)));
       let offset = 0;
       let end: number | null = null;

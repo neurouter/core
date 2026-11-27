@@ -9,7 +9,7 @@
  */
 import type { JsonSchema } from '@neurouter/shared';
 import { isObj, sha256Hex, type Obj } from '../util.js';
-import { generateValue, hashSeed, MOCK_DATA_VERSION, mockDataVersionOf, SEED_ITEMS, seededFaker, type MockDataVersion } from './generate.js';
+import { generateValue, hashSeed, MOCK_DATA_VERSION, mockDataVersionOf, mockScaleOf, scaledCount, SEED_ITEMS, seededFaker, type MockDataVersion, type MockScale } from './generate.js';
 import type { MockResource, OpenApiMockModel } from './model.js';
 
 export { SEED_ITEMS };
@@ -104,16 +104,48 @@ export function toMockNs(ns: MockNs | string): MockNs {
  * data version 2 a nested collection of a top-level resource's objects uses that resource's seed
  * (`seedKey`), so `refund_1` listed under a charge is the `refund_1` that `GET /v1/refunds/refund_1` returns.
  */
-export function collectionSeed(r: MockResource, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION): number {
-  return hashSeed(nsSeed, dv >= 2 && r.seedKey ? r.seedKey : r.key);
+export function collectionSeed(r: MockResource, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION, scale?: MockScale | null, scope?: MockScope): number {
+  const base = hashSeed(nsSeed, dv >= 2 && r.seedKey ? r.seedKey : r.key);
+  // a scaled namespace seeds each scope of a nested collection on its own (scope values case-insensitive);
+  // a collection that shares a top-level resource's objects (`seedKey`) keeps sharing them
+  if (!scale || !r.scopeParams.length || (dv >= 2 && r.seedKey) || !scope) return base;
+  return hashSeed(base, ...r.scopeParams.map((p) => String(scope[p] ?? '').toLowerCase()));
 }
 
-/** The 20 seed items of a collection (exactly what both stores hold before any write). `dv`: mock data version. */
-export function seedItems(r: MockResource, scope: MockScope, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION): Obj[] {
-  const seed = collectionSeed(r, nsSeed, dv);
+/**
+ * The seed items of a collection (exactly what both stores hold before any write): `SEED_ITEMS` (20), or
+ * the count a scaled namespace asks for (`scale`, see `MockScale`). `dv`: mock data version.
+ */
+export function seedItems(r: MockResource, scope: MockScope, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION, scale?: MockScale | null): Obj[] {
+  const seed = collectionSeed(r, nsSeed, dv, scale, scope);
+  const scoped = r.scopeParams.length > 0;
   const items: Obj[] = [];
-  for (let i = 1; i <= SEED_ITEMS; i++) items.push(newItem(r, hashSeed(seed, i), i, scope, dv));
+  if (scale && scoped && dv >= 2 && r.seedKey) {
+    // a scaled nested collection of a top-level resource's objects (`/v1/charges/{charge}/refunds`) lists a
+    // per-scope subset of the canonical objects (ids 1..items), so two charges list different refunds
+    const pick = hashSeed(seed, ...r.scopeParams.map((p) => String(scope[p] ?? '').toLowerCase()));
+    for (const i of sampleIndices(scale.items ?? SEED_ITEMS, scaledCount(scale, r.name, pick, true), pick)) items.push(newItem(r, hashSeed(seed, i), i, scope, dv));
+    return items;
+  }
+  const n = scaledCount(scale, r.name, seed, scoped);
+  for (let i = 1; i <= n; i++) items.push(newItem(r, hashSeed(seed, i), i, scope, dv));
   return items;
+}
+
+/** `k` distinct indices of 1..n (ascending), deterministic per seed (partial Fisher-Yates). */
+function sampleIndices(n: number, k: number, seed: number): number[] {
+  const pool = Array.from({ length: n }, (_, i) => i + 1);
+  const m = Math.min(k, n);
+  for (let i = 0; i < m; i++) {
+    const j = i + (hashSeed(seed, 'pick', i) % (n - i));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  return pool.slice(0, m).sort((a, b) => a - b);
+}
+
+/** The seed items of a collection in a namespace (its data version and scale come from the name). */
+export function seedItemsFor(r: MockResource, scope: MockScope, nsSeed: number, namespace: string): Obj[] {
+  return seedItems(r, scope, nsSeed, mockDataVersionOf(namespace), mockScaleOf(namespace));
 }
 
 export interface Collection {
@@ -187,7 +219,8 @@ export class MockStore {
     const key = `${resource.key}|${scopeKeyOf(resource, scope)}`;
     let c = s.collections.get(key);
     if (!c) {
-      c = { items: seedItems(resource, scope, s.seed, mockDataVersionOf(namespace)), nextId: SEED_ITEMS + 1 };
+      const items = seedItemsFor(resource, scope, s.seed, namespace);
+      c = { items, nextId: Math.max(SEED_ITEMS, items.length) + 1 };
       s.collections.set(key, c);
     }
     return c;
