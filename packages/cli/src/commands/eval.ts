@@ -270,7 +270,7 @@ async function regrade(s: RunningServer['services'], tenant: string, serverId: s
     console.log(`${renderRegradeCategories(categories)}\n`);
     console.log(`re-graded ${sum.attempts} attempts: pass rate ${pct(sum.oldPassRate)} → ${pct(sum.newPassRate)} (${sum.flipsUp} fail→pass, ${sum.flipsDown} pass→fail, ${sum.excluded} provider refusals excluded, ${sum.overBudget} over budget, ${sum.matchedByJudge} matched by judge)`);
     const u = out.judgeUsage;
-    console.log(`judge usage${o.judgeModel ? ` (${o.judgeModel})` : ''}: ${u.calls} calls, ${u.inputTokens + u.cacheReadTokens + u.outputTokens} tokens (cap ${maxJudgeTokens})`);
+    console.log(`judge usage: ${u.calls} calls, ${u.inputTokens + u.cacheReadTokens + u.outputTokens} tokens (cap ${maxJudgeTokens})${o.judgeModel ? `; judge ${o.judgeModel}` : ''}`);
     if (out.skippedTasks.length) console.log(`not re-graded (task not in the suite or disabled): ${out.skippedTasks.join(', ')}`);
     if (o.out) writeFileSync(o.out, JSON.stringify({ contract, judgeModel: o.judgeModel ?? null, summary: sum, categories, judgeUsage: u, skippedTasks: out.skippedTasks, rows: out.rows }, null, 2));
   } finally {
