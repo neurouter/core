@@ -23,7 +23,9 @@ export interface RunSettings {
 
 /**
  * Per-attempt limits. `maxTotalTokens` counts every agent token: uncached input (cache writes included) + cached input
- * read + output (0.3.3, L1; before, cached input was not counted). `wallMs` is enforced during LLM and tool calls: the
+ * read + output (0.3.3, L1; before, cached input was not counted). It is predictive (0.3.4): an LLM call is not made
+ * when its estimated input plus its max output could take the attempt more than 2% over it (`over_budget`). `wallMs`
+ * is enforced during LLM and tool calls: the
  * call in flight is aborted at the deadline and the attempt ends `timeout` (L2); a final answer received before the
  * deadline ends `end_turn`. Suites and tasks can override them (`limits`).
  */
@@ -33,6 +35,9 @@ export interface RunLimits {
   maxTotalTokens: number;
   wallMs: number;
 }
+
+/** The predictive token limit lets an attempt end at most 2% over `maxTotalTokens` (estimates are approximate). */
+const TOKEN_LIMIT_TOLERANCE = 1.02;
 
 export const DEFAULT_LIMITS: RunLimits = { maxTurns: 25, maxToolCalls: 60, maxTotalTokens: 200_000, wallMs: 5 * 60_000 };
 
@@ -124,16 +129,28 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
   const messages: LlmMessageParam[] = [{ role: 'user', content: opts.prompt }];
   const system = agentSystemPrompt(opts.mcp.instructions);
   let totalCalls = 0;
+  // predictive token limit: the next call's input ≈ the previous call's input + what was added since (4 chars/token)
+  const maxOutput = settings.maxTokens ?? 16000;
+  const fixedChars = JSON.stringify(system).length + JSON.stringify(tools).length;
+  let lastInput = 0;
+  let lastChars = 0;
 
   for (;;) {
     if (opts.signal?.aborted) return finish('cancelled', 'cancelled');
     if (out.turns >= limits.maxTurns) return finish('max_turns');
     if (now() - started > limits.wallMs) return finish('timeout');
     if (timedOut()) return finish('timeout', wallError());
-    if (out.inputTokens + out.cacheReadTokens + out.outputTokens > limits.maxTotalTokens) return finish('over_budget');
+    const spent = out.inputTokens + out.cacheReadTokens + out.outputTokens;
+    if (spent > limits.maxTotalTokens) return finish('over_budget');
+    const chars = JSON.stringify(messages).length;
+    const nextInput = out.turns === 0 ? Math.ceil((fixedChars + chars) / 4) : lastInput + Math.ceil((chars - lastChars) / 4);
+    // the call's max output is reserved, at most a tenth of the limit (a small limit still leaves room to work)
+    const reserve = Math.min(maxOutput, Math.round(limits.maxTotalTokens / 10));
+    if (spent + nextInput + reserve > limits.maxTotalTokens * TOKEN_LIMIT_TOLERANCE) return finish('over_budget');
+    lastChars = chars;
     const req: LlmRequest = {
       model: opts.model,
-      max_tokens: settings.maxTokens ?? 16000,
+      max_tokens: maxOutput,
       system,
       messages,
       tools,
@@ -160,6 +177,7 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     out.outputTokens += res.usage.output_tokens ?? 0;
     out.cacheReadTokens += res.usage.cache_read_input_tokens ?? 0;
     out.cacheWriteTokens += res.usage.cache_creation_input_tokens ?? 0;
+    lastInput = (res.usage.input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0) + (res.usage.cache_read_input_tokens ?? 0);
     out.servedByModel = res.model;
     if (fallbackUsed(res)) {
       out.fallbackUsed = true;

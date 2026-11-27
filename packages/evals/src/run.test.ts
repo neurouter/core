@@ -79,8 +79,30 @@ describe('runAttempt', () => {
     const cachedTurn = () => ({ ...llmResponse([use(`c${Math.random()}`, 'list_pets', {})], { input: 1_000, output: 100 }), usage: { input_tokens: 1_000, output_tokens: 100, cache_read_input_tokens: 40_000 } });
     const r = await runAttempt({ llm: new ScriptedLlmClient([], cachedTurn), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', limits: { maxTotalTokens: 200_000 } });
     expect(r.endReason).toBe('over_budget');
-    expect(r.turns).toBe(5);
-    expect(r).toMatchObject({ inputTokens: 5_000, cacheReadTokens: 200_000, outputTokens: 500 });
+    // 0.3.4: the limit is predictive; a 5th call (41k context + output on 164,400 spent) could cross 200k, so it is not made
+    expect(r.turns).toBe(4);
+    expect(r).toMatchObject({ inputTokens: 4_000, cacheReadTokens: 160_000, outputTokens: 400 });
+  });
+
+  it('0.3.4: the token limit is predictive: no LLM call that could cross it (stripe-n200-tool ended at 205,933 of 200,000)', async () => {
+    // the 0.3.3 probe's attempt: 11 turns, the context growing to ~25k, the last call taking it from ~181k to 205,933.
+    // Here: turn k reads 12,205 + 1,260·(k−1) context tokens (mostly cached) and writes 219; turn 11 answers.
+    const ctxOf = (k: number) => 12_205 + 1_260 * (k - 1);
+    const turn = (_req: LlmRequest, i: number) => {
+      const k = i + 1;
+      const r = k < 11 ? llmResponse([use(`p${k}`, 'list_pets', {})]) : llmResponse([text('USD has the largest failed total.')]);
+      return { ...r, usage: { input_tokens: 650, cache_read_input_tokens: ctxOf(k) - 650, output_tokens: 219 } };
+    };
+    const total = (r: { inputTokens: number; cacheReadTokens: number; outputTokens: number }) => r.inputTokens + r.cacheReadTokens + r.outputTokens;
+    // without a limit in reach it answers at turn 11, over 200k
+    const free = await runAttempt({ llm: new ScriptedLlmClient([], turn), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', limits: { maxTotalTokens: 1_000_000 } });
+    expect(free).toMatchObject({ endReason: 'end_turn', turns: 11 });
+    expect(total(free)).toBeGreaterThan(200_000);
+    // with 200k: the 11th call (context ~24k + up to 16k output on ~181k spent) could cross it, so it is not made
+    const capped = await runAttempt({ llm: new ScriptedLlmClient([], turn), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', limits: { maxTotalTokens: 200_000 } });
+    expect(capped.endReason).toBe('over_budget');
+    expect(capped.turns).toBe(10);
+    expect(total(capped)).toBeLessThanOrEqual(200_000);
   });
 
   it('L2: the wall limit aborts an LLM call in flight (timeout at the deadline, not after a 10-minute stall)', async () => {

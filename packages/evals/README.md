@@ -236,6 +236,11 @@ of wall time. Hitting a limit ends the attempt with the end reason `max_turns`, 
 - **Tokens (`maxTotalTokens`)** count uncached input (cache writes included), cached input and output (0.3.3).
   Before 0.3.3, cached input was not counted, so a long tool-mode attempt could use 277k tokens under a "200k"
   limit. Reports still show uncached and cached input separately.
+- **The token limit is predictive** (0.3.4). Before each LLM call the attempt estimates that call's input (the
+  previous call's input plus what was added since, at 4 characters per token) and adds the call's max output
+  (`max_tokens`, 16,000). If that could take the attempt more than 2% over `maxTotalTokens`, the call is not made
+  and the attempt ends `over_budget`. Before, the limit was checked only after each call, so the last call could
+  overshoot by a whole context (205,933 tokens under a 200,000 limit in the long-workflow probe).
 - **Wall time (`wallMs`)** is enforced during LLM and tool calls (0.3.3). At the deadline the call in flight is
   aborted, and the attempt ends `timeout` with no final answer. A final answer that arrived before the deadline
   ends `end_turn`, however long the attempt took to finish around it.
