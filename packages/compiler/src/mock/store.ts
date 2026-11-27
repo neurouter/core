@@ -118,10 +118,29 @@ export function collectionSeed(r: MockResource, nsSeed: number, dv: MockDataVers
  */
 export function seedItems(r: MockResource, scope: MockScope, nsSeed: number, dv: MockDataVersion = MOCK_DATA_VERSION, scale?: MockScale | null): Obj[] {
   const seed = collectionSeed(r, nsSeed, dv, scale, scope);
-  const n = scaledCount(scale, r.name, seed);
+  const scoped = r.scopeParams.length > 0;
   const items: Obj[] = [];
+  if (scale && scoped && dv >= 2 && r.seedKey) {
+    // a scaled nested collection of a top-level resource's objects (`/v1/charges/{charge}/refunds`) lists a
+    // per-scope subset of the canonical objects (ids 1..items), so two charges list different refunds
+    const pick = hashSeed(seed, ...r.scopeParams.map((p) => String(scope[p] ?? '').toLowerCase()));
+    for (const i of sampleIndices(scale.items ?? SEED_ITEMS, scaledCount(scale, r.name, pick, true), pick)) items.push(newItem(r, hashSeed(seed, i), i, scope, dv));
+    return items;
+  }
+  const n = scaledCount(scale, r.name, seed, scoped);
   for (let i = 1; i <= n; i++) items.push(newItem(r, hashSeed(seed, i), i, scope, dv));
   return items;
+}
+
+/** `k` distinct indices of 1..n (ascending), deterministic per seed (partial Fisher-Yates). */
+function sampleIndices(n: number, k: number, seed: number): number[] {
+  const pool = Array.from({ length: n }, (_, i) => i + 1);
+  const m = Math.min(k, n);
+  for (let i = 0; i < m; i++) {
+    const j = i + (hashSeed(seed, 'pick', i) % (n - i));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  return pool.slice(0, m).sort((a, b) => a - b);
 }
 
 /** The seed items of a collection in a namespace (its data version and scale come from the name). */

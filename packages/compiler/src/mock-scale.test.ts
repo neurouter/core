@@ -35,6 +35,17 @@ const SPEC = JSON.stringify({
     '/v1/charges/{charge}/refunds/{refund}': { get: { operationId: 'GetChargeRefund', parameters: [{ name: 'charge', in: 'path', required: true, schema: { type: 'string' } }, { name: 'refund', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: { $ref: '#/components/schemas/refund' } } } } } } },
     '/repos/{owner}/{repo}/pulls/{pull_number}': { get: { operationId: 'GetPull', parameters: [{ name: 'owner', in: 'path', required: true, schema: { type: 'string' } }, { name: 'repo', in: 'path', required: true, schema: { type: 'string' } }, { name: 'pull_number', in: 'path', required: true, schema: { type: 'integer' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: { $ref: '#/components/schemas/pull' } } } } } } },
     '/items/{id}': { get: { operationId: 'GetItem', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: { $ref: '#/components/schemas/item' } } } } } } },
+    '/v1/refunds': {
+      get: {
+        operationId: 'GetRefunds',
+        parameters: [
+          { name: 'limit', in: 'query', schema: { type: 'integer' } },
+          { name: 'starting_after', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: { '200': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/refund' } }, has_more: { type: 'boolean' } } } } } } },
+      },
+    },
+    '/v1/refunds/{refund}': { get: { operationId: 'GetRefund', parameters: [{ name: 'refund', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: { $ref: '#/components/schemas/refund' } } } } } } },
     '/repos/{owner}/{repo}/pulls': {
       get: {
         operationId: 'ListPulls',
@@ -192,7 +203,8 @@ describe('mock scale (long-workflow evals)', () => {
   });
 
   it('nested collections scale too: per-resource counts and ranges, a separate seed per scope (case-insensitive)', async () => {
-    const { get } = await setup();
+    const { m, get } = await setup();
+    expect(m.resources['/v1/charges/{charge}/refunds']?.seedKey).toBe('/v1/refunds');
     const ns = withMockScale('gen:k', { items: 200, resources: { refund: [1, 4], review: [0, 2] } });
     const charges = await stripeAll(get, ns, '/v1/charges');
     const counts = [];
@@ -203,9 +215,15 @@ describe('mock scale (long-workflow evals)', () => {
     }
     expect(Math.min(...counts)).toBe(1);
     expect(Math.max(...counts)).toBe(4);
+    // linked to /v1/refunds: each charge lists its own subset of the canonical refunds (same state as retrieve);
+    // the top-level collection keeps `items` (overrides apply to scoped collections)
+    expect(await stripeAll(get, ns, '/v1/refunds')).toHaveLength(200);
+    const one = (await get(ns, '/v1/charges/charge_1/refunds')).body.data;
+    const canon = (await get(ns, `/v1/refunds/${one[0].id}`)).body;
+    expect(canon.amount).toBe(one[0].amount);
     const a = (await get(ns, '/v1/charges/charge_1/refunds')).body.data;
     const b = (await get(ns, '/v1/charges/charge_2/refunds')).body.data;
-    expect(a.map((r: { amount: number }) => r.amount)).not.toEqual(b.map((r: { amount: number }) => r.amount));
+    expect(a.map((r: { id: string }) => r.id)).not.toEqual(b.map((r: { id: string }) => r.id));
     const reviews = [];
     for (let n = 1; n <= 30; n++) reviews.push((await get(ns, `/repos/octocat/Hello-World/pulls/${n}/reviews`)).body.length);
     expect(new Set(reviews)).toEqual(new Set([0, 1, 2]));

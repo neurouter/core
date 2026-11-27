@@ -59,11 +59,12 @@ export function withMockDataVersion(name: string, dv: MockDataVersion): string {
 
 /**
  * Mock scale (long-workflow evals): how many items a scaled namespace seeds per collection. `items` is the
- * default for every collection (default `SEED_ITEMS`); `resources` overrides it per resource name (`issue`,
- * `refund`; `-` and `.` read as `_`), as an exact count or a `[min, max]` range drawn per collection
+ * default for every collection (default `SEED_ITEMS`); `resources` overrides it for scoped collections by resource
+ * name (`issue`, `refund`; `-` and `.` read as `_`), as an exact count or a `[min, max]` range drawn per collection
  * (deterministic per seed and scope), so nested collections can vary in size (some pull requests without
  * reviews). A scaled namespace also seeds each scope of a nested collection separately (the issues of two
- * repositories differ) and caps page sizes at 100, as the real APIs do.
+ * repositories differ; a nested list of a top-level resource's objects lists a per-scope subset of them) and caps
+ * page sizes at 100, as the real APIs do.
  */
 export interface MockScale {
   items?: number;
@@ -134,10 +135,14 @@ export function withMockScale(name: string, scale: MockScale | null | undefined)
   return parts.length >= 3 ? [...parts.slice(0, 2), seg, ...parts.slice(2)].join(':') : `${name}:${seg}`;
 }
 
-/** Items a collection of `resource` seeds under `scale` (`seed`: the collection's seed, picks a count within a range). */
-export function scaledCount(scale: MockScale | null | undefined, resourceName: string, seed: number): number {
+/**
+ * Items a collection of `resource` seeds under `scale` (`seed`: the collection's seed, picks a count within a range).
+ * Per-resource overrides apply to scoped collections (`/repos/{owner}/{repo}/issues`, `/v1/charges/{charge}/refunds`);
+ * a top-level collection (`/v1/refunds`) has `items`.
+ */
+export function scaledCount(scale: MockScale | null | undefined, resourceName: string, seed: number, scoped = true): number {
   if (!scale) return SEED_ITEMS;
-  const v = scale.resources?.[scaleName(resourceName)];
+  const v = scoped ? scale.resources?.[scaleName(resourceName)] : undefined;
   if (Array.isArray(v)) return v[0] + (hashSeed(seed, 'count') % (v[1] - v[0] + 1));
   return v ?? scale.items ?? SEED_ITEMS;
 }
