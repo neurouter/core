@@ -25,6 +25,7 @@ import {
   STUB_RUN_MODEL,
   suggest,
   type EvalTask,
+  type EvalLimitsOverride,
   type GenTool,
   type LlmClient,
   type ObservedCall,
@@ -115,6 +116,8 @@ export interface CreateRunInput {
 /** The suite's generator JSON fields this service reads (mock data version, calibration). */
 interface SuiteMeta {
   mockDataVersion?: number;
+  /** Per-attempt limit overrides for every task of the suite (0.3.3; a task's own win). */
+  limits?: EvalLimitsOverride | null;
   calibration?: SuiteCalibration | null;
   pending?: boolean;
 }
@@ -158,6 +161,7 @@ export function taskFromRow(r: EvalTaskRowDb): EvalTask {
     assertions: parseJsonColumn(r.assertions) ?? [],
     referenceCalls: parseJsonColumn(r.reference_calls) ?? [],
     seedState: parseJsonColumn(r.seed_state),
+    ...(r.limits ? { limits: parseJsonColumn(r.limits) } : {}),
     tags: parseJsonColumn(r.tags) ?? [],
     enabled: r.enabled === 1,
   };
@@ -342,7 +346,7 @@ export class EvalsService {
       for (const t of tasks)
         await trx
           .insertInto('eval_tasks')
-          .values({ id: newId(), tenant_id: tenantId, suite_id: id, key: t.key, category: t.category, prompt: t.prompt, rubric: t.rubric ?? '', assertions: toJsonColumn(t.assertions), reference_calls: toJsonColumn(t.referenceCalls ?? []), seed_state: t.seedState ? toJsonColumn(t.seedState) : null, tags: toJsonColumn(t.tags ?? []), enabled: t.enabled === false ? 0 : 1, source: 'generated' })
+          .values({ id: newId(), tenant_id: tenantId, suite_id: id, key: t.key, category: t.category, prompt: t.prompt, rubric: t.rubric ?? '', assertions: toJsonColumn(t.assertions), reference_calls: toJsonColumn(t.referenceCalls ?? []), seed_state: t.seedState ? toJsonColumn(t.seedState) : null, limits: t.limits && Object.keys(t.limits).length ? toJsonColumn(t.limits) : null, tags: toJsonColumn(t.tags ?? []), enabled: t.enabled === false ? 0 : 1, source: 'generated' })
           .execute();
     });
     return (await this.d.db.selectFrom('eval_suites').selectAll().where('id', '=', id).where('tenant_id', '=', tenantId).executeTakeFirst())!;
@@ -354,7 +358,7 @@ export class EvalsService {
       for (const t of tasks)
         await trx
           .insertInto('eval_tasks')
-          .values({ id: newId(), tenant_id: tenantId, suite_id: suiteId, key: t.key, category: t.category, prompt: t.prompt, rubric: t.rubric ?? '', assertions: toJsonColumn(t.assertions), reference_calls: toJsonColumn(t.referenceCalls ?? []), seed_state: t.seedState ? toJsonColumn(t.seedState) : null, tags: toJsonColumn(t.tags ?? []), enabled: t.enabled === false ? 0 : 1, source: 'generated' })
+          .values({ id: newId(), tenant_id: tenantId, suite_id: suiteId, key: t.key, category: t.category, prompt: t.prompt, rubric: t.rubric ?? '', assertions: toJsonColumn(t.assertions), reference_calls: toJsonColumn(t.referenceCalls ?? []), seed_state: t.seedState ? toJsonColumn(t.seedState) : null, limits: t.limits && Object.keys(t.limits).length ? toJsonColumn(t.limits) : null, tags: toJsonColumn(t.tags ?? []), enabled: t.enabled === false ? 0 : 1, source: 'generated' })
           .execute();
       await trx.updateTable('eval_suites').set({ generated_from_build_id: buildId, generator: toJsonColumn(generator), task_count: tasks.length }).where('id', '=', suiteId).where('tenant_id', '=', tenantId).execute();
     });
@@ -624,6 +628,7 @@ export class EvalsService {
         hasResult: (k) => existing.has(k),
         groundTruth: groundTruthOf,
         ...(opts.maxRunTokens ? { maxRunTokens: opts.maxRunTokens } : {}),
+        ...(meta.limits ? { limits: meta.limits } : {}),
         openSession: async (ctx) => this.attemptSession(tenantId, run.server_id, server, env, ctx.mode, () => attemptNamespace(runId, ctx.key, meta.mockDataVersion, taskMockScale(ctx.task)), buildHeader, openKeys),
         onResult: async (r) => {
           const u = (usage[r.model] ??= { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
@@ -660,7 +665,7 @@ export class EvalsService {
               served_by_model: r.servedByModel,
               fallback_used: r.fallbackUsed ? 1 : 0,
               task_id_neurouter: r.neurouterTaskId,
-              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes, framingPassed: r.framingPassed, judgeVotes: r.judgeVotes ?? null }),
+              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes, framingPassed: r.framingPassed, judgeVotes: r.judgeVotes ?? null, limits: r.limits ?? null }),
               created_at: this.d.clock.now(),
             })
             .execute();
@@ -714,7 +719,7 @@ export class EvalsService {
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
     const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.cache_read_tokens', 'r.cache_write_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
-      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number; framingPassed?: boolean | null; judgeVotes?: TaskRunResult['judgeVotes'] } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
+      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number; framingPassed?: boolean | null; judgeVotes?: TaskRunResult['judgeVotes']; limits?: TaskRunResult['limits'] | null } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
       return {
         key: `${r.key}|${r.model}|${r.mode}|${r.attempt}`,
         taskKey: r.key,
@@ -748,6 +753,7 @@ export class EvalsService {
         ...(tr?.judgeUsage ? { judgeUsage: tr.judgeUsage } : {}),
         ...(tr?.toolsListBytes !== undefined ? { toolsListBytes: tr.toolsListBytes } : {}),
         ...(tr?.judgeVotes ? { judgeVotes: tr.judgeVotes } : {}),
+        ...(tr?.limits ? { limits: tr.limits } : {}),
       } as TaskRunResult;
     });
   }

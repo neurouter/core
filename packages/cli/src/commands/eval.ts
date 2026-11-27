@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   buildReport,
+  effectiveLimits,
   migrateSuite,
   regradeByCategory,
   regradeSummary,
@@ -17,8 +18,19 @@ import {
   type TranscriptEntry,
 } from '@neurouter/evals';
 import { startServer, type RunningServer } from '@neurouter/server';
-import { providerForModel } from '@neurouter/shared';
+import { EvalLimits, providerForModel } from '@neurouter/shared';
 import { readSpec, serverEnv } from './common.js';
+
+/** Suite and task `limits` (0.3.3) must be known limit names with numbers in range; a typo would silently not apply. */
+export function checkSuiteLimits(file: Pick<SuiteFile, 'limits' | 'tasks'>): void {
+  const check = (v: unknown, where: string) => {
+    if (v === undefined || v === null) return;
+    const r = EvalLimits.safeParse(v);
+    if (!r.success) throw new Error(`${where}.limits: ${r.error.issues.map((i) => `${i.path.join('.') || '(object)'} ${i.message}`).join('; ')} (allowed: maxTurns, maxToolCalls, maxTotalTokens, wallMs)`);
+  };
+  check(file.limits, 'suite');
+  for (const t of file.tasks) check(t.limits, `task ${t.key}`);
+}
 
 interface EvalOpts {
   config?: string;
@@ -130,7 +142,8 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     let calibration: SuiteCalibration | null = null;
     if (o.suite && !o.generate) {
       suiteFile = JSON.parse(readFileSync(o.suite, 'utf8')) as SuiteFile;
-      const suite = await s.evals.saveSuite(tenant, serverId, null, suiteFile.tasks, { importedFrom: o.suite, mockDataVersion: suiteDataVersion(suiteFile), ...(suiteFile.calibration ? { calibration: suiteFile.calibration } : {}) }, null, true);
+      checkSuiteLimits(suiteFile);
+      const suite = await s.evals.saveSuite(tenant, serverId, null, suiteFile.tasks, { importedFrom: o.suite, mockDataVersion: suiteDataVersion(suiteFile), ...(suiteFile.calibration ? { calibration: suiteFile.calibration } : {}), ...(suiteFile.limits ? { limits: suiteFile.limits } : {}) }, null, true);
       suiteId = suite.id;
       // calibration gate: each task's reference solution through its own assertions (rejected tasks are not run)
       if (o.calibrate !== false && !o.regrade) {
@@ -208,9 +221,10 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     const runModels = JSON.parse(run.models) as string[];
     // the judge the run used (the same choice the service made): judge usage is filed under it, not the agent model
     const judgeModel = await s.evals.judgeModel(tenant, runModels[0]!);
+    const runLimits = effectiveLimits(s.evals.suiteMeta(await s.evals.suiteOf(tenant, serverId, suiteId)).limits, null);
     const report = buildReport({
       server: { slug, name: slug },
-      run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString(), contract, judgeModel },
+      run: { id: run.id, models: JSON.parse(run.models) as string[], modes, repeats: run.repeats, environment: o.env, buildHash: null, provider: process.env.NEUROUTER_EVAL_LLM === 'stub' || results[0]?.servedByModel === 'stub' ? 'stub' : [...new Set((JSON.parse(run.models) as string[]).map((m) => providerForModel(m) ?? 'unknown'))].join(','), startedAt: new Date(run.started_at ?? run.created_at).toISOString(), endedAt: new Date(run.ended_at ?? Date.now()).toISOString(), contract, judgeModel, limits: runLimits },
       judgeModel,
       score,
       suggestions: suggestions.map((x) => ({ cause: x.cause as never, kind: x.kind, tools: JSON.parse(x.tools) as string[], affectedTaskKeys: (JSON.parse(x.affected_task_ids) as string[]).map((id) => keyById.get(id) ?? id), overlayPatch: (JSON.parse(x.overlay_patch) as { yaml: string }).yaml, overlayOps: [], specPatch: x.spec_patch, rationale: x.rationale, predictedDelta: x.predicted_delta })),

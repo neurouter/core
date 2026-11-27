@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildProgram } from './main.js';
+import { checkSuiteLimits } from './commands/eval.js';
 
 const ROOT = resolve(import.meta.dirname, '../../..');
 
@@ -186,4 +187,13 @@ describe('neurouter eval (in-process, stub provider)', () => {
     expect(existsSync(join(dir, 'r.json'))).toBe(false);
     expect(existsSync(join(dir, 's.json'))).toBe(false);
   }, 60_000);
+});
+
+describe('suite limits (0.3.3)', () => {
+  it('accepts known limits and rejects typos and out-of-range values', () => {
+    const t = (limits?: unknown) => ({ key: 't', category: 'single' as const, prompt: '', rubric: '', assertions: [], referenceCalls: [], tags: [], enabled: true, ...(limits ? { limits: limits as never } : {}) });
+    expect(() => checkSuiteLimits({ limits: { maxToolCalls: 150, maxTurns: 40 }, tasks: [t({ wallMs: 600_000 })] })).not.toThrow();
+    expect(() => checkSuiteLimits({ limits: { maxToolCall: 150 } as never, tasks: [] })).toThrow(/suite\.limits/);
+    expect(() => checkSuiteLimits({ tasks: [t({ maxTurns: 0 })] })).toThrow(/task t\.limits: maxTurns/);
+  });
 });

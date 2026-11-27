@@ -143,3 +143,18 @@ describe('0.2.2 scoring rules', () => {
     expect(recommend([cell('tool', 77, 0.72, 76_066), cell('code', 66, 0.33, 15_810)]).mode).toBe('tool');
   });
 });
+
+describe('report: attempt limits (0.3.3)', () => {
+  it('records the run limits and a task override, and says so in Markdown', () => {
+    const lim = { maxTurns: 25, maxToolCalls: 60, maxTotalTokens: 200_000, wallMs: 300_000 };
+    const big = { ...lim, maxTurns: 40, maxToolCalls: 150 };
+    const results = [result({ taskKey: 'a', limits: lim }), result({ key: 'b', taskKey: 'b', limits: big })];
+    const rep = buildReport({ server: { slug: 's', name: 's' }, run: { id: null, models: ['gpt'], modes: ['tool'], repeats: 1, environment: 'mock', buildHash: null, provider: 'openai', startedAt: '', endedAt: '', limits: lim }, score: scoreRun({ tasks: [task({ key: 'a' }), task({ key: 'b' })], results, models: ['gpt'], modes: ['tool'], lintScore: 90 }), suggestions: [], results, prompts: {} });
+    expect(rep.run.limits).toEqual(lim);
+    expect(rep.tasks.find((t) => t.key === 'a')).not.toHaveProperty('limits');
+    expect(rep.tasks.find((t) => t.key === 'b')!.limits).toEqual(big);
+    const md = renderMarkdown(rep);
+    expect(md).toContain('Attempt limits: 25 turns, 60 agent tool calls, 200000 tokens (uncached + cached input + output), 300 s wall');
+    expect(md).toContain('`b`: 40 turns, 150 agent tool calls');
+  });
+});

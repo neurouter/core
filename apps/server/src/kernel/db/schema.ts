@@ -658,6 +658,8 @@ export interface EvalTasksTable {
   tags: Generated<string>;
   enabled: Generated<BoolColumn>;
   source: Generated<'generated' | 'manual'>;
+  /** Per-task attempt limit overrides (JSON; 0013). */
+  limits: string | null;
 }
 
 export interface EvalRunsTable {
@@ -1039,7 +1041,7 @@ export const MAIN_TABLE_COLUMNS = {
   kill_switches: ['tenant_id', 'scope', 'target', 'kind', 'reason', 'created_by', 'created_at'],
   config_state: ['tenant_id', 'path', 'hash', 'applied_at', 'status', 'diagnostics'],
   eval_suites: ['tenant_id', 'id', 'server_id', 'version', 'status', 'generated_from_build_id', 'generator', 'task_count', 'created_by', 'created_at', 'frozen_at'],
-  eval_tasks: ['tenant_id', 'id', 'suite_id', 'key', 'category', 'prompt', 'rubric', 'assertions', 'reference_calls', 'seed_state', 'tags', 'enabled', 'source'],
+  eval_tasks: ['tenant_id', 'id', 'suite_id', 'key', 'category', 'prompt', 'rubric', 'assertions', 'reference_calls', 'seed_state', 'tags', 'enabled', 'source', 'limits'],
   eval_runs: ['tenant_id', 'id', 'server_id', 'suite_id', 'environment_id', 'build_id', 'overlay_revision_id', 'models', 'modes', 'repeats', 'task_keys', 'status', 'progress', 'score', 'headline', 'recommended_mode', 'confidence', 'usage', 'error', 'trigger', 'base_run_id', 'job_id', 'created_by', 'created_at', 'started_at', 'ended_at'],
   eval_task_runs: ['tenant_id', 'id', 'run_id', 'task_id', 'model', 'mode', 'attempt', 'passed', 'assertion_results', 'judge', 'failure_cause', 'framing_ok', 'tool_calls', 'scripts', 'input_tokens', 'output_tokens', 'latency_ms', 'served_by_model', 'fallback_used', 'task_id_neurouter', 'transcript', 'created_at', 'cache_read_tokens', 'cache_write_tokens'],
   suggestions: ['tenant_id', 'id', 'run_id', 'server_id', 'cause', 'kind', 'tools', 'affected_task_ids', 'overlay_patch', 'spec_patch', 'rationale', 'predicted_delta', 'status', 'verify_run_id', 'verified_delta', 'created_at', 'updated_at'],

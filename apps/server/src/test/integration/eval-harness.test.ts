@@ -117,4 +117,18 @@ describe('eval harness (calibration, redaction, run cap)', () => {
     // attempts already in flight (concurrency 4) finish; no new one starts
     expect(ev.score(run)!.incomplete).toMatchObject({ attemptsRun: 4, attemptsPlanned: 5 });
   }, 120_000);
+
+  it('0.3.3: suite and task limits are stored, honored per attempt and kept with the results', async () => {
+    const ev = s.services.evals;
+    const srv = (await s.services.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!;
+    const env = (await s.services.servers.environments(srv.id)).find((e) => e.slug === 'dev')!;
+    const ref = { referenceCalls: [{ tool: 'get_pet_by_id', arguments: { pet_id: 1 } }], assertions: [{ type: 'called' as const, tool: 'get_pet_by_id' }] };
+    const plain = task({ key: 'plain', prompt: 'Find pet 1 (use pet_id=1)', ...ref });
+    const big = task({ key: 'big', prompt: 'Find pet 1 (use pet_id=1)', ...ref, limits: { maxToolCalls: 150, maxTurns: 40 } });
+    const suite = await ev.saveSuite(DEFAULT_TENANT_ID, srv.id, null, [plain, big], { mockDataVersion: 2, limits: { wallMs: 600_000 } }, null, true);
+    expect(Object.fromEntries((await ev.suiteTasks(DEFAULT_TENANT_ID, suite.id)).map((r) => [r.key, r.limits ? JSON.parse(r.limits) : null]))).toEqual({ plain: null, big: { maxToolCalls: 150, maxTurns: 40 } });
+    const run = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 1, trigger: 'cli', createdBy: null, wait: true });
+    const by = Object.fromEntries((await ev.taskResults(DEFAULT_TENANT_ID, run.id)).map((r) => [r.taskKey, r.limits]));
+    expect(by).toEqual({ plain: { maxTurns: 25, maxToolCalls: 60, maxTotalTokens: 200_000, wallMs: 600_000 }, big: { maxTurns: 40, maxToolCalls: 150, maxTotalTokens: 200_000, wallMs: 600_000 } });
+  }, 120_000);
 });

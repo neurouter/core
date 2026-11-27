@@ -167,6 +167,19 @@ describe('runSuite', () => {
     expect(results[0]).toMatchObject({ passed: true, toolCalls: 1 });
   });
 
+  it('limits: per-suite and per-task overrides are honored per attempt and recorded with the result', async () => {
+    // long-workflows probe github-n200-tool: 88 candidate PRs need > 60 tool calls (default cap) → max_tool_calls
+    const loop = () => llmResponse([use(`x${Math.random()}`, 'list_pets', {})], { input: 10, output: 1 });
+    const base = task({ key: 'default' });
+    const big = task({ key: 'big', limits: { maxToolCalls: 150, maxTurns: 40 } });
+    const results = await runSuite({ llm: new ScriptedLlmClient([], loop), tasks: [base, big], models: ['m'], modes: ['tool'], repeats: 1, concurrency: 1, limits: { maxTurns: 30 }, openSession: async () => ({ mcp: fakePetstore() }) });
+    const by = Object.fromEntries(results.map((r) => [r.taskKey, r]));
+    expect(by.default).toMatchObject({ endReason: 'max_turns', limits: { maxTurns: 30, maxToolCalls: 60, maxTotalTokens: 200_000, wallMs: 300_000 } });
+    expect(by.default!.toolCalls).toBe(30);
+    expect(by.big).toMatchObject({ endReason: 'max_turns', limits: { maxTurns: 40, maxToolCalls: 150, maxTotalTokens: 200_000, wallMs: 300_000 } });
+    expect(by.big!.toolCalls).toBe(40);
+  });
+
   it('aborts the whole run on key errors', async () => {
     await expect(runSuite({ llm: new ScriptedLlmClient([], () => Promise.reject(new LlmKeyError())), tasks: [task()], models: ['m'], modes: ['tool'], repeats: 3, openSession: async () => ({ mcp: fakePetstore() }) })).rejects.toBeInstanceOf(LlmKeyError);
   });

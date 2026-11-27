@@ -12,8 +12,18 @@ export interface EvalTask {
   assertions: Assertion[];
   referenceCalls: ReferenceCall[];
   seedState?: Record<string, unknown> | null;
+  /** Per-attempt limit overrides (0.3.3): win over the suite's and the run defaults. */
+  limits?: EvalLimitsOverride | null;
   tags: string[];
   enabled: boolean;
+}
+
+/** Per-attempt limit overrides of a suite or a task (see `RunLimits`). */
+export interface EvalLimitsOverride {
+  maxTurns?: number;
+  maxToolCalls?: number;
+  maxTotalTokens?: number;
+  wallMs?: number;
 }
 
 /** Calibration of one task: its own reference solution run through its assertions in the mock. */
@@ -55,6 +65,8 @@ export interface SuiteFile {
   coverage?: Record<string, number>;
   /** `migrateSuite`: what changed, per task key. */
   migration?: { from: string; at: string; notes: Record<string, string[]> } | null;
+  /** Per-attempt limit overrides for every task (0.3.3); a task's own `limits` win. */
+  limits?: EvalLimitsOverride | null;
   tasks: EvalTask[];
 }
 
@@ -228,6 +240,8 @@ export interface TaskRunResult {
   /** All judge calls behind the verdicts (voting on borderline ones). */
   judgeVotes?: JudgeVotes | null;
   toolsListBytes?: number;
+  /** The attempt's effective limits (defaults < run < suite < task overrides; 0.3.3, absent before). */
+  limits?: { maxTurns: number; maxToolCalls: number; maxTotalTokens: number; wallMs: number };
 }
 
 export interface ReadinessComponent {

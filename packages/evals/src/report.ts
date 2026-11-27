@@ -7,11 +7,12 @@ export interface EvalReport {
   version: 1;
   server: { slug: string; name: string };
   /** `contract`: the agent contract the eval server served (1 or 2). `judgeModel`: the model that judged the attempts. */
-  run: { id: string | null; models: string[]; modes: string[]; repeats: number; environment: string; buildHash: string | null; provider: string; startedAt: string; endedAt: string; contract?: 1 | 2 | null; judgeModel?: string | null };
+  run: { id: string | null; models: string[]; modes: string[]; repeats: number; environment: string; buildHash: string | null; provider: string; startedAt: string; endedAt: string; contract?: 1 | 2 | null; judgeModel?: string | null; limits?: AttemptLimits | null };
   score: ReadinessScore;
   /** Per (model, mode, category): counted attempts (no provider refusals), passes, success, tokens per attempt. */
   categories: CategoryRow[];
-  tasks: Array<{ key: string; category: string; prompt: string; cells: Array<{ model: string; mode: string; passes: number; attempts: number; failureCause: string | null; overBudget: number; refusals: number; matchedByJudge: number }> }>;
+  /** `limits`: the task's effective attempt limits, when they differ from `run.limits` (a suite or task override). */
+  tasks: Array<{ key: string; category: string; prompt: string; limits?: AttemptLimits; cells: Array<{ model: string; mode: string; passes: number; attempts: number; failureCause: string | null; overBudget: number; refusals: number; matchedByJudge: number }> }>;
   topFailures: Array<{ taskKey: string; model: string; mode: string; cause: string | null; detail: string }>;
   suggestions: Suggestion[];
   /** Per model: uncached input, output, cached input read and cache writes (part of input); see `attemptTokens`. */
@@ -27,6 +28,17 @@ export interface EvalReport {
   /** Calibration gate of the suite (rejected tasks were not run). */
   calibration?: Pick<SuiteCalibration, 'mockDataVersion' | 'passed' | 'rejected' | 'flagged' | 'model'> & { tasks: SuiteCalibration['tasks'] };
 }
+
+/** Per-attempt limits (`maxTotalTokens` = uncached input + cached input + output). */
+export interface AttemptLimits {
+  maxTurns: number;
+  maxToolCalls: number;
+  maxTotalTokens: number;
+  wallMs: number;
+}
+
+const sameLimits = (a: AttemptLimits | null | undefined, b: AttemptLimits | null | undefined) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const limitsText = (l: AttemptLimits) => `${l.maxTurns} turns, ${l.maxToolCalls} agent tool calls, ${l.maxTotalTokens} tokens (uncached + cached input + output), ${Math.round(l.wallMs / 1000)} s wall`;
 
 export interface CategoryRow {
   model: string;
@@ -81,7 +93,8 @@ export function buildReport(
       if (r.assertionResults.some((a) => a.matchedBy === 'judge')) c.matchedByJudge++;
       cells.set(k, c);
     }
-    return { key, category: input.prompts[key]?.category ?? rs[0]!.category, prompt: input.prompts[key]?.prompt ?? '', cells: [...cells.values()] };
+    const lim = rs.find((r) => r.limits)?.limits;
+    return { key, category: input.prompts[key]?.category ?? rs[0]!.category, prompt: input.prompts[key]?.prompt ?? '', ...(lim && !sameLimits(lim, input.run.limits) ? { limits: lim } : {}), cells: [...cells.values()] };
   });
   const topFailures = input.results
     .filter((r) => !r.passed && r.failureCause !== 'provider_refusal')
@@ -122,6 +135,8 @@ export function renderMarkdown(rep: EvalReport): string {
   for (const c of s.cells)
     lines.push(`| ${c.model} | ${c.mode}${c.best ? ' ★' : ''} | ${c.score} | ${Math.round(c.successRate * 100)}% | ${Math.round(c.avgTokens)} | ${Math.round(c.avgCachedTokens ?? 0)} | ${c.avgTokensMulti === null ? '–' : Math.round(c.avgTokensMulti)} | ${c.avgCalls.toFixed(1)} | ${Math.round(c.avgLatencyMs)} ms | ${c.flakyTasks} |`);
   lines.push('', '_Tokens = uncached input + cached input + output, summed over the turns of an attempt (the same for every provider); "of which cached" is input read from the provider\'s prompt cache._');
+  if (rep.run.limits) lines.push('', `Attempt limits: ${limitsText(rep.run.limits)}.`);
+  for (const t of rep.tasks.filter((x) => x.limits)) lines.push(`- \`${t.key}\`: ${limitsText(t.limits!)} (task override)`);
   const over = s.cells.reduce((a, c) => a + (c.overBudget ?? 0), 0);
   if (over) lines.push('', `_${over} counted attempt(s) went over their call budget (soft: reported as efficiency, not failed)._`);
   if (rep.providerRefusals) lines.push('', `_${rep.providerRefusals} attempt(s) were refused by the model provider's policy filter (\`provider_refusal\`) and excluded from scoring._`);
