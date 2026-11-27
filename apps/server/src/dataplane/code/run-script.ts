@@ -18,7 +18,7 @@ import { errorInfoFor } from '../envelope/render.js';
 import { closestNames } from '../envelope/relations.js';
 import type { Call, EnvelopeErrorCode, ErrorInfo, Truncated } from '../envelope/types.js';
 import { NO_RESULT, v1Result } from '../envelope/v1.js';
-import { envLabel, killSwitchFor, resolveVisibleTool, writeEnabled, type Confirmer, type McpToolResult, type Pipeline, type PlannedChange } from '../pipeline/pipeline.js';
+import { envLabel, killSwitchFor, resolveVisibleTool, writeEnabled, type Confirmer, type InvokeOptions, type McpToolResult, type Pipeline, type PlannedChange, type ToolOutcome } from '../pipeline/pipeline.js';
 import type { OpsTools } from '../ops/ops.js';
 import { opFor, reportEnabled } from '../ops/ops.js';
 import { validateScript } from './validate.js';
@@ -270,7 +270,7 @@ export class ScriptRunner {
       const confirmMode = ctx.bundle.environment.writes.confirm;
       const confirmWrites = ctx.bundle.environment.writes.enabled && confirmMode !== 'none';
       if (mode === 'execute' && confirmWrites) {
-        const dry = await this.runOnce(executor, ctx, code, 'dry_run', inputs, callAs, signal, true);
+        const dry = await this.runOnce(executor, ctx, code, 'dry_run', inputs, callAs, signal);
         if (dry.status !== 'ok') return { result: dry.result, draft: dry.draft };
         if (dry.planned.length) {
           const listed = dry.planned.slice(0, 20).map((p) => `- ${p.method} ${p.path} (${p.tool})`).join('\n');
@@ -310,22 +310,34 @@ export class ScriptRunner {
    * (5 min, single use). Without one (or with a stale one) the answer is `confirmation_required` with `data.plan`
    * and the run_script call carrying a fresh token; with it, the script runs with exactly those destructive calls
    * approved (any other destructive call inside raises `confirmation_required`). Null: no gate applies.
+   * B1 (0.3.4): the dry run's reads reach the upstream, so they are not repeated: a dry run that planned no write is
+   * returned as the execute itself; otherwise the execute pass reuses its read responses until its first write.
    */
   private async tokenGate(executor: Executor, ctx: RunContext, code: string, mode: 'dry_run' | 'execute', inputs: Record<string, unknown>, args: Record<string, unknown>, callAs: ScriptCallAs, signal: AbortSignal | undefined): Promise<ScriptReply | null> {
     const env = ctx.bundle.environment;
     if (ctx.contract !== 2 || !this.d.confirms || mode !== 'execute' || !env.writes.enabled || env.writes.confirm !== 'none') return null;
     const destructiveTools = new Set(allowedTools(ctx).filter((t) => t.risk.write && t.risk.destructive).map((t) => t.name));
     if (!destructiveTools.size) return null;
-    const dry = await this.runOnce(executor, ctx, code, 'dry_run', inputs, callAs, signal, true);
+    // B1 (0.3.4): the dry run's reads are real upstream calls; its read responses are kept for this call's execute pass
+    const reads = new ReadReplay();
+    const dry = await this.runOnce(executor, ctx, code, 'dry_run', inputs, callAs, signal, { probe: true, record: reads });
+    // no write planned: the dry run made every call the execute would make, so it is the execute (recorded as one)
+    if (!dry.planned.length) return { result: dry.result, draft: dry.draft };
     if (dry.status !== 'ok') return { result: dry.result, draft: dry.draft };
+    const replay = { use: reads, from: dry.runId };
     const destructive = dry.planned.filter((p) => destructiveTools.has(p.tool));
-    if (!destructive.length) return null;
+    if (!destructive.length) {
+      // non-destructive writes only: execute, with the dry run's reads reused up to the first write
+      const run = await this.runOnce(executor, ctx, code, 'execute', inputs, callAs, signal, { replay });
+      return { result: run.result, draft: run.draft };
+    }
     const binding = this.scriptBinding(ctx, code, inputs, callAs, destructive);
     const token = typeof args.confirm === 'string' ? args.confirm : undefined;
     const problem = token ? await this.d.confirms.spend(token, binding) : 'missing';
     if (!problem) {
+      // the plan was re-checked by this call's dry run just now; the confirmed run reuses that dry run's reads
       const plan = new Set(destructive.map((p) => `${p.tool}|${p.argsHash}`));
-      const run = await this.runOnce(executor, { ...ctx, approvedPlan: plan }, code, 'execute', inputs, callAs, signal);
+      const run = await this.runOnce(executor, { ...ctx, approvedPlan: plan }, code, 'execute', inputs, callAs, signal, { replay });
       return { result: run.result, draft: run.draft };
     }
     const why = problem === 'expired' ? 'The confirm token expired (5 minutes). ' : problem === 'used' ? 'The confirm token was already used. ' : problem === 'missing' ? '' : 'The confirm token is for another script or plan. ';
@@ -469,6 +481,7 @@ export class ScriptRunner {
     signal: AbortSignal | undefined,
     onBlocked: () => void,
     pace: PaceBudget | null,
+    invoke: InvokeFn,
   ): Promise<HostCallResult> {
     const name = typeof kwargs.fn === 'string' ? kwargs.fn : '';
     const t = byFn.get(name);
@@ -512,7 +525,7 @@ export class ScriptRunner {
         return refuse(await errorInfoFor(ctx, { code: 'invalid_args', message: '', text, name: t.name, tool: t, args, issues: [{ path: '/cursor', keyword: 'cursor', params: {}, message: problem }], next: [...keep, { tool: t.name, args }] }));
       }
     }
-    const out = await this.d.pipeline.invoke(ctx, t.name, args, { planned, pace, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
+    const out = await invoke(t, args, { planned, pace, ...(position ? { position } : {}), ...(signal ? { signal } : {}) });
     if (!out.ok) {
       if (out.decision.startsWith('denied_')) onBlocked();
       if (out.draft.error) return refuse(await errorInfoFor(ctx, out.draft.error), planOf(out.draft.data));
@@ -548,7 +561,12 @@ export class ScriptRunner {
     return out;
   }
 
-  private async runOnce(executor: Executor, ctx0: RunContext, code: string, mode: 'dry_run' | 'execute', inputs: Record<string, unknown>, callAs: ScriptCallAs, signal: AbortSignal | undefined, planOnly = false): Promise<{ status: ScriptStatus; result: McpToolResult; planned: PlannedChange[]; draft: Draft }> {
+  /**
+   * One executor run. `probe` (a gate's dry run, B1): writes are planned, not made, and the run is recorded as the
+   * execute it was when it planned none. `record` keeps its read responses; `replay.use` answers this run's reads from
+   * them (same function and arguments, in order) until its first write, which goes upstream like every call after it.
+   */
+  private async runOnce(executor: Executor, ctx0: RunContext, code: string, mode: 'dry_run' | 'execute', inputs: Record<string, unknown>, callAs: ScriptCallAs, signal: AbortSignal | undefined, o: { probe?: boolean; record?: ReadReplay; replay?: { use: ReadReplay; from: string } } = {}): Promise<RunOnce> {
     const started = this.d.now();
     const runId = newId();
     const codeHash = sha256Hex(code);
@@ -566,14 +584,18 @@ export class ScriptRunner {
       );
     }
     const ctx: RunContext = { ...ctx0, taskId, via: 'script', mode: 'code', scriptRunId: runId, dryRun: mode === 'dry_run' };
-    // the run shows on the request's gateway span; each inner upstream call gets its own client span
-    ctx.trace?.setAttribute(mode === 'dry_run' ? 'neurouter.script_run_id.dry_run' : 'neurouter.script_run_id', runId);
+    /** What the run is recorded as: a probe that planned no write was the execute (B1). */
+    const recordedMode = (): 'dry_run' | 'execute' => (o.probe && mode === 'dry_run' && !planned.length ? 'execute' : mode);
+    let replayed = 0;
     await this.d.db.insertInto('script_runs').values({ id: runId, tenant_id: ctx.tenantId, task_id: taskId, server_id: ctx.server.id, environment_id: ctx.environment.id, user_id: ctx.principal.type === 'external' ? null : ctx.principal.userId, credential_key: ctx.credentialKey, code: code.slice(0, 16384), code_hash: codeHash, mode, status: 'running', started_at: started }).execute();
 
     const ns = ctx.server.slug.replace(/-/g, '_');
-    const finish = async (status: ScriptStatus, body: { value?: unknown; error?: Record<string, unknown>; stats?: Record<string, unknown>; stdout?: string; truncated?: boolean; preview?: unknown; valueBytes?: number }): Promise<{ status: ScriptStatus; result: McpToolResult; planned: PlannedChange[]; draft: Draft }> => {
+    const finish = async (status: ScriptStatus, body: { value?: unknown; error?: Record<string, unknown>; stats?: Record<string, unknown>; stdout?: string; truncated?: boolean; preview?: unknown; valueBytes?: number }): Promise<RunOnce> => {
       const ended = this.d.now();
-      const stats = { wallMs: ended - started, toolCalls: calls, blockedCalls: blocked, suspensions: calls, ...(body.stats ?? {}), ...(pace.waits ? { rateLimitWaits: pace.waits, rateLimitWaitMs: pace.waitedMs } : {}) };
+      const mode = recordedMode();
+      // the run shows on the request's gateway span; each inner upstream call gets its own client span
+      ctx.trace?.setAttribute(mode === 'dry_run' ? 'neurouter.script_run_id.dry_run' : 'neurouter.script_run_id', runId);
+      const stats = { wallMs: ended - started, toolCalls: calls, blockedCalls: blocked, suspensions: calls, ...(body.stats ?? {}), ...(pace.waits ? { rateLimitWaits: pace.waits, rateLimitWaitMs: pace.waitedMs } : {}), ...(replayed ? { replayedReads: replayed, replayedFrom: o.replay?.from } : {}) };
       let handle: string | null = null;
       let value = body.value;
       if (body.truncated) {
@@ -584,7 +606,7 @@ export class ScriptRunner {
       const preview = value === undefined ? null : JSON.stringify(value).slice(0, 8192);
       await this.d.db
         .updateTable('script_runs').where('tenant_id', '=', ctx.tenantId)
-        .set({ status, error: body.error ? toJsonColumn(body.error) : null, result_preview: preview === null ? null : toJsonColumn(safeParse(preview)), result_bytes: body.valueBytes ?? (preview ? Buffer.byteLength(preview) : 0), result_handle: handle, planned_changes: toJsonColumn(planned.map(({ argsHash: _h, ...p }) => p)), stats: toJsonColumn(stats), phases: toJsonColumn(phases), stdout: body.stdout ? body.stdout.slice(0, 16384) : null, audit_id: auditId, ended_at: ended })
+        .set({ mode, status, error: body.error ? toJsonColumn(body.error) : null, result_preview: preview === null ? null : toJsonColumn(safeParse(preview)), result_bytes: body.valueBytes ?? (preview ? Buffer.byteLength(preview) : 0), result_handle: handle, planned_changes: toJsonColumn(planned.map(({ argsHash: _h, ...p }) => p)), stats: toJsonColumn(stats), phases: toJsonColumn(phases), stdout: body.stdout ? body.stdout.slice(0, 16384) : null, audit_id: auditId, ended_at: ended })
         .where('id', '=', runId)
         .execute();
       this.d.audit.record({
@@ -617,7 +639,7 @@ export class ScriptRunner {
       const resultChars = lim.resultChars ?? SCRIPT_RESULT_CHARS;
       const agentCut = ctx.contract === 2 && status === 'ok' && !body.truncated ? await this.agentCut(ctx, value ?? null, resultChars) : null;
       const draft = this.scriptDraft(ctx, status, { ...body, agentCut, resultChars }, value ?? null, mode, planned, callAs, { calls, left: { calls: Math.max(0, lim.maxToolCalls - calls), seconds: Math.max(0, Math.floor((lim.wallTimeSec * 1000 - (ended - started)) / 1000)) } }, innerErrors, { [META_CALL_ID]: auditId, [META_TASK_ID]: taskId, 'dev.neurouter/script-run-id': runId }, { code, inputs });
-      return { status, planned, result: v1Result(text.length > resultChars ? `${text.slice(0, resultChars - 42)}… (truncated preview)` : text, structured, meta, isError), draft };
+      return { status, planned, runId, result: v1Result(text.length > resultChars ? `${text.slice(0, resultChars - 42)}… (truncated preview)` : text, structured, meta, isError), draft };
     };
     /** contract 2: the error objects raised into the script (by JSON message), so an uncaught one becomes the run's error */
     const innerErrors = new Map<string, InnerError>();
@@ -649,6 +671,22 @@ export class ScriptRunner {
     const wrapped = wrapScript(code);
     const v2 = ctx.contract === 2;
     const sem = new Semaphore(lim.maxConcurrentCalls);
+    // B1: reads answered from this call's dry run (none after the first write); the dry run records its reads
+    const invoke: InvokeFn = async (t, args, opts) => {
+      if (t.risk.write) {
+        o.replay?.use.stop();
+        return this.d.pipeline.invoke(ctx, t.name, args, opts);
+      }
+      const key = ReadReplay.key(t.name, args, opts.position);
+      const hit = o.replay?.use.take(key);
+      if (hit) {
+        replayed++;
+        return hit;
+      }
+      const out = await this.d.pipeline.invoke(ctx, t.name, args, opts);
+      if (out.ok) o.record?.put(key, out);
+      return out;
+    };
 
     const host = {
       call: async (fn: string, kwargs: Record<string, unknown>): Promise<HostCallResult> => {
@@ -675,7 +713,7 @@ export class ScriptRunner {
             return { ok: true, value: { ok: false, py: scriptErrorType(info.code), text, error } };
           };
           const unknownFn = async (name: string): Promise<ErrorInfo> => errorInfoFor(ctx, { code: 'unknown_tool', message: '', text: `No function ${name} in this script's namespaces; nothing was called.`, name, closest: closestNames(name, [...byFn.keys()]), next: [{ tool: 'search_tools', args: { query: name.split('.').pop() ?? name } }] });
-          if (fn === '_nr.call' && v2) return this.nrCall(ctx, kwargs, byFn, refuse, unknownFn, planned, signal, () => blocked++, pace);
+          if (fn === '_nr.call' && v2) return this.nrCall(ctx, kwargs, byFn, refuse, unknownFn, planned, signal, () => blocked++, pace, invoke);
           if (fn.startsWith('ops.')) {
             const op = opFor(ctx, fn);
             if (!op || !(surface.opsFunctions as readonly string[]).includes(op)) return v2 ? raise(await unknownFn(fn)) : { ok: false, error: { code: 'unknown_tool', message: `Tool not found or not permitted: ${fn}` } };
@@ -690,7 +728,7 @@ export class ScriptRunner {
           const map = pyArgMap(t, { snake: v2 });
           const argsIn: Record<string, unknown> = {};
           for (const [k, val] of Object.entries(kwargs)) argsIn[map[k] ?? k] = val;
-          const out = await this.d.pipeline.invoke(ctx, t.name, argsIn, { planned, pace, ...(signal ? { signal } : {}) });
+          const out = await invoke(t, argsIn, { planned, pace, ...(signal ? { signal } : {}) });
           if (!out.ok) {
             blocked += out.decision.startsWith('denied_') ? 1 : 0;
             if (v2 && out.draft.error) return raise(await errorInfoFor(ctx, out.draft.error), planOf(out.draft.data));
@@ -739,9 +777,57 @@ export class ScriptRunner {
     const execMs = this.d.now() - t1;
     if (res.status === 'type_error' || res.status === 'syntax_error') phases.push({ name: 'type_check', status: 'failed', durationMs: execMs }, { name: 'execute', status: 'skipped', durationMs: 0 });
     else phases.push({ name: 'type_check', status: 'ok', durationMs: 0 }, { name: 'execute', status: res.status === 'ok' ? 'ok' : 'failed', durationMs: execMs });
-    void planOnly;
     return finish(res.status as ScriptStatus, { value: res.value, ...(res.error ? { error: v2 ? scriptHintV2(withBuiltinHint({ ...res.error }, 2), ns, [...byFn.keys()]) : withBuiltinHint({ ...res.error }) } : {}), stats: { wallMs: res.stats.wallMs, suspensions: res.stats.suspensions, toolCalls: calls }, stdout: res.stdout, truncated: res.truncated === true, preview: res.preview, valueBytes: res.valueBytes });
   }
+}
+
+interface RunOnce {
+  status: ScriptStatus;
+  result: McpToolResult;
+  planned: PlannedChange[];
+  draft: Draft;
+  runId: string;
+}
+
+/** A script's tool call through the pipeline (scripts: `planned`, `pace`, `position`, `signal`). */
+type InvokeFn = (t: ToolDef, args: Record<string, unknown>, opts: InvokeOptions) => Promise<ToolOutcome>;
+
+/**
+ * B1 (0.3.4): the read responses of one run_script call's dry run, for that call's execute pass. A read with the same
+ * function, arguments and page position gets the dry run's response (the n-th such read the n-th response) until the
+ * execute pass makes its first write; from then on every call goes upstream. Successful reads only; never shared
+ * between run_script calls.
+ */
+class ReadReplay {
+  private readonly byKey = new Map<string, ToolOutcome[]>();
+  private stopped = false;
+
+  static key(tool: string, args: Record<string, unknown>, position: unknown): string {
+    return `${tool}|${stableJson(args)}|${position === undefined ? '' : stableJson(position)}`;
+  }
+
+  put(key: string, out: ToolOutcome): void {
+    const list = this.byKey.get(key);
+    if (list) list.push(out);
+    else this.byKey.set(key, [out]);
+  }
+
+  take(key: string): ToolOutcome | undefined {
+    return this.stopped ? undefined : this.byKey.get(key)?.shift();
+  }
+
+  /** The execute pass wrote: reads now see another state than the dry run's. */
+  stop(): void {
+    this.stopped = true;
+    this.byKey.clear();
+  }
+}
+
+/** JSON with object keys sorted (request identity). */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v as Record<string, unknown>).sort().map((k) => `${JSON.stringify(k)}:${stableJson((v as Record<string, unknown>)[k])}`).join(',')}}`;
+  return JSON.stringify(v) ?? 'null';
 }
 
 /** Call arguments without a confirm token (single use; next calls carry a fresh one). */
