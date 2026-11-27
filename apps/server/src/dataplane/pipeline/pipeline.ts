@@ -27,6 +27,7 @@ import type { CredentialResolver } from '../http/credentials.js';
 import { InvokeError, type HttpInvoker, type MockUpstream, type UpstreamResponse } from '../http/invoker.js';
 import { buildHttpRequest, RequestBuildError, toSpecArgs, applyArgTransforms, hostAllowed } from '../http/request-builder.js';
 import type { RateLimiter } from '../rate-limit/limiter.js';
+import { sleepFor, takePaced, type PaceBudget } from '../rate-limit/pacer.js';
 import type { ResultPages } from '../shaping/result-pages.js';
 import { looksLikeInjection, scanUntrusted, UNTRUSTED_PREFIX } from '../shaping/sanitize.js';
 import { errorDraft, okDraft, type Draft, type ErrorSpec } from '../envelope/draft.js';
@@ -77,6 +78,8 @@ export interface InvokeOptions {
   planned?: PlannedChange[];
   /** contract 2, scripts (`ops.pages`): start at this upstream page position */
   position?: CursorPayload;
+  /** Inner script calls: wait for a rate-limit token within this budget instead of failing at once (0.3.3, R1). */
+  pace?: PaceBudget | null;
 }
 
 export interface ToolOutcome {
@@ -111,6 +114,8 @@ export interface PipelineDeps {
   errors: ErrorEvents;
   metrics?: Metrics;
   now: () => number;
+  /** Rate-limit pacing waits (tests: a fake clock). Default: an abortable timer. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   publicUrl: string;
   version: string;
   /** contract 2: signs and checks `page.next_cursor` (absent: no cursors) */
@@ -361,19 +366,27 @@ export class Pipeline {
     step('policy', 'pass');
 
     // 7 rate limits (principal, principal × tool); an eval reference session computes ground truth (harness work,
-    // not agent traffic: a long-workflow reference script walks every item) and is not throttled
+    // not agent traffic: a long-workflow reference script walks every item) and is not throttled. The built-in mock
+    // environment has no gateway rate limit unless its limits (or the key) set one (0.3.3). Inner script calls wait
+    // for a token within the script's budget (pacing) before they fail.
     const lim = ctx.bundle.environment.limits;
-    const principalLimit = ctx.principal.type === 'api_key' && ctx.principal.rateLimit ? ctx.principal.rateLimit : lim.rateLimit;
-    const rl = ctx.fullObjects ? { allowed: true as const } : await this.d.limiter.take(this.d.limiter.checksFor({ environmentId: ctx.environment.id, credentialKey: ctx.credentialKey, tool: tool.name, principalLimit, toolLimit: lim.toolRateLimit }));
+    const keyLimit = ctx.principal.type === 'api_key' && ctx.principal.rateLimit ? ctx.principal.rateLimit : null;
+    const principalLimit = keyLimit ?? lim.rateLimit;
+    const unlimitedMock = ctx.bundle.environment.isMock && !keyLimit && !lim.rateLimit && !lim.toolRateLimit;
+    const rl = ctx.fullObjects || unlimitedMock
+      ? { allowed: true as const, waitedMs: 0 }
+      : await takePaced(this.d.limiter, this.d.limiter.checksFor({ environmentId: ctx.environment.id, credentialKey: ctx.credentialKey, tool: tool.name, principalLimit, toolLimit: lim.toolRateLimit }), { budget: opts.pace, now: this.d.now, sleep: this.d.sleep ?? sleepFor, ...(opts.signal ? { signal: opts.signal } : {}) });
     if (!rl.allowed) {
       step('rate_limit', 'fail', rl.scope);
       const secs = Math.max(1, Math.ceil(rl.retryAfterMs / 1000));
       this.d.metrics?.rateLimited(rl.scope);
-      const out = await fail('denied_rate_limit', 'blocked', 'rate_limited', `Rate limit exceeded for ${tool.name}; retry after ${secs}s.`, { retryAfterSec: secs, scopeDetail: ` (${rl.scope})` }, { retryAfterMs: rl.retryAfterMs });
+      const paced = 'pacing' in rl && rl.pacing && rl.pacing.reason !== 'cancelled' ? rl.pacing : null;
+      const why = paced ? ` Waiting does not fit this script (${paced.reason === 'wall_time' ? `${(paced.roomMs / 1000).toFixed(1)}s of wall time left` : `max wait ${Math.round((opts.pace?.maxWaitMs ?? 0) / 1000)}s per call`}).` : '';
+      const out = await fail('denied_rate_limit', 'blocked', 'rate_limited', `Rate limit exceeded for ${tool.name}; retry after ${secs}s.${why}`, { retryAfterSec: secs, scopeDetail: ` (${rl.scope})` }, { retryAfterMs: rl.retryAfterMs });
       out.draft.left = { calls: 0 };
       return out;
     }
-    step('rate_limit', 'pass');
+    step('rate_limit', 'pass', rl.waitedMs ? `paced ${rl.waitedMs} ms` : undefined);
     // contract 2 (§2.4): `state.left.calls` once a rate-limit bucket is down to 20%
     const left = rl.left && rl.left.calls <= rl.left.capacity * 0.2 ? { calls: rl.left.calls } : undefined;
 

@@ -16,6 +16,11 @@ export const CodeLimits = z.object({
   maxResultBytes: z.number().int().min(1024).max(64 * 1024 * 1024),
   /** What an agent gets back from run_script (characters, both contracts); larger values are cut with a `truncated` marker. Default `SCRIPT_RESULT_CHARS`. */
   resultChars: z.number().int().min(512).max(1_048_576).optional(),
+  /**
+   * Pacing (0.3.3): how long one inner call may wait for a gateway rate-limit token (seconds, within the script's
+   * remaining wall time) before it raises `RateLimited`. Default 30; 0 fails at once, as before 0.3.3.
+   */
+  rateLimitWaitSec: z.number().min(0).max(600).optional(),
 });
 export type CodeLimits = z.infer<typeof CodeLimits>;
 
