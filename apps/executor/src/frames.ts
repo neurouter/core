@@ -8,6 +8,15 @@ import { HOST_ERROR_TYPES, PROTOCOL_VERSION } from './types.js';
 
 export const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 
+/**
+ * One tool result inside a script may be larger than a frame (0.3.3, M2: full GitHub objects at per_page=100): the
+ * server sends it as `call_result_part` frames that the executor joins, up to this hard limit per call. Over it the
+ * call fails with `response_too_large` (the script can catch it and ask for less).
+ */
+export const MAX_CALL_RESULT_BYTES = 16 * 1024 * 1024;
+/** Characters of the result's JSON text per part (≤ 6 bytes each once escaped in the frame: under 2 MiB). */
+export const CALL_RESULT_PART_CHARS = 256 * 1024;
+
 const RunLimitsSchema = z.object({
   cpuTimeSec: z.number().positive().max(600),
   wallTimeSec: z.number().positive().max(3600),
@@ -29,6 +38,8 @@ export const HelloAckFrame = z.object({
   montyVersion: z.string(),
   montyBinarySha256: z.string(),
   poolMax: z.number().int(),
+  /** Optional protocol features (0.3.3: `call_result_parts`); an older executor sends none. */
+  features: z.array(z.string().max(64)).max(32).optional(),
 });
 export const RunFrame = z.object({
   type: z.literal('run'),
@@ -58,6 +69,8 @@ export const CallResultFrame = z.union([
   z.object({ type: z.literal('call_result'), runId: RunId, callId: z.number().int().nonnegative(), ok: z.literal(true), value: z.unknown() }),
   z.object({ type: z.literal('call_result'), runId: RunId, callId: z.number().int().nonnegative(), ok: z.literal(false), error: ToolCallErrorSchema }),
 ]);
+/** A slice of a call result's JSON text (`{"ok":…}`) too large for one frame; `last` completes it. */
+export const CallResultPartFrame = z.object({ type: z.literal('call_result_part'), runId: RunId, callId: z.number().int().nonnegative(), seq: z.number().int().nonnegative(), part: z.string().max(CALL_RESULT_PART_CHARS), last: z.boolean() });
 export const PrintFrame = z.object({ type: z.literal('print'), runId: RunId, text: z.string().max(64 * 1024) });
 export const CancelFrame = z.object({ type: z.literal('cancel'), runId: RunId, reason: z.string().max(500) });
 export const DoneFrame = z.object({
@@ -79,7 +92,7 @@ export const PongFrame = z.object({ type: z.literal('pong'), t: z.number().optio
 export const ErrorFrame = z.object({ type: z.literal('error'), message: z.string().max(4096) });
 
 /** Frames the executor accepts (server → executor). */
-export const ToExecutorFrame = z.union([z.discriminatedUnion('type', [HelloFrame, RunFrame, CancelFrame, PingFrame, PongFrame]), CallResultFrame]);
+export const ToExecutorFrame = z.union([z.discriminatedUnion('type', [HelloFrame, RunFrame, CancelFrame, PingFrame, PongFrame, CallResultPartFrame]), CallResultFrame]);
 /** Frames the server accepts (executor → server). */
 export const ToServerFrame = z.discriminatedUnion('type', [HelloAckFrame, CallFrame, PrintFrame, DoneFrame, PingFrame, PongFrame, ErrorFrame]);
 
@@ -88,6 +101,20 @@ export type HelloAckFrame = z.infer<typeof HelloAckFrame>;
 export type RunFrame = z.infer<typeof RunFrame>;
 export type CallFrame = z.infer<typeof CallFrame>;
 export type CallResultFrame = z.infer<typeof CallResultFrame>;
+export type CallResultPartFrame = z.infer<typeof CallResultPartFrame>;
+
+/** Splits a JSON text into part frames (never between the two halves of a surrogate pair). */
+export function callResultParts(runId: string, callId: number, json: string, size = CALL_RESULT_PART_CHARS): CallResultPartFrame[] {
+  const out: CallResultPartFrame[] = [];
+  for (let i = 0, seq = 0; i < json.length; seq++) {
+    let end = Math.min(json.length, i + size);
+    const c = json.charCodeAt(end - 1);
+    if (end < json.length && c >= 0xd800 && c <= 0xdbff) end--;
+    out.push({ type: 'call_result_part', runId, callId, seq, part: json.slice(i, end), last: end >= json.length });
+    i = end;
+  }
+  return out;
+}
 export type DoneFrame = z.infer<typeof DoneFrame>;
 export type ToExecutorFrame = z.infer<typeof ToExecutorFrame>;
 export type ToServerFrame = z.infer<typeof ToServerFrame>;

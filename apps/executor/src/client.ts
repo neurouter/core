@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { encodeFrame, FrameDecoder, parseFrame, ToServerFrame, type CallFrame, type HelloAckFrame } from './frames.js';
+import { callResultParts, encodeFrame, FrameDecoder, MAX_CALL_RESULT_BYTES, MAX_FRAME_BYTES, parseFrame, ToServerFrame, type CallFrame, type HelloAckFrame } from './frames.js';
 import { silentLogger } from './logger.js';
 import { PROTOCOL_VERSION, type ExecLogger, type Executor, type ExecutorHealth, type HostBridge, type RunRequest, type RunResult } from './types.js';
 
@@ -240,10 +240,16 @@ export class SocketExecutor implements Executor {
       result = { ok: false as const, error: { code: 'internal', message: err instanceof Error ? err.message : String(err) } };
     }
     if (!this.runs.has(frame.runId)) return;
+    // M2 (0.3.3): a result over one frame goes as call_result_part frames, up to MAX_CALL_RESULT_BYTES per call
+    const json = JSON.stringify(result) ?? 'null';
+    const bytes = Buffer.byteLength(json);
+    if (bytes > MAX_CALL_RESULT_BYTES) return void reject('response_too_large', `the tool result is ${bytes} bytes, over the ${MAX_CALL_RESULT_BYTES}-byte limit for one call inside a script; ask for less (a smaller page size, fields or a filter)`);
     try {
-      this.write({ type: 'call_result', runId: frame.runId, callId: frame.callId, ...result });
-    } catch {
-      reject('response_too_large', 'tool result exceeds the executor frame limit');
+      if (bytes + 256 <= MAX_FRAME_BYTES) this.write({ type: 'call_result', runId: frame.runId, callId: frame.callId, ...result });
+      else if (this.ack?.features?.includes('call_result_parts')) for (const part of callResultParts(frame.runId, frame.callId, json)) this.write(part);
+      else reject('response_too_large', `the tool result (${bytes} bytes) is over the executor frame limit and this executor cannot take it in parts; upgrade the executor or ask for less`);
+    } catch (err) {
+      reject('response_too_large', `the tool result (${bytes} bytes) could not be sent to the executor: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
