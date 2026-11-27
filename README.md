@@ -82,7 +82,10 @@ Tool results follow one of two contracts, chosen per session:
   (`RuntimeError`); catch them by name, by base or as `ToolError`. `str(e)` is short (code, message, next call) and
   `ops.error(e)` returns the structured error (`code`, `message`, `retry`, `next`, `fields`, `plan`). `print()` output
   comes back as `logs` (up to 2,000 characters); a return value over 8,192 characters (`limits.code.resultChars`) is
-  cut with `truncated` (`truncated.next` reads the rest) and a hint to return less.
+  cut with `truncated` (`truncated.next` reads the rest) and a hint to return less; the cut data always fits.
+  A `search_tools` result over 8,192 characters (`limits.searchResultChars`) keeps the full detail (`doc`, schema,
+  example) for the top 3 hits only, then drops the last hits; `truncated` says what was cut and `truncated.next`
+  is `search_tools` for one tool by name with its full detail.
   There is no task framing: Neurouter infers tasks per credential, client and MCP session (10-minute idle gap),
   counts `state.call`/`streak` in the task row (the same on every instance), and shows `state.left` when a
   rate limit is down to 20%. One ops tool is listed, `neurouter_report(kind: done|blocked|unmet_need|tool_problem|

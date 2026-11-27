@@ -55,6 +55,8 @@ export interface EnvLimits {
   timeoutMs: number;
   maxResponseBytes: number;
   code: CodeLimits;
+  /** agent-facing contract-2 search_tools result budget in characters (default `SEARCH_RESULT_CHARS`, 8,192) */
+  searchResultChars?: number;
 }
 
 export const DEFAULT_CODE_LIMITS: CodeLimits = { maxToolCalls: 200, wallTimeSec: 30, cpuTimeSec: 10, maxMemoryMb: 64, maxConcurrentCalls: 8, maxResultBytes: 1024 * 1024 };
@@ -204,6 +206,7 @@ export function parseLimits(v: unknown): EnvLimits {
     timeoutMs: l.timeoutMs ?? DEFAULT_ENV_LIMITS.timeoutMs,
     maxResponseBytes: l.maxResponseBytes ?? DEFAULT_ENV_LIMITS.maxResponseBytes,
     code: { ...DEFAULT_CODE_LIMITS, ...(l.code ?? {}) },
+    ...(typeof l.searchResultChars === 'number' ? { searchResultChars: l.searchResultChars } : {}),
   };
 }
 
