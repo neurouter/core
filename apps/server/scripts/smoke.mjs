@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Boot smoke for the built server: starts it as production would (SQLite in a temp dir, embedded
- * executor), then checks /readyz, MCP tools/list, a mock tool call, run_script and search_tools.
+ * executor), then checks /readyz, that every endpoint of the shared `api` contract is registered
+ * (no 404 "No route"), MCP tools/list, a mock tool call, run_script and search_tools.
  *
  *   node apps/server/scripts/smoke.mjs                  the production bundle (dist-bundle/main.js)
  *   node apps/server/scripts/smoke.mjs --entry dist     the unbundled build (dist/main.js, `npm start`)
@@ -15,6 +16,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { checkRoutes } from './check-routes.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
 const entry = process.argv.includes('--entry') ? process.argv[process.argv.indexOf('--entry') + 1] : 'bundle';
@@ -90,6 +92,10 @@ try {
     }
     check('embedder ready', ready.checks?.embedder?.detail === 'ready', JSON.stringify(ready.checks?.embedder));
   }
+
+  // the console API as built: every contract endpoint must have a route (dynamic imports the bundle broke 404)
+  const routes = await checkRoutes(base, root);
+  check(`contract routes registered (${routes.checked})`, routes.missing.length === 0, routes.missing.slice(0, 10).join('; ') + (routes.missing.length > 10 ? ` … +${routes.missing.length - 10}` : ''));
 
   const token = execFileSync(process.execPath, ['packages/cli/dist/main.js', 'keys', 'create', '--server', 'petstore', '--env', 'dev', '--scopes', 'tools:read,tools:write,code:run', '--name', 'smoke'], { cwd: root, env: { ...env, LOG_LEVEL: 'warn' }, encoding: 'utf8' }).trim().split('\n').filter((l) => !l.startsWith('{')).pop();
   check('API key created (CLI)', /^\S{20,}$/.test(token ?? ''), (token ?? '').slice(0, 12) + '…');
