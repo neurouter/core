@@ -52,10 +52,15 @@ export type LimitsInput = z.infer<typeof LimitsInput>;
 /** Code-mode defaults (§10.5): 200 calls, 30 s wall, 10 s CPU, 64 MiB, 8 concurrent calls, 1 MiB result. */
 export const DEFAULT_CODE_LIMITS: CodeLimits = { maxToolCalls: 200, wallTimeSec: 30, cpuTimeSec: 10, maxMemoryMb: 64, maxConcurrentCalls: 8, maxResultBytes: 1_048_576 };
 
-/** Environment defaults. Rate limits are per principal (and per principal × tool). */
+/**
+ * Environment defaults. Rate limits are per principal (credential) and per principal × tool; the gateway's limiter
+ * applies these when an environment (and the API key) sets none, and the console shows them. 0.3.5: one source of
+ * truth. The values are the ones the limiter has always enforced (600/min burst 120, 300/min burst 60); before 0.3.5
+ * this object said 300/60 and 120/30, which only the console displayed.
+ */
 export const DEFAULT_LIMITS: Limits = {
-  rateLimit: { perMinute: 300, burst: 60 },
-  toolRateLimit: { perMinute: 120, burst: 30 },
+  rateLimit: { perMinute: 600, burst: 120 },
+  toolRateLimit: { perMinute: 300, burst: 60 },
   timeoutMs: 15_000,
   maxResponseBytes: 2_097_152,
   code: DEFAULT_CODE_LIMITS,

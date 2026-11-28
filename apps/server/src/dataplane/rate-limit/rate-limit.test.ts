@@ -1,9 +1,11 @@
+import { DEFAULT_LIMITS, OPS_RATE_LIMIT } from '@neurouter/shared';
 import { describe, expect, it } from 'vitest';
 import { recordingKysely } from '../../test/fakes/recording-dialect.js';
 import { FakeClock } from '../../test/fakes/context.js';
 import type { MainDB } from '../../kernel/db/schema.js';
 import { LeaseRateLimitStore, MemoryRateLimitStore, PgBucketExecutor, type BucketExecutor } from './stores.js';
 import { perMinute, refill, take } from './token-bucket.js';
+import { RateLimiter } from './limiter.js';
 
 describe('token bucket', () => {
   it('refills linearly up to capacity and computes retry-after', () => {
@@ -90,5 +92,18 @@ describe('lease store', () => {
     const { db, driver } = recordingKysely<MainDB>('postgres');
     expect(await new PgBucketExecutor(db).lease('agent:a', { capacity: 10, refillPerMs: 0.01 }, 1, 5)).toBeNull();
     expect(driver.queries.at(-1)!.sql).toMatch(/insert into rate_limit_buckets[\s\S]*on conflict \(key\) do update set[\s\S]*where least\(/);
+  });
+});
+
+describe('default rate limits (0.3.5: one source of truth)', () => {
+  it('the limiter applies the shared DEFAULT_LIMITS (what the console shows) when an environment sets none', () => {
+    const limiter = new RateLimiter(new MemoryRateLimitStore(new FakeClock(0)));
+    const [principal, tool] = limiter.checksFor({ environmentId: 'e', credentialKey: 'k', tool: 't', principalLimit: null, toolLimit: null });
+    expect(principal).toMatchObject({ scope: 'principal', ...DEFAULT_LIMITS.rateLimit });
+    expect(tool).toMatchObject({ scope: 'principal_tool', ...DEFAULT_LIMITS.toolRateLimit });
+    // the values enforced since 0.1 (not loosened, not tightened): 600/min burst 120 per credential, 300/min burst 60 per tool
+    expect(DEFAULT_LIMITS.rateLimit).toEqual({ perMinute: 600, burst: 120 });
+    expect(DEFAULT_LIMITS.toolRateLimit).toEqual({ perMinute: 300, burst: 60 });
+    expect(limiter.opsCheck('k')).toMatchObject({ scope: 'ops', ...OPS_RATE_LIMIT });
   });
 });
