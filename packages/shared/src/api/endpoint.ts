@@ -29,6 +29,12 @@ export interface EndpointDef {
   /** Success status (200 unless stated). */
   status: number;
   access: readonly AccessLevel[];
+  /**
+   * False for tenant-free endpoints (user scope: `me.get`, `tenants.*`, `invites.*`, `auth.*`;
+   * multi-tenancy spec §3.3). Every other non-public endpoint needs the request's tenant (403
+   * `no_tenant` when the signed-in user has no membership). Default true.
+   */
+  tenant?: boolean;
   summary: string;
   params?: z.ZodType;
   query?: z.ZodType;

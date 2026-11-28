@@ -4,7 +4,7 @@ import type { Dialect } from '../db/url.js';
 import type { Clock } from '../lib/clock.js';
 import { hashCanonical } from '../lib/jcs.js';
 import { toJsonColumn } from '../lib/json.js';
-import { genesisPrev, hashRow } from './chain.js';
+import { genesisPrev, hashRow, LEGACY_CHAIN_ID } from './chain.js';
 import { paramsText, Redactor } from './redact.js';
 import type { AuditEventInput } from './types.js';
 
@@ -69,14 +69,28 @@ export const AUDIT_LOCK_ID = 0x4e5241554449_54n;
 
 type Db = Kysely<AuditDB> | Transaction<AuditDB>;
 
-/** Last chained (seq, hash): the newest row, else the newest checkpoint (all rows pruned), else genesis. */
-export async function chainHead(db: Db, installId: string): Promise<{ seq: number; hash: string }> {
-  // tenant-scope: system-job (chain head of the instance-wide hash chain)
-  const last = await db.selectFrom('audit_log').select(['seq', 'hash']).orderBy('seq', 'desc').limit(1).executeTakeFirst();
-  if (last) return { seq: Number(last.seq), hash: last.hash };
-  const cp = await db.selectFrom('audit_checkpoints').select(['seq', 'hash']).orderBy('seq', 'desc').limit(1).executeTakeFirst();
-  if (cp) return { seq: Number(cp.seq), hash: cp.hash };
-  return { seq: 0, hash: genesisPrev(installId) };
+/**
+ * The last `seq` handed out: the newest row, else the newest chain head (all rows pruned). `seq` stays
+ * global and increasing (row identity, ordering, SIEM cursors); hash links are per tenant.
+ */
+export async function lastSeq(db: Db): Promise<number> {
+  // tenant-scope: system-job (seq is allocated across tenants)
+  const last = await db.selectFrom('audit_log').select('seq').orderBy('seq', 'desc').limit(1).executeTakeFirst();
+  if (last) return Number(last.seq);
+  const head = await db.selectFrom('audit_chain_heads').select((eb) => eb.fn.max('seq').as('seq')).executeTakeFirst();
+  return Number(head?.seq ?? 0);
+}
+
+/** The head of a tenant's chain (multi-tenancy spec §4.5): the last (seq, hash) written for it, else its genesis. */
+export async function tenantHead(db: Db, installId: string, tenantId: string): Promise<{ seq: number; hash: string }> {
+  const h = await db.selectFrom('audit_chain_heads').select(['seq', 'hash']).where('tenant_id', '=', tenantId).executeTakeFirst();
+  return h ? { seq: Number(h.seq), hash: h.hash } : { seq: 0, hash: genesisPrev(installId, tenantId) };
+}
+
+/** The seq up to which rows belong to the legacy instance-wide chain (0 on an install that started with per-tenant chains). */
+export async function legacyChainEnd(db: Db): Promise<{ seq: number; hash: string }> {
+  const h = await db.selectFrom('audit_chain_heads').select(['seq', 'hash']).where('tenant_id', '=', LEGACY_CHAIN_ID).executeTakeFirst();
+  return { seq: Number(h?.seq ?? 0), hash: h?.hash ?? '' };
 }
 
 /**
@@ -263,15 +277,25 @@ export class AuditWriter {
     const committed: AuditLogTable[] = [];
     await this.o.db.transaction().execute(async (trx) => {
       if (this.o.dialect === 'postgres') await sql`select pg_advisory_xact_lock(${sql.lit(AUDIT_LOCK_ID.toString())}::bigint)`.execute(trx);
-      const head = await chainHead(trx, ctx.installId);
-      let prev = head.hash;
-      let seq = head.seq;
+      // one global, contiguous seq; one hash chain per tenant (spec §4.5)
+      let seq = await lastSeq(trx);
+      const heads = new Map<string, { seq: number; hash: string }>();
+      for (const t of new Set(prepared.map((p) => p.tenant_id))) heads.set(t, await tenantHead(trx, ctx.installId, t));
       for (let i = 0; i < prepared.length; i++) {
         seq++;
-        const row = { ...prepared[i]!, seq, prev_hash: prev, hash: '' } as AuditLogTable;
-        row.hash = hashRow(prev, row as unknown as Record<string, unknown>);
-        prev = row.hash;
+        const head = heads.get(prepared[i]!.tenant_id)!;
+        const row = { ...prepared[i]!, seq, prev_hash: head.hash, hash: '' } as AuditLogTable;
+        row.hash = hashRow(head.hash, row as unknown as Record<string, unknown>);
+        heads.set(row.tenant_id, { seq, hash: row.hash });
         committed.push(row);
+      }
+      const now = this.o.clock.now();
+      for (const [tenantId, h] of heads) {
+        await trx
+          .insertInto('audit_chain_heads')
+          .values({ tenant_id: tenantId, seq: h.seq, hash: h.hash, updated_at: now })
+          .onConflict((oc) => oc.column('tenant_id').doUpdateSet({ seq: h.seq, hash: h.hash, updated_at: now }))
+          .execute();
       }
       // chunk inserts to stay under SQLite's bound-parameter limit (~40 columns per row)
       for (let i = 0; i < committed.length; i += 50) {

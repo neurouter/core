@@ -9,14 +9,16 @@ import { m0010_eval_origin } from './main/0010_eval_origin.js';
 import { m0011_eval_cache_tokens } from './main/0011_eval_cache_tokens.js';
 import { m0012_task_state } from './main/0012_task_state.js';
 import { m0013_eval_limits } from './main/0013_eval_limits.js';
+import { m0014_tenancy } from './main/0014_tenancy.js';
 import { m0006_audit } from './audit/0006_audit.js';
 import { m0007_metrics } from './audit/0007_metrics.js';
+import { m0015_audit_tenant_chains } from './audit/0015_audit_tenant_chains.js';
 import type { DialectMigration } from './types.js';
 
 /** Static migration sets (bundler-safe, explicit order). Numbering is global across both sets (Hub convention). */
-export const MAIN_MIGRATIONS: readonly DialectMigration[] = [m0001_core, m0002_servers, m0003_auth, m0004_ops, m0005_evals, m0008_tenant_scope, m0009_mock_state, m0010_eval_origin, m0011_eval_cache_tokens, m0012_task_state, m0013_eval_limits];
+export const MAIN_MIGRATIONS: readonly DialectMigration[] = [m0001_core, m0002_servers, m0003_auth, m0004_ops, m0005_evals, m0008_tenant_scope, m0009_mock_state, m0010_eval_origin, m0011_eval_cache_tokens, m0012_task_state, m0013_eval_limits, m0014_tenancy];
 
-export const AUDIT_MIGRATIONS: readonly DialectMigration[] = [m0006_audit, m0007_metrics];
+export const AUDIT_MIGRATIONS: readonly DialectMigration[] = [m0006_audit, m0007_metrics, m0015_audit_tenant_chains];
 
 export type MigrationSet = 'main' | 'audit';
 

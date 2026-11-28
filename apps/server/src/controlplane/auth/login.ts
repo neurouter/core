@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 import * as oidc from 'openid-client';
 import { isSafeReturnTo, type LoginErrorCode, type Role } from '@neurouter/shared';
+import { INSTANCE_SCOPE_ID } from '../../kernel/tenancy/index.js';
 import type { AuditRecorder } from '../../kernel/audit/recorder.js';
 import type { MainDB } from '../../kernel/db/schema.js';
 import type { Clock } from '../../kernel/lib/clock.js';
@@ -17,6 +18,8 @@ export interface LoginConfig {
   adminGroups: readonly string[];
   defaultRole: Role;
   allowedEmailDomains: readonly string[];
+  /** An email with a pending invite may sign in outside `allowedEmailDomains` (multi-tenancy spec §2.4). */
+  invited?: (email: string) => Promise<boolean>;
 }
 
 export type LoginOutcome = { ok: true; userId: string; returnTo: string; idToken: string | null } | { ok: false; error: Exclude<LoginErrorCode, 'session_expired'>; reason: string };
@@ -57,7 +60,8 @@ export class LoginService {
     const verifier = oidc.randomPKCECodeVerifier();
     const challenge = await oidc.calculatePKCECodeChallenge(verifier);
     const stateHash = sha256(state);
-    const sealed = await this.envelope.seal(Buffer.from(verifier), stateAad(stateHash.toString('hex')));
+    // sign-in happens before any tenant is known: the login state is sealed under the instance scope
+    const sealed = await this.envelope.seal(INSTANCE_SCOPE_ID, Buffer.from(verifier), stateAad(stateHash.toString('hex')));
     await this.db
       .insertInto('oidc_login_states')
       .values({ state_hash: stateHash, code_verifier_enc: Buffer.concat([Buffer.from(sealed.dekId.padEnd(36).slice(0, 36)), pack(sealed)]), nonce, return_to: isSafeReturnTo(returnTo) ? returnTo : '/', expires_at: this.clock.now() + STATE_TTL_MS })
@@ -84,7 +88,7 @@ export class LoginService {
     try {
       const dekId = row.code_verifier_enc.subarray(0, 36).toString().trim();
       const sealed = unpack(row.code_verifier_enc.subarray(36));
-      verifier = (await this.envelope.open({ dekId, ...sealed }, stateAad(stateHash.toString('hex')))).toString();
+      verifier = (await this.envelope.open(INSTANCE_SCOPE_ID, { dekId, ...sealed }, stateAad(stateHash.toString('hex')))).toString();
     } catch {
       return fail('idp_error', 'state_decrypt_failed');
     }
@@ -100,7 +104,7 @@ export class LoginService {
     if (!sub || !email) return fail('access_denied', 'missing_sub_or_email');
     const verified = claims.email_verified === undefined ? true : claims.email_verified === true || claims.email_verified === 'true';
     if (!verified) return fail('access_denied', 'email_not_verified');
-    if (!this.domainAllowed(email)) return fail('domain_not_allowed', 'email_domain_not_allowed');
+    if (!this.domainAllowed(email) && !(await this.cfg.invited?.(email))) return fail('domain_not_allowed', 'email_domain_not_allowed');
     const name = typeof claims.name === 'string' && claims.name.trim() ? claims.name.trim().slice(0, 200) : email.split('@')[0]!;
     const user = await this.users.upsertOidc({ email, name, issuer: this.provider.issuer, subject: sub, role: roleFromClaims(claims, this.cfg) });
     if (user.status !== 'active') return fail('disabled', 'user_disabled', user.id);

@@ -1,3 +1,4 @@
+import { mcpUrl } from '../../kernel/lib/mcp-url.js';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { Kysely, Selectable } from 'kysely';
 import { applyOverlayPatch, mockScaleSegment, sha256Hex, withMockDataVersion, withMockScale, type MockDataVersion, type MockNs, type MockScale } from '@neurouter/compiler';
@@ -84,7 +85,7 @@ export interface EvalDeps {
   env: Record<string, string | undefined>;
   /** Server-level LLM key policy (spec §8.8, G12). */
   modelKeys: ModelKeyPolicy;
-  tenancy: Pick<TenantResolver, 'byId'>;
+  tenancy: Pick<TenantResolver, 'byId' | 'multi'>;
   defaultModel: string;
   metrics?: Metrics;
   log: { warn: (o: object, m: string) => void; info: (o: object, m: string) => void };
@@ -190,6 +191,12 @@ export class EvalsService {
     if (t && (await hasProviderKey({ env: this.d.env, settings: this.d.settings, tenantId, allowEnvKeys: this.d.modelKeys.allowEnvKeys(t) }, 'gemini'))) return DETERMINISTIC_JUDGE_MODEL;
     return fallback;
   }
+  /** The run's MCP endpoint on this instance: the tenant's 3-segment URL on a multi-tenant deployment (spec §3.9). */
+  private async mcpUrlOf(tenantId: string, server: string, env: string): Promise<string> {
+    const tenant = this.d.tenancy.multi ? ((await this.d.tenancy.byId(tenantId))?.slug ?? null) : null;
+    return mcpUrl(this.d.ports.baseUrl(), server, env, tenant);
+  }
+
 
   async llm(tenantId: string, models?: string[]): Promise<LlmClient> {
     const testLlm = this.d.env.NEUROUTER_EVAL_LLM || this.d.env.NEUROUTER_EVAL_FAKE_LLM;
@@ -272,7 +279,7 @@ export class EvalsService {
       // a script reference (long-workflow task) runs with code-mode exposure
       const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: opts.code ? 'code' : 'tools', [HEADER_REFERENCE]: '1' };
       if (build) headers[HEADER_BUILD] = build;
-      const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
+      const mcp = await createMcpHttpClient({ url: await this.mcpUrlOf(env.tenant_id, server.slug, env.slug), apiKey: key.token, headers });
       return {
         call: async (tool, args) => outcomeFromResult(tool, await mcp.callTool(tool, args)),
         close: async () => {
@@ -481,7 +488,7 @@ export class EvalsService {
     await this.d.ports.resetMock(ns);
     const headers: Record<string, string> = { [HEADER_MOCK_STATE]: name, [HEADER_EXPOSURE]: mode === 'code' ? 'code' : 'tools' };
     if (buildHeader) headers[HEADER_BUILD] = buildHeader;
-    const mcp = await createMcpHttpClient({ url: `${this.d.ports.baseUrl()}/mcp/${server.slug}/${env.slug}`, apiKey: key.token, headers });
+    const mcp = await createMcpHttpClient({ url: await this.mcpUrlOf(tenantId, server.slug, env.slug), apiKey: key.token, headers });
     return {
       mcp,
       stateReader: this.d.ports.mockState(ns),

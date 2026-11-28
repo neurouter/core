@@ -23,21 +23,24 @@ export class BuiltinSecretProvider implements SecretProvider {
   async put(input: { purpose: string; value: Uint8Array; id?: string; tenantId?: string }): Promise<SecretRef> {
     const now = this.clock.now();
     // tenant-scope: child-of-scoped (secret ids come from NamedSecrets rows filtered by tenant)
-    const existing = input.id ? await this.db.selectFrom('secrets').select(['id', 'version', 'purpose']).where('id', '=', input.id).executeTakeFirst() : undefined;
+    const existing = input.id ? await this.db.selectFrom('secrets').select(['id', 'version', 'purpose', 'tenant_id']).where('id', '=', input.id).executeTakeFirst() : undefined;
     const id = existing?.id ?? input.id ?? newId();
     const version = existing ? existing.version + 1 : 1;
-    const sealed = await this.envelope.seal(input.value, secretAad(input.purpose, id, version));
+    const tenantId = existing?.tenant_id ?? input.tenantId ?? INSTANCE_SCOPE_ID;
+    // sealed under the owning tenant's DEK (multi-tenancy spec §4.4)
+    const sealed = await this.envelope.seal(tenantId, input.value, secretAad(input.purpose, id, version));
     if (existing) {
       // tenant-scope: child-of-scoped (secret ids come from NamedSecrets rows filtered by tenant)
       await this.db
         .updateTable('secrets')
         .set({ purpose: input.purpose, dek_id: sealed.dekId, nonce: sealed.nonce, ciphertext: sealed.ciphertext, version, updated_at: now })
         .where('id', '=', id)
+        .where('tenant_id', '=', tenantId)
         .execute();
     } else {
       await this.db
         .insertInto('secrets')
-        .values({ id, tenant_id: input.tenantId ?? INSTANCE_SCOPE_ID, purpose: input.purpose, provider: 'builtin', external_ref: null, dek_id: sealed.dekId, nonce: sealed.nonce, ciphertext: sealed.ciphertext, version, created_at: now, updated_at: now })
+        .values({ id, tenant_id: tenantId, purpose: input.purpose, provider: 'builtin', external_ref: null, dek_id: sealed.dekId, nonce: sealed.nonce, ciphertext: sealed.ciphertext, version, created_at: now, updated_at: now })
         .execute();
     }
     return { id };
@@ -47,7 +50,7 @@ export class BuiltinSecretProvider implements SecretProvider {
     // tenant-scope: child-of-scoped (secret ids come from NamedSecrets rows filtered by tenant)
     const row = await this.db.selectFrom('secrets').selectAll().where('id', '=', ref.id).executeTakeFirst();
     if (!row || !row.dek_id || !row.nonce || !row.ciphertext) throw new Error(`Secret ${ref.id} not found`);
-    return this.envelope.open({ dekId: row.dek_id, nonce: row.nonce, ciphertext: row.ciphertext }, secretAad(row.purpose, row.id, row.version));
+    return this.envelope.open(row.tenant_id, { dekId: row.dek_id, nonce: row.nonce, ciphertext: row.ciphertext }, secretAad(row.purpose, row.id, row.version));
   }
 
   async delete(ref: SecretRef): Promise<void> {
@@ -61,12 +64,11 @@ export class BuiltinSecretProvider implements SecretProvider {
     return row?.updated_at ?? null;
   }
 
-  /** Re-encrypts every secret not under `activeDekId` (DEK rotation). Returns the number re-encrypted. */
-  async reencryptAll(activeDekId: string, batch = 500): Promise<number> {
+  /** Re-encrypts every secret of the tenant not under its `activeDekId` (DEK rotation). Returns the number re-encrypted. */
+  async reencryptAll(tenantId: string, activeDekId: string, batch = 500): Promise<number> {
     let total = 0;
     for (;;) {
-      // tenant-scope: system-job (DEK rotation re-encrypts every tenant's secrets)
-      const rows = await this.db.selectFrom('secrets').select(['id', 'purpose']).where('dek_id', '!=', activeDekId).limit(batch).execute();
+      const rows = await this.db.selectFrom('secrets').select(['id', 'purpose']).where('tenant_id', '=', tenantId).where('dek_id', '!=', activeDekId).limit(batch).execute();
       if (rows.length === 0) return total;
       for (const r of rows) {
         const value = await this.get(r);

@@ -8,7 +8,6 @@ import { pingDatabase } from '../../../kernel/db/index.js';
 import { toIso, toIsoOrNull } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
 import { parseJsonColumn } from '../../../kernel/lib/json.js';
-import { clampLimit, decodeCursor, toPage } from '../../../kernel/lib/pagination.js';
 import { KILL_CHANGED, type UpstreamAuthDescriptor } from '../../../kernel/runtime-config.js';
 import { requireTenant, requireUser, tenantOf } from '../../auth/guards.js';
 import type { TenantRef } from '../../../kernel/tenancy/types.js';
@@ -397,18 +396,7 @@ export async function settingsRoutes(app: FastifyInstance, c: ApiContext): Promi
     };
   });
 
-  /* ---------------------------------------------------------------- users, jobs */
-  const userRow = (u: { id: string; email: string; name: string; role: 'admin' | 'viewer'; role_source: 'local' | 'oidc' | 'bootstrap'; status: 'active' | 'disabled'; last_login_at: number | null; created_at: number }) => ({ id: u.id, email: u.email, name: u.name, role: u.role, roleSource: u.role_source, status: u.status, lastLoginAt: toIsoOrNull(u.last_login_at), createdAt: toIso(u.created_at) });
-  route(app, 'users.list', api.users.list, async (req) => {
-    const limit = clampLimit(req.query.limit);
-    const key = decodeCursor(req.query.cursor);
-    let qb = db.selectFrom('users').selectAll().where('tenant_id', '=', tenantOf(req)).where('email', '!=', 'anonymous@demo.invalid');
-    if (req.query.q) qb = qb.where((eb) => eb.or([eb('email', 'like', `%${req.query.q}%`), eb('name', 'like', `%${req.query.q}%`)]));
-    if (key) qb = qb.where('email', '>', String(key[0]));
-    const rows = await qb.orderBy('email').limit(limit + 1).execute();
-    return toPage(rows, limit, userRow, (r) => [r.email]);
-  });
-  route(app, 'users.update', api.users.update, async (req) => userRow(await c.users.update(tenantOf(req), req.params.id, req.body, requireUser(req).id)));
+  /* ---------------------------------------------------------------- jobs (members: routes/members.ts) */
   route(app, 'jobs.get', api.jobs.get, async (req) => c.jobs.get(tenantOf(req), req.params.id, requireUser(req)));
 
   /* ---------------------------------------------------------------- SSE events (§12.3) */

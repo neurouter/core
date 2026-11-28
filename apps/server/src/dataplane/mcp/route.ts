@@ -13,7 +13,9 @@ import { originOf, RC_KEY, traceIdOf, type ClientInfo, type Principal, type RunC
 import type { Confirmer, ConfirmOutcome, Pipeline } from '../pipeline/pipeline.js';
 import type { TaskTracker } from '../tasks/tracker.js';
 import { startCallTrace } from '../../kernel/observability/tracing.js';
-import { bearerChallenge, protectedResourceMetadata } from './challenge.js';
+import { bearerChallenge, mcpUrl, protectedResourceMetadata } from './challenge.js';
+
+type McpParams = { tenant?: string; server: string; env: string };
 import type { Dispatcher } from './dispatch.js';
 import { InflightCalls, inspectJsonRpc, LegacyClientInfo } from './inflight.js';
 import { originAllowed } from './origin.js';
@@ -48,8 +50,8 @@ export interface McpRouteDeps {
   onAuthFailure?: (reason: string, method: 'api_key' | 'oauth' | 'external') => void;
   inflight?: InflightCalls;
   legacyClients?: LegacyClientInfo;
-  /** Request → tenant (spec §3.2). */
-  tenancy: Pick<TenantResolver, 'forMcp'>;
+  /** Request → tenant (spec §3.2); `multi` registers the `/mcp/{tenant}/{server}/{env}` routes and their PRM. */
+  tenancy: Pick<TenantResolver, 'forMcp' | 'multi'>;
   /** `NEUROUTER_MAINTENANCE`: 503 on every MCP request. */
   maintenance?: () => boolean;
   /** Accepts the eval mock-state header only when bound to this tenant/environment/run (G13). */
@@ -296,31 +298,37 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
   const callHandler = createMcpHandler(factory, { ...common, responseMode: 'sse' });
   const defaultHandler = createMcpHandler(factory, { ...common, responseMode: 'auto' });
 
-  app.get<{ Params: { server: string; env: string } }>('/.well-known/oauth-protected-resource/mcp/:server/:env', async (req, reply) =>
-    reply.header('cache-control', 'public, max-age=3600').header('access-control-allow-origin', '*').send(protectedResourceMetadata(d.publicUrl, req.params.server, req.params.env, d.externalIssuer)),
-  );
+  const prm = async (req: FastifyRequest<{ Params: McpParams }>, reply: FastifyReply) =>
+    reply.header('cache-control', 'public, max-age=3600').header('access-control-allow-origin', '*').send(protectedResourceMetadata(d.publicUrl, req.params.server, req.params.env, d.externalIssuer, req.params.tenant ?? null));
+  app.get<{ Params: McpParams }>('/.well-known/oauth-protected-resource/mcp/:server/:env', prm);
+  // the tenant's own resource URI (spec §3.2, D5): only on a multi-tenant deployment
+  if (d.tenancy.multi) app.get<{ Params: McpParams }>('/.well-known/oauth-protected-resource/mcp/:tenant/:server/:env', prm);
 
   await app.register(async (scope) => {
     scope.removeAllContentTypeParsers();
     scope.addContentTypeParser('*', { parseAs: 'string', bodyLimit: 4 * 1024 * 1024 }, (_req, body, done) => done(null, body));
 
-    const handle = async (req: FastifyRequest<{ Params: { server: string; env: string } }>, reply: FastifyReply) => {
+    const handle = async (req: FastifyRequest<{ Params: McpParams }>, reply: FastifyReply) => {
       const { server: serverSlug, env: envSlug } = req.params;
+      const tenantSlug = req.params.tenant ?? null;
       if (!originAllowed(header(req, 'origin'), d.publicUrl, d.allowedOrigins)) {
         return reply.status(403).type('application/json').send({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Origin not allowed' } });
       }
-      const challenge = (error?: 'invalid_token' | 'insufficient_scope') => bearerChallenge(d.publicUrl, serverSlug, envSlug, error);
+      const challenge = (error?: 'invalid_token' | 'insufficient_scope') => bearerChallenge(d.publicUrl, serverSlug, envSlug, error, undefined, tenantSlug);
       const authz = header(req, 'authorization');
       // maintenance window (spec §11 M3): no MCP traffic while the database is being moved
       if (d.maintenance?.()) return reply.status(503).header('retry-after', '120').type('application/json').send({ error: 'maintenance', error_description: 'Neurouter is in maintenance; retry shortly' });
-      // the tenant comes from the resolver (legacy 2-segment route: the deployment's default tenant), never a constant (spec §3.2)
-      const tenant = await d.tenancy.forMcp({ tenantSlug: null, serverSlug, envSlug });
+      // the tenant comes from the URL through the resolver (legacy 2-segment route: the deployment's legacy tenant), never a constant (spec §3.2);
+      // deleted tenants and tenants pending deletion read as unknown
+      const found = await d.tenancy.forMcp({ tenantSlug, serverSlug, envSlug });
+      const tenant = found && found.status !== 'deleted' && found.status !== 'pending_deletion' ? found : null;
       const bundle = tenant ? await d.runtime.get(tenant.id, serverSlug, envSlug) : null;
       if (!bundle) {
         if (!authz) return reply.status(401).header('www-authenticate', challenge()).type('application/json').send({ error: 'unauthorized', error_description: 'Authentication required' });
         return reply.status(404).type('application/json').send({ error: 'not_found' });
       }
-      const resourceUri = `${d.publicUrl}/mcp/${serverSlug}/${envSlug}`;
+      // the canonical resource: the tenant's current slug (an alias URL authenticates against it)
+      const resourceUri = mcpUrl(d.publicUrl, serverSlug, envSlug, tenantSlug === null ? null : tenant!.slug);
       const auth = await d.authenticator.authenticate(authz, { tenantId: bundle.tenantId, serverId: bundle.server.id, environmentId: bundle.environment.id, resourceUri }, { ip: req.ip });
       if (!auth.ok) {
         d.onAuthFailure?.(auth.reason, /^bearer\s+nrk_at_/i.test(authz ?? '') ? 'oauth' : /^bearer\s+nrk_/i.test(authz ?? '') ? 'api_key' : 'external');
@@ -331,6 +339,7 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
           .type('application/json')
           .send({ error: auth.error === 'missing_token' ? 'unauthorized' : auth.error, error_description: auth.error === 'missing_token' ? 'Authentication required' : 'The access token is invalid or not permitted' });
       }
+      if (tenant!.status === 'suspended') return reply.status(403).type('application/json').send({ error: 'tenant_suspended', error_description: 'This organization is suspended' });
       if (bundle.environment.status !== 'active' || bundle.server.status !== 'active') return reply.status(503).type('application/json').send({ error: 'environment_disabled' });
 
       const ua = header(req, 'user-agent');
@@ -401,6 +410,11 @@ export async function mcpRoutes(app: FastifyInstance, d: McpRouteDeps): Promise<
     scope.post('/mcp/:server/:env', handle);
     scope.get('/mcp/:server/:env', handle);
     scope.delete('/mcp/:server/:env', handle);
+    if (d.tenancy.multi) {
+      scope.post('/mcp/:tenant/:server/:env', handle);
+      scope.get('/mcp/:tenant/:server/:env', handle);
+      scope.delete('/mcp/:tenant/:server/:env', handle);
+    }
   });
   return { handlers: [callHandler, defaultHandler] };
 }

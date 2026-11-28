@@ -22,8 +22,12 @@ describe('console auth: local link, me, logout', () => {
     const r = await t.as(null, { method: 'POST', url: '/api/auth/link', payload: { token } });
     expect(r.statusCode).toBe(200);
     const me = JSON.parse(r.body);
-    expect(me.user).toMatchObject({ email: 'admin@localhost', role: 'admin', anonymous: false });
-    expect(me.capabilities).toContain('settings:write');
+    // the bootstrap admin owns the install's organization (multi-tenancy spec §2.2)
+    expect(me.user).toMatchObject({ email: 'admin@localhost', role: 'owner', anonymous: false });
+    expect(me.capabilities).toEqual(expect.arrayContaining(['settings:write', 'members:manage', 'tenant:delete']));
+    expect(me.tenant).toMatchObject({ slug: 'default', role: 'owner', kind: 'org', status: 'active' });
+    expect(me.tenants).toHaveLength(1);
+    expect(me.tenancy).toEqual({ multi: false });
     const cookie = String(r.headers['set-cookie']).split(';')[0]!;
     const me2 = await t.s.app.inject({ url: '/api/me', headers: { cookie } });
     expect(JSON.parse(me2.body).user.email).toBe('admin@localhost');

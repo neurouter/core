@@ -19,6 +19,8 @@ export interface WebSession {
   idHash: Buffer;
   /** Demo-mode anonymous viewer session (§13.1). */
   anonymous: boolean;
+  /** Last-used tenant of this session (multi-tenancy spec §3.3); the console falls back to it without a tenant header. */
+  activeTenantId: string | null;
 }
 
 const SLIDE_EVERY_MS = 60_000;
@@ -34,14 +36,14 @@ export class SessionService {
     readonly cfg: SessionConfig,
   ) {}
 
-  async create(userId: string, meta: { ip?: string | null; userAgent?: string | null; idTokenHint?: string | null; anonymous?: boolean } = {}): Promise<{ token: string; csrfToken: string; expiresAt: number }> {
+  async create(userId: string, meta: { ip?: string | null; userAgent?: string | null; idTokenHint?: string | null; anonymous?: boolean; activeTenantId?: string | null } = {}): Promise<{ token: string; csrfToken: string; expiresAt: number }> {
     const token = randomToken(32);
     const csrfToken = randomToken(24);
     const now = this.clock.now();
     const expiresAt = now + this.cfg.ttlMs;
     await this.db
       .insertInto('web_sessions')
-      .values({ id_hash: sha256(token), user_id: userId, csrf_token: csrfToken, created_at: now, expires_at: expiresAt, last_seen_at: now, ip: meta.ip ?? null, user_agent: meta.userAgent?.slice(0, 512) ?? null, id_token_hint: meta.idTokenHint ?? null, anonymous: meta.anonymous ? 1 : 0 })
+      .values({ id_hash: sha256(token), user_id: userId, csrf_token: csrfToken, created_at: now, expires_at: expiresAt, last_seen_at: now, ip: meta.ip ?? null, user_agent: meta.userAgent?.slice(0, 512) ?? null, id_token_hint: meta.idTokenHint ?? null, anonymous: meta.anonymous ? 1 : 0, active_tenant_id: meta.activeTenantId ?? null })
       .execute();
     return { token, csrfToken, expiresAt };
   }
@@ -59,7 +61,12 @@ export class SessionService {
     if (now - row.last_seen_at >= SLIDE_EVERY_MS) {
       await this.db.updateTable('web_sessions').set({ last_seen_at: now }).where('id_hash', '=', idHash).execute();
     }
-    return { userId: row.user_id, csrfToken: row.csrf_token, expiresAt: row.expires_at, idTokenHint: row.id_token_hint, idHash, anonymous: row.anonymous === 1 };
+    return { userId: row.user_id, csrfToken: row.csrf_token, expiresAt: row.expires_at, idTokenHint: row.id_token_hint, idHash, anonymous: row.anonymous === 1, activeTenantId: row.active_tenant_id };
+  }
+
+  /** Remembers the session's active tenant (`tenants.switch`, invite accept). */
+  async setActiveTenant(idHash: Buffer, tenantId: string): Promise<void> {
+    await this.db.updateTable('web_sessions').set({ active_tenant_id: tenantId }).where('id_hash', '=', idHash).execute();
   }
 
   async destroy(idHash: Buffer): Promise<void> {

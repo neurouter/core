@@ -97,6 +97,8 @@ export interface AuditCheckpoint {
   mac: string;
   keyId: string;
   createdAt: number;
+  /** The chain the checkpoint anchors: a tenant, or null for the legacy instance-wide chain. */
+  tenantId?: string | null;
 }
 
 export type BrokenReason = 'hash_mismatch' | 'gap' | 'bad_checkpoint_mac' | 'checkpoint_mismatch' | 'broken_link';

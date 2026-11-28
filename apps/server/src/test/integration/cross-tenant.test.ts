@@ -13,7 +13,7 @@ import { startServer } from '../../server.js';
 import { newId } from '../../kernel/lib/ids.js';
 import { resolveResource } from '../../controlplane/oauth/resource.js';
 import { consoleOn, importPetstore, PETSTORE, type TestContext, type TestUser } from '../fakes/app-context.js';
-import { FakeMultiTenantResolver, modelKeyPolicy, secretRefPolicy, seedTenant } from '../fakes/extensions.js';
+import { FakeMultiTenantResolver, modelKeyPolicy, secretRefPolicy, seedMember, seedTenant } from '../fakes/extensions.js';
 
 const A = DEFAULT_TENANT_ID;
 const B = '00000000-0000-7000-8000-0000000000b2';
@@ -46,8 +46,7 @@ describe('cross-tenant isolation (P0 gaps)', () => {
     t = await consoleOn(s);
     alice = t.admin;
     await seedTenant(db(), B, 'beta', 'Beta');
-    const bobId = newId();
-    await db().insertInto('users').values({ id: bobId, tenant_id: B, email: 'bob@beta.test', name: 'bob', role: 'admin', role_source: 'local', created_at: Date.now(), updated_at: Date.now() }).execute();
+    await seedMember(db(), { tenantId: B, email: 'bob@beta.test', role: 'owner', userId: newId(), name: 'bob' });
     bob = await t.user('bob@beta.test', 'admin');
     serverA = await importPetstore(t);
     const { readFile } = await import('node:fs/promises');
@@ -154,11 +153,12 @@ describe('cross-tenant isolation (P0 gaps)', () => {
     expect((await t.as(alice, { method: 'POST', url: '/api/eval-runs', payload: { serverId: serverA.id, buildId: buildB } })).statusCode).toBe(404);
   });
 
-  it('G7: users are listed and updated per tenant', async () => {
-    const list = await t.json(alice, { url: '/api/users' }, 200);
+  it('G7: members are listed and updated per tenant', async () => {
+    const list = await t.json(alice, { url: '/api/members' }, 200);
     expect(list.items.map((u: { email: string }) => u.email)).not.toContain('bob@beta.test');
-    expect((await t.as(alice, { method: 'PATCH', url: `/api/users/${bob.id}`, payload: { role: 'viewer' } })).statusCode).toBe(404);
-    expect((await db().selectFrom('users').select('role').where('id', '=', bob.id).executeTakeFirstOrThrow()).role).toBe('admin');
+    expect((await t.as(alice, { method: 'PATCH', url: `/api/members/${bob.id}`, payload: { role: 'viewer' } })).statusCode).toBe(404);
+    expect((await t.as(alice, { method: 'DELETE', url: `/api/members/${bob.id}` })).statusCode).toBe(404);
+    expect((await db().selectFrom('memberships').select('role').where('user_id', '=', bob.id).where('tenant_id', '=', B).executeTakeFirstOrThrow()).role).toBe('owner');
   });
 
   it('G8: sidebar badges count only the tenant’s inbox and runs', async () => {

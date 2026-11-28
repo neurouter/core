@@ -20,6 +20,7 @@ import type { BuildsService } from '../servers/builds.service.js';
 import type { ServersService } from '../servers/servers.service.js';
 import type { GraphqlIntrospector, SpecFetcher } from '../servers/fetch-spec.js';
 import type { UsersService } from '../users/users.service.js';
+import type { InvitesService } from '../members/invites.service.js';
 import type { ConsolePorts } from './ports.js';
 import type { EvalsService } from '../evals/evals.service.js';
 import type { Views } from './views.js';
@@ -56,6 +57,7 @@ export interface ApiContext {
   configSync: ConfigSync;
   apiKeys: ApiKeysService;
   users: UsersService;
+  invites: InvitesService;
   sessions: SessionService;
   login: LoginService;
   oidcProvider: OidcProvider | null;

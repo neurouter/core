@@ -11,7 +11,7 @@ const d = dbs.main.native.database;
 const pascal = (s: string) => s.split('_').map((p) => p[0]!.toUpperCase() + p.slice(1)).join('') + 'Table';
 // determine table membership from migration source text
 const src = (names: string[]) => names.map((n) => fs.readFileSync(`src/kernel/db/migrations/${n}`, 'utf8')).join('\n');
-const auditSrc = src(['audit/0006_audit.ts', 'audit/0007_metrics.ts']);
+const auditSrc = src(['audit/0006_audit.ts', 'audit/0007_metrics.ts', 'audit/0015_audit_tenant_chains.ts']);
 const tables = (d.prepare("select name, sql from sqlite_master where type='table' and name not like 'sqlite_%' and name not like 'kysely_%'").all() as { name: string; sql: string }[]).filter(
   (t) => !/_(data|idx|content|docsize|config)$/.test(t.name) && !/virtual table/i.test(t.sql),
 );

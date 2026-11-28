@@ -100,7 +100,7 @@ async function verify(db: AnyDb, s: Awaited<ReturnType<typeof seed>>) {
 async function runScenario(db: AnyDb, ctx: MigrationContext) {
   expect(await up(db, ctx, V011)).toEqual(['0001_core', '0002_servers', '0003_auth', '0004_ops', '0005_evals']);
   const s = await seed(db);
-  expect(await up(db, ctx)).toEqual(['0008_tenant_scope', '0009_mock_state', '0010_eval_origin', '0011_eval_cache_tokens', '0012_task_state', '0013_eval_limits']);
+  expect(await up(db, ctx)).toEqual(['0008_tenant_scope', '0009_mock_state', '0010_eval_origin', '0011_eval_cache_tokens', '0012_task_state', '0013_eval_limits', '0014_tenancy']);
   await verify(db, s);
   // idempotent: re-running the body on the cleaned database changes nothing
   const m = MAIN_MIGRATIONS.find((x) => x.name === '0010_eval_origin')!;

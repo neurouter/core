@@ -1,10 +1,10 @@
 import * as z from 'zod';
-import { ConfigMode, JobKind, JobStatus, KillSwitchKind, KillSwitchScope, Role, UserStatus } from '../domain/index.js';
+import { ConfigMode, JobKind, JobStatus, KillSwitchKind, KillSwitchScope } from '../domain/index.js';
 import { CodeLimits } from '../config/limits.js';
 import { LlmProviderKind } from '../config/llm-models.js';
 import { EvalEffort } from '../config/neurouter-yaml.js';
 import { Diagnostic } from '../domain/tool-model.js';
-import { CursorQuery, Id, IdParams, IsoDateTime, Items, Page, Ref, queryOptional } from './common.js';
+import { Id, IdParams, IsoDateTime, Items, Ref, queryOptional } from './common.js';
 import { endpoint } from './endpoint.js';
 
 /* ------------------------------------------------------------------ settings (§14.13) */
@@ -233,18 +233,8 @@ export const SystemInfo = z.object({
 });
 export type SystemInfo = z.infer<typeof SystemInfo>;
 
-export const UserRow = z.object({
-  id: Id,
-  email: z.string(),
-  name: z.string(),
-  role: Role,
-  roleSource: z.enum(['local', 'oidc', 'bootstrap']),
-  status: UserStatus,
-  lastLoginAt: IsoDateTime.nullable(),
-  createdAt: IsoDateTime,
-});
-export type UserRow = z.infer<typeof UserRow>;
-export const UserPatch = z.object({ role: Role.optional(), status: UserStatus.optional() });
+/** Kept for older imports: the members list row (`members.list`). */
+export { MemberRow as UserRow, MemberPatch as UserPatch } from './members.js';
 
 export const Job = z.object({
   id: Id,
@@ -272,11 +262,6 @@ export type SseEvent = z.infer<typeof SseEvent>;
 
 export const systemEndpoints = {
   info: endpoint({ method: 'GET', path: '/api/system/info', kind: 'json', access: ['settings:read'], summary: 'Version, DB, executor, embedder', response: SystemInfo }),
-} as const;
-
-export const userEndpoints = {
-  list: endpoint({ method: 'GET', path: '/api/users', kind: 'json', access: ['settings:read'], summary: 'Console users', query: CursorQuery.extend({ q: queryOptional(z.string().max(200)) }), response: Page(UserRow) }),
-  update: endpoint({ method: 'PATCH', path: '/api/users/:id', kind: 'json', access: ['settings:write'], summary: 'Change role or status (409 last admin)', params: IdParams, body: UserPatch, response: UserRow }),
 } as const;
 
 export const jobEndpoints = {

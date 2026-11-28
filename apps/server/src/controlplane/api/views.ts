@@ -1,3 +1,4 @@
+import { mcpUrl } from '../../kernel/lib/mcp-url.js';
 import type { EnvRefGate } from '../../kernel/secrets/env-refs.js';
 import { gunzipSync } from 'node:zlib';
 import type { Kysely, Selectable } from 'kysely';
@@ -51,6 +52,8 @@ export class Views {
     private readonly secrets: NamedSecrets,
     /** `env:NAME` presence is revealed only for references the env's tenant may use (G12: no oracle on gateway variables). */
     private readonly envRefs: Pick<EnvRefGate, 'read'>,
+    /** The tenant segment of MCP URLs (`/mcp/{tenant}/{server}/{env}`), null on a single-tenant deployment (spec §3.2). */
+    private readonly mcpTenant: (tenantId: string) => Promise<string | null> = async () => null,
   ) {}
 
   async userRef(id: string | null): Promise<{ id: string; name: string } | null> {
@@ -288,7 +291,7 @@ export class Views {
       autoPromote: e.auto_promote === 1,
       health: this.envHealth(e),
       credential: await this.credentialState(e, auth),
-      mcpUrl: `${this.publicUrl}/mcp/${server.slug}/${e.slug}`,
+      mcpUrl: mcpUrl(this.publicUrl, server.slug, e.slug, await this.mcpTenant(e.tenant_id)),
       managedBy: e.managed_by,
       config: e.config_path ? { path: e.config_path, line: e.config_line } : null,
       createdAt: toIso(e.created_at),

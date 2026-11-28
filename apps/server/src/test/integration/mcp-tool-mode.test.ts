@@ -76,7 +76,7 @@ describe.each([['sqlite', ''], ...(PG ? [['postgres', PG]] : [])])('tool-mode da
 
   it('audit chain verifies after calls', async () => {
     await s.services.auditStore.flush();
-    const v = await s.services.auditStore.verify({});
+    const v = await s.services.auditStore.verify(DEFAULT_TENANT_ID, {}, { includeLegacy: true });
     expect(v.ok).toBe(true);
     expect(v.checked).toBeGreaterThan(5);
   });

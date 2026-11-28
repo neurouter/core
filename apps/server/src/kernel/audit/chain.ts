@@ -3,12 +3,17 @@ import { hkdf, hmacSha256Hex, sha256Hex, timingSafeEqualStr } from '../lib/crypt
 import { createHash } from 'node:crypto';
 
 /**
- * Pure hash-chain functions (backend §9.3).
+ * Pure hash-chain functions (backend §9.3; per-tenant chains: multi-tenancy spec §4.5).
  *
- *   genesis_prev = sha256("neurouter-core-audit-genesis:" + install_id)
+ *   genesis_prev = sha256("neurouter-core-audit-genesis:" + install_id + ":" + tenant_id)
+ *                  (the legacy instance-wide chain, rows before 0015: sha256("neurouter-core-audit-genesis:" + install_id))
  *   entry_body   = JCS({ seq, id, ts, kind, …, session_id, ip, user_agent })   // nulls explicit
  *   hash(n)      = hex(sha256(hexToBytes(prev_hash) || 0x1E || utf8(entry_body)))
- *   checkpoint   = { seq, hash, kind, key_id, mac: hex(HMAC-SHA256(auditMacKey, "ckpt|seq|hash|kind")) }
+ *   checkpoint   = { seq, hash, kind, key_id, mac: hex(HMAC-SHA256(auditMacKey, "ckpt|tenant_id|seq|hash|kind")) }
+ *                  (legacy chain checkpoints: "ckpt|seq|hash|kind")
+ *
+ * Every tenant has its own chain: a row's `prev_hash` is the hash of the previous row of the same
+ * tenant, so a tenant can verify and export its chain without seeing other tenants' hashes.
  */
 export const CHAIN_FIELDS = [
   'seq', 'id', 'ts', 'kind', 'request_id', 'user_id', 'api_key_id', 'oauth_client_id', 'client_name',
@@ -28,8 +33,12 @@ export type CheckpointKind = 'periodic' | 'retention_cut' | 'key_rotation';
 const JSON_FIELDS = new Set<ChainField>(['params_redacted', 'changes', 'output_full', 'policy_trail']);
 const INT_FIELDS = new Set<ChainField>(['seq', 'ts', 'output_size', 'latency_ms', 'upstream_latency_ms', 'write', 'dry_run', 'upstream_status']);
 
-export function genesisPrev(installId: string): string {
-  return sha256Hex(`neurouter-core-audit-genesis:${installId}`);
+/** `audit_chain_heads` key of the legacy instance-wide chain (the rows written before per-tenant chains). */
+export const LEGACY_CHAIN_ID = '00000000-0000-0000-0000-000000000000';
+
+/** Genesis `prev_hash` of a tenant's chain, or of the legacy instance-wide chain without `tenantId`. */
+export function genesisPrev(installId: string, tenantId?: string): string {
+  return sha256Hex(tenantId === undefined ? `neurouter-core-audit-genesis:${installId}` : `neurouter-core-audit-genesis:${installId}:${tenantId}`);
 }
 
 /**
@@ -65,10 +74,11 @@ export function auditMacKey(kek: Buffer): Buffer {
   return hkdf(kek, 'neurouter-core:audit-checkpoint-mac');
 }
 
-export function checkpointMac(macKey: Buffer, seq: number, hash: string, kind: CheckpointKind): string {
-  return hmacSha256Hex(macKey, `ckpt|${seq}|${hash}|${kind}`);
+/** Checkpoint MAC; a tenant chain's checkpoint binds the tenant (it can't be moved to another tenant's chain). */
+export function checkpointMac(macKey: Buffer, seq: number, hash: string, kind: CheckpointKind, tenantId: string | null = null): string {
+  return hmacSha256Hex(macKey, tenantId === null ? `ckpt|${seq}|${hash}|${kind}` : `ckpt|${tenantId}|${seq}|${hash}|${kind}`);
 }
 
-export function verifyCheckpointMac(macKey: Buffer, cp: { seq: number; hash: string; kind: CheckpointKind; mac: string }): boolean {
-  return timingSafeEqualStr(checkpointMac(macKey, Number(cp.seq), cp.hash, cp.kind), cp.mac);
+export function verifyCheckpointMac(macKey: Buffer, cp: { seq: number; hash: string; kind: CheckpointKind; mac: string; tenantId?: string | null }): boolean {
+  return timingSafeEqualStr(checkpointMac(macKey, Number(cp.seq), cp.hash, cp.kind, cp.tenantId ?? null), cp.mac);
 }

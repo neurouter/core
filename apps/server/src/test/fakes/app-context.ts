@@ -18,8 +18,8 @@ export interface TestUser {
 export interface TestContext {
   s: RunningServer;
   admin: TestUser;
-  /** Creates a user with a role and a signed-in session. */
-  user(email: string, role: 'admin' | 'viewer'): Promise<TestUser>;
+  /** Creates a user (a member of the default tenant with that role) and a signed-in session; an existing user keeps its memberships. */
+  user(email: string, role: 'owner' | 'admin' | 'viewer'): Promise<TestUser>;
   /** Injects with the user's cookie (+ CSRF on non-GET). `null` = anonymous. */
   as(u: TestUser | null, opts: InjectOptions): Promise<LightMyRequestResponse>;
   /** JSON body helper (throws with the payload on an unexpected status). */
@@ -55,18 +55,21 @@ export async function createTestContext(env: Record<string, string> = {}, servic
 
 async function withHelpers(s: RunningServer): Promise<TestContext> {
   const sessions = new SessionService(s.services.dbs.main.db, s.services.clock, { cookieName: s.config.cookieNames.session, secure: false, ttlMs: 3_600_000, idleMs: 3_600_000 });
-  const user = async (email: string, role: 'admin' | 'viewer'): Promise<TestUser> => {
+  const user = async (email: string, role: 'owner' | 'admin' | 'viewer'): Promise<TestUser> => {
     const db = s.services.dbs.main.db;
     let row = await db.selectFrom('users').select('id').where('email', '=', email).executeTakeFirst();
     if (!row) {
       const id = newId();
-      await db.insertInto('users').values({ id, tenant_id: DEFAULT_TENANT_ID, email, name: email.split('@')[0]!, role, role_source: 'local', created_at: Date.now(), updated_at: Date.now() }).execute();
+      const now = Date.now();
+      await db.insertInto('users').values({ id, tenant_id: DEFAULT_TENANT_ID, email, name: email.split('@')[0]!, role: role === 'viewer' ? 'viewer' : 'admin', role_source: 'local', created_at: now, updated_at: now }).execute();
+      await db.insertInto('memberships').values({ tenant_id: DEFAULT_TENANT_ID, user_id: id, role, role_source: 'local', status: 'active', invited_by: null, created_at: now, updated_at: now }).execute();
       row = { id };
     }
     const sess = await sessions.create(row.id);
     return { id: row.id, email, cookie: `${s.config.cookieNames.session}=${sess.token}`, csrf: sess.csrfToken };
   };
-  const admin = await user('admin@test.dev', 'admin');
+  // the install's operator: the default tenant's owner (OSS: the bootstrap admin)
+  const admin = await user('admin@test.dev', 'owner');
   const as = (u: TestUser | null, opts: InjectOptions) =>
     s.app.inject({ ...opts, headers: { ...(opts.headers ?? {}), ...(u ? { cookie: u.cookie, ...(opts.method && opts.method !== 'GET' ? { 'x-csrf-token': u.csrf } : {}) } : {}) } });
   const json = async (u: TestUser | null, opts: InjectOptions, status?: number) => {

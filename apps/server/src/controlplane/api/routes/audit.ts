@@ -131,12 +131,15 @@ export async function auditRoutes(app: FastifyInstance, c: ApiContext): Promise<
     const from = req.body.from ? fromIso(req.body.from) : undefined;
     const to = req.body.to ? fromIso(req.body.to) : undefined;
     if (from !== undefined && to !== undefined && to <= from) throw AppError.validation('`to` must be after `from`', [{ path: ['to'], message: 'Must be after from', code: 'invalid_range' }]);
-    const jobId = await c.jobs.start(tenantOf(req), 'audit_verify', { from: req.body.from ?? null, to: req.body.to ?? null }, u.id, async (): Promise<AuditVerifyResult> => {
+    const tenantId = tenantOf(req);
+    // the legacy instance-wide chain (rows from before per-tenant chains) belongs to the install's own tenant
+    const includeLegacy = (await c.tenancy.defaultTenant())?.id === tenantId;
+    const jobId = await c.jobs.start(tenantId, 'audit_verify', { from: req.body.from ?? null, to: req.body.to ?? null }, u.id, async (): Promise<AuditVerifyResult> => {
       await c.auditStore.flush();
       const rangeSeq = from !== undefined || to !== undefined ? await c.auditStore.seqRange(from, to) : {};
       if (rangeSeq === null) return { ok: true, checked: 0, fromSeq: null, toSeq: null, checkpointsVerified: 0, firstBrokenSeq: null, reason: null };
-      const out = await c.auditStore.verify(rangeSeq);
-      c.audit.system(tenantOf(req), 'audit.verify', { reason: out.ok ? 'ok' : (out.brokenAt?.reason ?? 'broken') });
+      const out = await c.auditStore.verify(tenantId, rangeSeq, { includeLegacy });
+      c.audit.system(tenantId, 'audit.verify', { reason: out.ok ? 'ok' : (out.brokenAt?.reason ?? 'broken') });
       return { ok: out.ok, checked: out.checked, fromSeq: out.firstSeq, toSeq: out.lastSeq, checkpointsVerified: out.checkpointsVerified, firstBrokenSeq: out.brokenAt?.seq ?? null, reason: out.brokenAt?.reason ?? null };
     });
     reply.status(202);

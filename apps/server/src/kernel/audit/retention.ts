@@ -4,7 +4,8 @@ import { sql, type Kysely } from 'kysely';
 import type { AuditDB } from '../db/schema.js';
 import type { Dialect } from '../db/url.js';
 import type { ArchiveStore } from './archive/store.js';
-import { writeCheckpoint, type MacSigner } from './checkpoints.js';
+import { toCheckpoint, writeCheckpoint, type MacSigner } from './checkpoints.js';
+import { legacyChainEnd } from './writer.js';
 import { ndjsonLine } from './export.js';
 import { DAY_MS, dayStart, droppable, listPartitions } from './partitions.js';
 import type { AuditCheckpoint, AuditRow, RetentionOutcome } from './types.js';
@@ -87,22 +88,50 @@ export async function archiveUpTo(db: Kysely<AuditDB>, archive: ArchiveStore, cu
 }
 
 /**
- * Retention (§9.6 + addendum 3): retention_cut checkpoint for the last row before the cutoff →
+ * One `retention_cut` checkpoint per chain that loses rows (multi-tenancy spec §4.5): for each tenant,
+ * its last row at or before `cutSeq` (the first retained row links to it); for the legacy chain, its
+ * last row at or before `cutSeq`. Idempotent (a re-run after a failed archive reuses them). Returns
+ * the checkpoint of the newest cut row (the archive manifest's anchor).
+ */
+async function cutCheckpoints(d: RetentionDeps, cutSeq: number): Promise<AuditCheckpoint> {
+  const legacy = await legacyChainEnd(d.db);
+  const targets: Array<{ tenantId: string | null; seq: number; hash: string }> = [];
+  if (legacy.seq > 0) {
+    // tenant-scope: system-job (the legacy chain spans the rows of a single-tenant install)
+    const l = await d.db.selectFrom('audit_log').select(['seq', 'hash']).where('seq', '<=', Math.min(cutSeq, legacy.seq)).orderBy('seq', 'desc').limit(1).executeTakeFirst();
+    if (l) targets.push({ tenantId: null, seq: Number(l.seq), hash: l.hash });
+  }
+  // tenant-scope: system-job (retention cuts every tenant's chain)
+  const lasts = await d.db.selectFrom('audit_log').select((eb) => ['tenant_id', eb.fn.max('seq').as('seq')]).where('seq', '>', legacy.seq).where('seq', '<=', cutSeq).groupBy('tenant_id').execute();
+  for (const l of lasts) {
+    const r = await d.db.selectFrom('audit_log').select(['seq', 'hash']).where('tenant_id', '=', l.tenant_id).where('seq', '=', Number(l.seq)).executeTakeFirstOrThrow();
+    targets.push({ tenantId: l.tenant_id, seq: Number(r.seq), hash: r.hash });
+  }
+  let newest: AuditCheckpoint | null = null;
+  for (const t of targets) {
+    let q = d.db.selectFrom('audit_checkpoints').selectAll().where('seq', '=', t.seq).where('kind', '=', 'retention_cut');
+    q = t.tenantId === null ? q.where('tenant_id', 'is', null) : q.where('tenant_id', '=', t.tenantId);
+    const existing = await q.executeTakeFirst();
+    const cp = existing ? toCheckpoint(existing) : (await writeCheckpoint(d.db, 'retention_cut', d.signer, d.now(), { seq: t.seq, hash: t.hash }, t.tenantId))!;
+    if (!newest || cp.seq > newest.seq) newest = cp;
+  }
+  return newest!;
+}
+
+/**
+ * Retention (§9.6 + addendum 3): retention_cut checkpoints for the last row before the cutoff (one per chain) →
  * archive (when configured; a failure skips the delete and logs an alert) → delete (SQLite:
  * batches of 10k plus FTS deletes; PG: drop whole daily partitions, then delete the remainder)
  * → prune sessions.
  */
 export async function applyRetention(d: RetentionDeps, cutoff: number): Promise<RetentionOutcome> {
   const out: RetentionOutcome = { cutoff, cutSeq: null, deleted: 0, archived: false, skipped: false, partitionsDropped: 0 };
-  // tenant-scope: system-job (retention archives the instance-wide chain)
+  // tenant-scope: system-job (retention cuts every chain at the same global seq)
   const cut = await d.db.selectFrom('audit_log').select(['seq', 'hash']).where('ts', '<', cutoff).orderBy('seq', 'desc').limit(1).executeTakeFirst();
   if (cut) {
     const cutSeq = Number(cut.seq);
     out.cutSeq = cutSeq;
-    const existing = await d.db.selectFrom('audit_checkpoints').selectAll().where('seq', '=', cutSeq).where('kind', '=', 'retention_cut').executeTakeFirst();
-    const cp: AuditCheckpoint = existing
-      ? { id: existing.id, seq: Number(existing.seq), hash: existing.hash, kind: 'retention_cut', mac: existing.mac, keyId: existing.key_id, createdAt: Number(existing.created_at) }
-      : (await writeCheckpoint(d.db, 'retention_cut', d.signer, d.now(), { seq: cutSeq, hash: cut.hash }))!;
+    const cp = await cutCheckpoints(d, cutSeq);
     if (d.archive) {
       try {
         const res = await archiveUpTo(d.db, d.archive, cutSeq, cp, d.now());

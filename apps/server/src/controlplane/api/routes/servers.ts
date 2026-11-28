@@ -1,3 +1,4 @@
+import { mcpUrl, resourceMetadataUrl } from '../../../kernel/lib/mcp-url.js';
 import { gunzipSync } from 'node:zlib';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { compile, diffSpecs, parseOverlay, applyOverlayPatch, type CompileResult } from '@neurouter/compiler';
@@ -90,8 +91,13 @@ async function compileBytes(bytes: Uint8Array, slug: string, format?: string, gr
   return compile({ spec: { bytes, ...(format ? { format: format as never } : {}), ...(graphql ? { graphql } : {}) }, ...(overlay ? { overlay } : {}), namespace: slug.replace(/-/g, '_') });
 }
 
-export function connectConfig(c: ApiContext, s: { slug: string; name: string; exposure: unknown }, e: Parameters<typeof environmentRuntime>[0], listedTools: number, codeMode: boolean): ConnectConfig {
-  const url = `${c.config.publicUrl}/mcp/${s.slug}/${e.slug}`;
+/** The tenant segment of the request's MCP URLs: the tenant slug on a multi-tenant deployment, else none (spec §3.2). */
+export function mcpTenantOf(c: ApiContext, req: FastifyRequest): string | null {
+  return c.tenancy.multi ? requireTenant(req).tenant.slug : null;
+}
+
+export function connectConfig(c: ApiContext, s: { slug: string; name: string; exposure: unknown }, e: Parameters<typeof environmentRuntime>[0], listedTools: number, codeMode: boolean, tenantSlug: string | null = null): ConnectConfig {
+  const url = mcpUrl(c.config.publicUrl, s.slug, e.slug, tenantSlug);
   const rt = environmentRuntime(e);
   const exposure = parseExposure(s.exposure);
   const name = `${s.slug}-${e.slug}`;
@@ -102,7 +108,7 @@ export function connectConfig(c: ApiContext, s: { slug: string; name: string; ex
   const curl = (extra = '') => `curl -s ${url} -H "${header}" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream"${extra} -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`;
   return {
     mcpUrl: url,
-    resourceMetadataUrl: `${c.config.publicUrl}/.well-known/oauth-protected-resource/mcp/${s.slug}/${e.slug}`,
+    resourceMetadataUrl: resourceMetadataUrl(c.config.publicUrl, s.slug, e.slug, tenantSlug),
     environment: { id: e.id, slug: e.slug, kind: e.kind },
     auth: { apiKey: true, oauth: true, externalAs: c.config.externalAs ? { issuer: c.config.externalAs.issuer } : null },
     summary: { exposure: exposure.mode, discovery: exposure.discovery, listedTools, codeMode, writesEnabled: rt.writes.enabled },
@@ -275,7 +281,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     if (!e) throw AppError.notFound('Environment');
     const b = await v.buildById(e.build_id);
     const exec = c.ports.executorStatus();
-    return connectConfig(c, s, e, b?.visible_count ?? 0, exec.ok && environmentRuntime(e).codeMode);
+    return connectConfig(c, s, e, b?.visible_count ?? 0, exec.ok && environmentRuntime(e).codeMode, mcpTenantOf(c, req));
   });
 
   /* ---------------------------------------------------------------- ops tools */
@@ -359,13 +365,15 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     return reply.header('content-type', r.content_type ?? (ext === 'json' ? 'application/json' : 'text/plain; charset=utf-8')).header('content-disposition', `attachment; filename="spec-rev${r.rev}.${ext}"`).send(gunzipSync(r.content));
   });
 
-  const toolsOfRevision = async (revId: string): Promise<ToolDef[]> => {
-    // tenant-scope: child-of-scoped (spec revision of a tenant-scoped server)
-    const b = await db.selectFrom('builds').select('id').where('spec_revision_id', '=', revId).where('status', '=', 'ok').orderBy('created_at', 'desc').limit(1).executeTakeFirst();
+  /** Tool definitions of a spec revision's newest good build; another tenant's revision reads as not found (§4.8). */
+  const toolsOfRevision = async (tenantId: string, revId: string): Promise<ToolDef[]> => {
+    const rev = await db.selectFrom('spec_revisions').select('id').where('id', '=', revId).where('tenant_id', '=', tenantId).executeTakeFirst();
+    if (!rev) throw AppError.notFound('Spec revision');
+    const b = await db.selectFrom('builds').select('id').where('tenant_id', '=', tenantId).where('spec_revision_id', '=', rev.id).where('status', '=', 'ok').orderBy('created_at', 'desc').limit(1).executeTakeFirst();
     return b ? (await v.buildTools(b.id)).map((t) => t.def) : [];
   };
   route(app, 'specs.diff', api.specs.diff, async (req) => {
-    const [a, b] = await Promise.all([toolsOfRevision(req.query.against), toolsOfRevision(req.params.id)]);
+    const [a, b] = await Promise.all([toolsOfRevision(tenantOf(req), req.query.against), toolsOfRevision(tenantOf(req), req.params.id)]);
     const d = diffSpecs(a, b, []);
     return d as never;
   });

@@ -9,7 +9,9 @@ import type { AuditDB, MainDB } from './schema.js';
  */
 export const GLOBAL_TABLES = [
   'tenants',
+  'tenant_slug_aliases',
   'users',
+  'user_identities',
   'web_sessions',
   'oidc_login_states',
   'local_links',
@@ -19,9 +21,8 @@ export const GLOBAL_TABLES = [
   'coord_signals',
   'rate_limit_buckets',
   'redaction_rules',
-  // one instance-wide DEK until per-tenant DEKs (spec §4.4, G11, P1)
-  'encryption_keys',
   'audit_checkpoints',
+  'audit_chain_heads',
   'audit_sink_cursors',
   'rollup_minute',
   'rollup_hour',
@@ -41,7 +42,7 @@ export const isTenantTable = (t: string): boolean => !GLOBAL.has(t);
  * global tables that still carry a `tenant_id` column. Inserts into every other table must set
  * `tenant_id` (spec §4.2 step 1).
  */
-export const TENANT_ID_OPTIONAL_TABLES: readonly string[] = ['web_sessions', 'oidc_login_states', 'local_links', 'oauth_clients', 'redaction_rules', 'encryption_keys'];
+export const TENANT_ID_OPTIONAL_TABLES: readonly string[] = ['web_sessions', 'oidc_login_states', 'local_links', 'oauth_clients', 'redaction_rules'];
 
 /**
  * Scoped query helper (spec §4.2 step 2): every builder it returns is already filtered by the tenant,

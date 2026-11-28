@@ -15,11 +15,12 @@ export interface RotationResult {
 /**
  * Key rotation (backend §8).
  * - `rewrap`: rewrap every DEK under the active KEK (after adding a new KEK and restarting).
- * - `dek`: create a new active DEK, re-encrypt secrets under it, delete retired DEKs nothing references.
+ * - `dek`: per tenant with keys (multi-tenancy spec §4.4): a new active DEK, the tenant's secrets
+ *   re-encrypted under it (with the tenant-bound AAD), then retired DEKs nothing references are deleted.
  * Upstream OAuth tokens (step 10) re-encrypt through `extraReencrypt`.
  */
 export async function rotateKeys(
-  deps: { db: Kysely<MainDB>; envelope: EnvelopeService; secrets: BuiltinSecretProvider; extraReencrypt?: (activeDekId: string) => Promise<number> },
+  deps: { db: Kysely<MainDB>; envelope: EnvelopeService; secrets: BuiltinSecretProvider; extraReencrypt?: (tenantId: string, activeDekId: string) => Promise<number> },
   type: 'dek' | 'rewrap',
 ): Promise<RotationResult> {
   let rewrapped = 0;
@@ -28,9 +29,12 @@ export async function rotateKeys(
   if (type === 'rewrap') {
     rewrapped = await deps.envelope.rewrapAll();
   } else {
-    const dek = await deps.envelope.createDek();
-    reencrypted = await deps.secrets.reencryptAll(dek.id);
-    if (deps.extraReencrypt) reencrypted += await deps.extraReencrypt(dek.id);
+    for (const tenantId of await deps.envelope.tenantsWithKeys()) {
+      const dek = await deps.envelope.createDek(tenantId);
+      reencrypted += await deps.secrets.reencryptAll(tenantId, dek.id);
+      if (deps.extraReencrypt) reencrypted += await deps.extraReencrypt(tenantId, dek.id);
+    }
+    // tenant-scope: system-job (DEK rotation across tenants)
     const retired = await deps.db.selectFrom('encryption_keys').select('id').where('status', '=', 'retired').execute();
     for (const { id } of retired) {
       // tenant-scope: system-job (DEK rotation across tenants)
@@ -38,11 +42,13 @@ export async function rotateKeys(
       // tenant-scope: system-job (DEK rotation across tenants)
       const t = await deps.db.selectFrom('upstream_tokens').select('id').where('dek_id', '=', id).limit(1).executeTakeFirst();
       if (!s && !t) {
+        // tenant-scope: system-job (DEK rotation across tenants)
         await deps.db.deleteFrom('encryption_keys').where('id', '=', id).execute();
         deletedDeks++;
       }
     }
   }
+  // tenant-scope: system-job (KEK ids in use across tenants)
   const keks = await deps.db.selectFrom('encryption_keys').select('kek_id').distinct().execute();
   return { type, rewrapped, reencrypted, kekIdsInUse: keks.map((k) => k.kek_id).sort(), deletedDeks };
 }

@@ -11,6 +11,13 @@ export interface TenantsTable {
   slug: string;
   name: string;
   created_at: number;
+  kind: Generated<'personal' | 'org'>;
+  status: Generated<'active' | 'suspended' | 'pending_deletion' | 'deleted'>;
+  plan: Generated<string>;
+  created_by: string | null;
+  deletion_requested_at: number | null;
+  deleted_at: number | null;
+  updated_at: number | null;
 }
 
 export interface UsersTable {
@@ -27,6 +34,7 @@ export interface UsersTable {
   preferences: Generated<string>;
   created_at: number;
   updated_at: number;
+  avatar_url: string | null;
 }
 
 export interface WebSessionsTable {
@@ -41,6 +49,8 @@ export interface WebSessionsTable {
   user_agent: string | null;
   id_token_hint: string | null;
   anonymous: Generated<BoolColumn>;
+  active_tenant_id: string | null;
+  impersonation_id: string | null;
 }
 
 export interface OidcLoginStatesTable {
@@ -71,7 +81,7 @@ export interface SettingsTable {
 
 export interface EncryptionKeysTable {
   id: string;
-  tenant_id: Generated<string>;
+  tenant_id: string;
   kek_id: string;
   wrapped_key: Buffer;
   status: 'active' | 'retired';
@@ -787,6 +797,49 @@ export interface ConfirmNoncesTable {
   expires_at: number;
 }
 
+export interface TenantSlugAliasesTable {
+  slug: string;
+  tenant_id: string;
+  created_at: number;
+  expires_at: number | null;
+}
+
+export interface UserIdentitiesTable {
+  id: string;
+  user_id: string;
+  provider: string;
+  subject: string;
+  email: string;
+  email_verified: Generated<BoolColumn>;
+  created_at: number;
+  last_login_at: number | null;
+}
+
+export interface MembershipsTable {
+  tenant_id: string;
+  user_id: string;
+  role: 'owner' | 'admin' | 'viewer';
+  role_source: Generated<'local' | 'oidc' | 'bootstrap' | 'invite'>;
+  status: Generated<'active' | 'disabled'>;
+  invited_by: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface InvitesTable {
+  id: string;
+  tenant_id: string;
+  email: string;
+  role: 'admin' | 'viewer';
+  token_hash: Buffer;
+  invited_by: string | null;
+  created_at: number;
+  expires_at: number;
+  accepted_at: number | null;
+  accepted_by: string | null;
+  revoked_at: number | null;
+}
+
 export interface AuditLogTable {
   seq: number;
   id: string;
@@ -852,6 +905,7 @@ export interface AuditCheckpointsTable {
   mac: string;
   key_id: string;
   created_at: number;
+  tenant_id: string | null;
 }
 
 export interface AuditSinkCursorsTable {
@@ -931,6 +985,13 @@ export interface RollupHourTable {
   h19: Generated<number>;
 }
 
+export interface AuditChainHeadsTable {
+  tenant_id: string;
+  seq: number;
+  hash: string;
+  updated_at: number;
+}
+
 export interface MainDB {
   tenants: TenantsTable;
   users: UsersTable;
@@ -984,6 +1045,10 @@ export interface MainDB {
   mock_collections: MockCollectionsTable;
   mock_items: MockItemsTable;
   confirm_nonces: ConfirmNoncesTable;
+  tenant_slug_aliases: TenantSlugAliasesTable;
+  user_identities: UserIdentitiesTable;
+  memberships: MembershipsTable;
+  invites: InvitesTable;
 }
 
 export interface AuditDB {
@@ -992,15 +1057,16 @@ export interface AuditDB {
   audit_sink_cursors: AuditSinkCursorsTable;
   rollup_minute: RollupMinuteTable;
   rollup_hour: RollupHourTable;
+  audit_chain_heads: AuditChainHeadsTable;
 }
 
 export type DB = MainDB & AuditDB;
 
 /** Runtime column inventory (the drift test compares it to the migrated schema). */
 export const MAIN_TABLE_COLUMNS = {
-  tenants: ['id', 'slug', 'name', 'created_at'],
-  users: ['id', 'tenant_id', 'email', 'name', 'oidc_issuer', 'oidc_subject', 'role', 'role_source', 'status', 'last_login_at', 'preferences', 'created_at', 'updated_at'],
-  web_sessions: ['id_hash', 'tenant_id', 'user_id', 'csrf_token', 'created_at', 'expires_at', 'last_seen_at', 'ip', 'user_agent', 'id_token_hint', 'anonymous'],
+  tenants: ['id', 'slug', 'name', 'created_at', 'kind', 'status', 'plan', 'created_by', 'deletion_requested_at', 'deleted_at', 'updated_at'],
+  users: ['id', 'tenant_id', 'email', 'name', 'oidc_issuer', 'oidc_subject', 'role', 'role_source', 'status', 'last_login_at', 'preferences', 'created_at', 'updated_at', 'avatar_url'],
+  web_sessions: ['id_hash', 'tenant_id', 'user_id', 'csrf_token', 'created_at', 'expires_at', 'last_seen_at', 'ip', 'user_agent', 'id_token_hint', 'anonymous', 'active_tenant_id', 'impersonation_id'],
   oidc_login_states: ['state_hash', 'tenant_id', 'code_verifier_enc', 'nonce', 'return_to', 'expires_at'],
   local_links: ['token_hash', 'tenant_id', 'user_id', 'expires_at', 'used_at', 'created_at'],
   settings: ['tenant_id', 'key', 'value', 'updated_by', 'updated_at'],
@@ -1050,14 +1116,19 @@ export const MAIN_TABLE_COLUMNS = {
   mock_collections: ['tenant_id', 'environment_id', 'namespace', 'collection_key', 'seed', 'next_id', 'item_count', 'bytes', 'created_at', 'last_used_at'],
   mock_items: ['tenant_id', 'environment_id', 'namespace', 'collection_key', 'item_id', 'ord', 'body', 'bytes', 'updated_at'],
   confirm_nonces: ['id', 'tenant_id', 'expires_at'],
+  tenant_slug_aliases: ['slug', 'tenant_id', 'created_at', 'expires_at'],
+  user_identities: ['id', 'user_id', 'provider', 'subject', 'email', 'email_verified', 'created_at', 'last_login_at'],
+  memberships: ['tenant_id', 'user_id', 'role', 'role_source', 'status', 'invited_by', 'created_at', 'updated_at'],
+  invites: ['id', 'tenant_id', 'email', 'role', 'token_hash', 'invited_by', 'created_at', 'expires_at', 'accepted_at', 'accepted_by', 'revoked_at'],
 } as const satisfies { [T in keyof MainDB]: readonly (keyof MainDB[T])[] };
 
 export const AUDIT_TABLE_COLUMNS = {
   audit_log: ['seq', 'id', 'tenant_id', 'ts', 'kind', 'request_id', 'user_id', 'api_key_id', 'oauth_client_id', 'principal_type', 'external_subject', 'credential_key', 'client_name', 'client_version', 'protocol_version', 'client_era', 'server_id', 'environment_id', 'environment_kind', 'task_id', 'script_run_id', 'via', 'mode', 'write', 'dry_run', 'confirm', 'tool_id', 'tool_name', 'action', 'target_type', 'target_id', 'decision', 'decision_reason', 'status', 'policy_trail', 'error_id', 'upstream_status', 'params_redacted', 'params_text', 'changes', 'output_size', 'output_hash', 'output_full', 'output_preview', 'latency_ms', 'upstream_latency_ms', 'error_code', 'error_message', 'trace_id', 'span_id', 'ip', 'user_agent', 'prev_hash', 'hash'],
-  audit_checkpoints: ['id', 'seq', 'hash', 'kind', 'mac', 'key_id', 'created_at'],
+  audit_checkpoints: ['id', 'seq', 'hash', 'kind', 'mac', 'key_id', 'created_at', 'tenant_id'],
   audit_sink_cursors: ['sink', 'last_seq', 'updated_at', 'last_error'],
   rollup_minute: ['tenant_id', 'bucket', 'server_id', 'environment_id', 'tool_name', 'mode', 'status_class', 'calls', 'errors', 'blocked', 'latency_sum_ms', 'upstream_latency_sum', 'h00', 'h01', 'h02', 'h03', 'h04', 'h05', 'h06', 'h07', 'h08', 'h09', 'h10', 'h11', 'h12', 'h13', 'h14', 'h15', 'h16', 'h17', 'h18', 'h19'],
   rollup_hour: ['tenant_id', 'bucket', 'server_id', 'environment_id', 'tool_name', 'mode', 'status_class', 'calls', 'errors', 'blocked', 'latency_sum_ms', 'upstream_latency_sum', 'h00', 'h01', 'h02', 'h03', 'h04', 'h05', 'h06', 'h07', 'h08', 'h09', 'h10', 'h11', 'h12', 'h13', 'h14', 'h15', 'h16', 'h17', 'h18', 'h19'],
+  audit_chain_heads: ['tenant_id', 'seq', 'hash', 'updated_at'],
 } as const satisfies { [T in keyof AuditDB]: readonly (keyof AuditDB[T])[] };
 
 /** Dialect-specific extras that exist only in one engine (not in the shared inventory). */

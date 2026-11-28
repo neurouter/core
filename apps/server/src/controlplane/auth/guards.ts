@@ -7,7 +7,7 @@ import { timingSafeEqualStr } from '../../kernel/lib/crypto.js';
 import { AppError } from '../../kernel/lib/errors.js';
 import { loadConsoleUser, type ConsoleUser } from '../../kernel/principal.js';
 import type { SessionService, WebSession } from './sessions.js';
-import type { TenantContext, TenantResolver, TenantRole } from '../../kernel/tenancy/types.js';
+import type { TenantContext, TenantResolver } from '../../kernel/tenancy/types.js';
 
 export interface WebAuth {
   user: ConsoleUser;
@@ -23,6 +23,8 @@ declare module 'fastify' {
   interface FastifyContextConfig {
     /** Registry key of the route (`servers.get`), set by `route()`. */
     key?: string;
+    /** False on tenant-free endpoints (`EndpointDef.tenant`); every other signed-in endpoint needs the request's tenant. */
+    tenant?: boolean;
   }
 }
 
@@ -52,11 +54,11 @@ export function installWebAuth(app: FastifyInstance, deps: { db: Kysely<MainDB>;
       if (typeof header !== 'string' || !timingSafeEqualStr(header, session.csrfToken)) throw new AppError('forbidden', 'Missing or invalid CSRF token', { extensions: { reason: 'csrf' } });
     }
     req.webAuth = { user, session };
-    const t = await deps.tenancy.forConsole(req, user.id, null);
+    const t = await deps.tenancy.forConsole(req, user.id, session.activeTenantId);
     if (t) req.tenantCtx = { tenant: t.tenant, role: t.role };
   });
   app.addHook('preValidation', async (req) => {
-    const cfg = req.routeOptions.config as { access?: readonly string[]; key?: string } | undefined;
+    const cfg = req.routeOptions.config as { access?: readonly string[]; key?: string; tenant?: boolean } | undefined;
     const access = cfg?.access;
     if (!access) return;
     if (access.includes('public')) {
@@ -75,9 +77,12 @@ export function installWebAuth(app: FastifyInstance, deps: { db: Kysely<MainDB>;
     if (user.anonymous && !SAFE_METHODS.has(req.method) && !DEMO_ALLOW.has(cfg?.key ?? '')) {
       throw new AppError('forbidden', 'The public demo is read-only', { extensions: { reason: 'demo_read_only' } });
     }
-    if (access.includes('user')) return;
+    if (cfg?.tenant === false) return;
+    // every tenant-scoped endpoint needs the request's tenant (403 `no_tenant` without a membership, spec §3.3)
     const ctx = requireTenant(req);
-    if (!access.some((a) => hasCapability(capabilityRole(ctx.role), a as Capability))) throw new AppError('forbidden', 'You do not have permission to perform this action', { extensions: { reason: 'capability' } });
+    if (ctx.tenant.status === 'suspended' && !SAFE_METHODS.has(req.method)) throw new AppError('forbidden', 'This organization is suspended', { extensions: { reason: 'tenant_suspended' } });
+    if (access.includes('user')) return;
+    if (!access.some((a) => hasCapability(roleOf(ctx), a as Capability))) throw new AppError('forbidden', 'You do not have permission to perform this action', { extensions: { reason: 'capability' } });
   });
   app.addHook('onResponse', async (req, reply) => {
     const cfg = req.routeOptions.config as { key?: string } | undefined;
@@ -104,13 +109,13 @@ export function requireUser(req: FastifyRequest): ConsoleUser {
 
 export function requireCap(req: FastifyRequest, cap: Capability): ConsoleUser {
   const user = requireUser(req);
-  if (!hasCapability(capabilityRole(requireTenant(req).role), cap)) throw AppError.forbidden();
+  if (!hasCapability(roleOf(requireTenant(req)), cap)) throw AppError.forbidden();
   return user;
 }
 
-/** Tenant roles → the capability sets of the shared contract (owner has every admin capability until P1 adds owner-only ones). */
-export function capabilityRole(role: TenantRole | null): 'admin' | 'viewer' {
-  return role === 'owner' || role === 'admin' ? 'admin' : 'viewer';
+/** The membership role that drives capability checks; a context without a role (data plane, public pages) gets the viewer set. */
+function roleOf(ctx: TenantContext) {
+  return ctx.role ?? 'viewer';
 }
 
 /** The request's tenant context; 403 `no_tenant` when the user has no membership (spec §3.3). */
