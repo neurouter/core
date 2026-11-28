@@ -134,6 +134,16 @@ export interface AttemptRun {
   framingAvailable?: boolean;
   /** JSON size of the tools/list the agent got (sent with every turn). */
   toolsListBytes?: number;
+  /** LLM calls retried after a rate limit or a transient error (0.3.5; absent: none). */
+  llmRetries?: LlmRetry[];
+}
+
+/** One retried LLM call of an attempt: the turn it was for, why, the error and the backoff wait. */
+export interface LlmRetry {
+  turn: number;
+  kind: 'rate_limit' | 'transient';
+  error: string;
+  waitMs: number;
 }
 
 /** AttemptRun + the audit-log view of the calls: what the checker consumes. */
@@ -242,6 +252,8 @@ export interface TaskRunResult {
   toolsListBytes?: number;
   /** The attempt's effective limits (defaults < run < suite < task overrides; 0.3.3, absent before). */
   limits?: { maxTurns: number; maxToolCalls: number; maxTotalTokens: number; wallMs: number };
+  /** LLM calls retried within the attempt (0.3.5; absent: none). */
+  llmRetries?: LlmRetry[];
 }
 
 export interface ReadinessComponent {

@@ -255,12 +255,31 @@ of wall time. Hitting a limit ends the attempt with the end reason `max_turns`, 
   Unknown names and out-of-range values are rejected when the suite loads. Each result keeps its effective limits.
   The report records `run.limits` and, per task, the `limits` that differ from them (JSON and Markdown).
 
+## LLM retries
+
+An LLM call that fails is retried inside the attempt (on top of the provider SDK's own retries), with exponential
+backoff (1 s, 2 s, 4 s … plus up to 50 % jitter, at most 30 s per wait) and never past the attempt's wall time:
+
+- **Rate limits** (429): up to 3 retries; the provider's `retry-after` is honoured.
+- **Transient errors** (0.3.5): up to 2 retries (3 tries). These are provider 5xx (incl. 529 overloaded) and 408,
+  and transport failures: undici's `TypeError: terminated` (a response body cut off mid-read), `ECONNRESET`,
+  socket hang up, connection errors.
+- **Never retried:** 4xx validation errors (400, 404, 413, 422 …), key errors (which fail the run), cancellation.
+
+Each retry is recorded with the attempt as `llmRetries` (`turn`, `kind`: `rate_limit` | `transient`, `error`,
+`waitMs`); `--transcripts` includes it. An attempt that still fails ends with `endReason: error`.
+
 ## Spend
 
 - `--max-generator-tokens`: budget for suite generation (default 400,000).
-- `--max-run-tokens`: hard cap for the run (agent, judge and fix-suggestion tokens). No new attempt starts once it
-  is reached (attempts in flight finish); the run is marked incomplete and its scores cover the attempts
-  that ran. The fix-suggestion step after the run gets what is left: a suggestion LLM call that could cross the
+- `--max-run-tokens`: hard cap for the run (agent, judge and fix-suggestion tokens). Each attempt in flight reserves
+  its per-attempt token limit (`maxTotalTokens`, default 200,000, or the suite's or task's `limits`). An attempt
+  starts only when the cap minus the tokens used and reserved still covers its own limit; otherwise it waits for
+  an attempt in flight to finish, and when none is left the run stops. So attempts running at once cannot overshoot
+  the cap (before 0.3.5 up to `--concurrency` × the per-attempt limit could). A cap below one attempt's limit runs
+  nothing and says so. The run is marked incomplete and its scores cover the attempts that ran. Judge tokens are
+  counted after the attempt, outside the reservation.
+- `--concurrency <n>`: attempts run at once (default 4). The fix-suggestion step after the run gets what is left: a suggestion LLM call that could cross the
   cap (estimated input plus its 4,000 max output) is not made, and that suggestion keeps its deterministic text.
 - Judge usage (rubric and equivalence judge) is counted per attempt and reported per judge model.
 - Suggestion usage (0.3.4) is reported as `suggestUsage` (JSON) and "Suggestion usage" (Markdown): the model the

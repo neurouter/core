@@ -111,6 +111,8 @@ export interface CreateRunInput {
   transcriptMaxChars?: number | null;
   /** Hard token cap (agent + judge) for the run; it stops gracefully and is marked incomplete. */
   maxRunTokens?: number | null;
+  /** Attempts in flight at once (default 4; CLI `--concurrency`). */
+  concurrency?: number | null;
 }
 
 /** The suite's generator JSON fields this service reads (mock data version, calibration). */
@@ -552,7 +554,7 @@ export class EvalsService {
         created_at: now,
       })
       .execute();
-    const work = async () => this.executeRun(tenantId, id, { quick, createdBy: input.createdBy, ...(input.transcriptMaxChars !== undefined ? { transcriptMaxChars: input.transcriptMaxChars } : {}), ...(input.maxRunTokens ? { maxRunTokens: input.maxRunTokens } : {}) });
+    const work = async () => this.executeRun(tenantId, id, { quick, createdBy: input.createdBy, ...(input.transcriptMaxChars !== undefined ? { transcriptMaxChars: input.transcriptMaxChars } : {}), ...(input.maxRunTokens ? { maxRunTokens: input.maxRunTokens } : {}), ...(input.concurrency ? { concurrency: input.concurrency } : {}) });
     if (input.wait) await work();
     else {
       const jobId = await this.d.jobs.start(tenantId, 'eval_run', { runId: id }, input.createdBy, work);
@@ -574,7 +576,7 @@ export class EvalsService {
     return this.run(tenantId, id);
   }
 
-  private async executeRun(tenantId: string, runId: string, opts: { quick: boolean; createdBy: string | null; transcriptMaxChars?: number | null; maxRunTokens?: number }): Promise<void> {
+  private async executeRun(tenantId: string, runId: string, opts: { quick: boolean; createdBy: string | null; transcriptMaxChars?: number | null; maxRunTokens?: number; concurrency?: number }): Promise<void> {
     const ac = new AbortController();
     this.cancels.set(runId, ac);
     const db = this.d.db;
@@ -628,6 +630,7 @@ export class EvalsService {
         hasResult: (k) => existing.has(k),
         groundTruth: groundTruthOf,
         ...(opts.maxRunTokens ? { maxRunTokens: opts.maxRunTokens } : {}),
+        ...(opts.concurrency ? { concurrency: opts.concurrency } : {}),
         ...(meta.limits ? { limits: meta.limits } : {}),
         openSession: async (ctx) => this.attemptSession(tenantId, run.server_id, server, env, ctx.mode, () => attemptNamespace(runId, ctx.key, meta.mockDataVersion, taskMockScale(ctx.task)), buildHeader, openKeys),
         onResult: async (r) => {
@@ -665,7 +668,7 @@ export class EvalsService {
               served_by_model: r.servedByModel,
               fallback_used: r.fallbackUsed ? 1 : 0,
               task_id_neurouter: r.neurouterTaskId,
-              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes, framingPassed: r.framingPassed, judgeVotes: r.judgeVotes ?? null, limits: r.limits ?? null }),
+              transcript: gz({ transcript: r.transcript, calls: r.calls, endReason: r.endReason, error: r.error, primaryTool: r.primaryTool, referenceCallCount: r.referenceCallCount, category: r.category, taskKey: r.taskKey, upstreamCalls: r.upstreamCalls, callBudget: r.callBudget, overBudget: r.overBudget, judgeUsage: r.judgeUsage, toolsListBytes: r.toolsListBytes, framingPassed: r.framingPassed, judgeVotes: r.judgeVotes ?? null, limits: r.limits ?? null, ...(r.llmRetries?.length ? { llmRetries: r.llmRetries } : {}) }),
               created_at: this.d.clock.now(),
             })
             .execute();
@@ -721,7 +724,7 @@ export class EvalsService {
   async taskResults(tenantId: string, runId: string): Promise<TaskRunResult[]> {
     const rows = await this.d.db.selectFrom('eval_task_runs as r').where('r.tenant_id', '=', tenantId).innerJoin('eval_tasks as t', 't.id', 'r.task_id').select(['r.id', 'r.model', 'r.mode', 'r.attempt', 'r.passed', 'r.assertion_results', 'r.judge', 'r.failure_cause', 'r.framing_ok', 'r.tool_calls', 'r.scripts', 'r.input_tokens', 'r.output_tokens', 'r.cache_read_tokens', 'r.cache_write_tokens', 'r.latency_ms', 'r.served_by_model', 'r.fallback_used', 'r.task_id_neurouter', 'r.transcript', 't.key', 't.category']).where('r.run_id', '=', runId).execute();
     return rows.map((r) => {
-      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number; framingPassed?: boolean | null; judgeVotes?: TaskRunResult['judgeVotes']; limits?: TaskRunResult['limits'] | null } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
+      const tr = gunz<{ transcript: TaskRunResult['transcript']; calls: ObservedCall[]; endReason: TaskRunResult['endReason']; error: string | null; primaryTool: string | null; referenceCallCount: number; framingPassed?: boolean | null; judgeVotes?: TaskRunResult['judgeVotes']; limits?: TaskRunResult['limits'] | null; llmRetries?: TaskRunResult['llmRetries'] } & Pick<TaskRunResult, 'upstreamCalls' | 'callBudget' | 'overBudget' | 'judgeUsage' | 'toolsListBytes'>>(r.transcript);
       return {
         key: `${r.key}|${r.model}|${r.mode}|${r.attempt}`,
         taskKey: r.key,
@@ -756,6 +759,7 @@ export class EvalsService {
         ...(tr?.toolsListBytes !== undefined ? { toolsListBytes: tr.toolsListBytes } : {}),
         ...(tr?.judgeVotes ? { judgeVotes: tr.judgeVotes } : {}),
         ...(tr?.limits ? { limits: tr.limits } : {}),
+        ...(tr?.llmRetries?.length ? { llmRetries: tr.llmRetries } : {}),
       } as TaskRunResult;
     });
   }

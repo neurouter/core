@@ -146,7 +146,7 @@ describe('runAttempt', () => {
     expect(sleeps).toEqual([2000, 2000]);
     const four = new ScriptedLlmClient([new LlmRateLimitError('a'), new LlmRateLimitError('b'), new LlmRateLimitError('c'), new LlmRateLimitError('d')]);
     expect((await runAttempt({ llm: four, mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', sleep: async () => {} })).endReason).toBe('error');
-    expect((await runAttempt({ llm: new ScriptedLlmClient([new LlmError('500', 500)]), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool' })).error).toBe('500');
+    expect((await runAttempt({ llm: new ScriptedLlmClient([new LlmError('400', 400)]), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool' })).error).toBe('400');
     await expect(runAttempt({ llm: new ScriptedLlmClient([new LlmKeyError()]), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool' })).rejects.toBeInstanceOf(LlmKeyError);
   });
 });
@@ -243,11 +243,13 @@ describe('ground truth, judges, spend (0.2.2)', () => {
   });
 
   it('--max-run-tokens stops starting attempts and marks the run incomplete', async () => {
+    // 0.3.5: an attempt starts only while the cap still covers its per-attempt limit (2,000): 2,300 → 2,080 → 1,860 left
     const llm = new ScriptedLlmClient([...script('Rex'), ...script('Rex'), ...script('Rex')]);
-    const out = await runSuiteDetailed({ llm, tasks: [answerTask], models: ['m'], modes: ['tool'], repeats: 3, concurrency: 1, maxRunTokens: 300, openSession: async () => ({ mcp: fakePetstore() }) });
+    const out = await runSuiteDetailed({ llm, tasks: [answerTask], models: ['m'], modes: ['tool'], repeats: 3, concurrency: 1, maxRunTokens: 2300, limits: { maxTotalTokens: 2000 }, openSession: async () => ({ mcp: fakePetstore() }) });
     expect(out.results).toHaveLength(2);
+    expect(out.results.map((r) => r.endReason)).toEqual(['end_turn', 'end_turn']);
     expect(out.incomplete).toMatchObject({ attemptsRun: 2, attemptsPlanned: 3 });
-    expect(out.incomplete!.reason).toContain('--max-run-tokens 300');
+    expect(out.incomplete!.reason).toContain('--max-run-tokens 2300');
   });
 
   it('gradeAttempt: the equivalence judge can pass a failed answer check (matched_by: judge); judge usage is counted', async () => {
@@ -273,5 +275,125 @@ describe('ground truth, judges, spend (0.2.2)', () => {
     expect(check.judgeVotes?.equivalence).toHaveLength(2);
     // the rubric judge saw the ground truth
     expect(String(reqs[0]!.messages[0]!.content)).toContain('groundTruth');
+  });
+});
+
+describe('0.3.5', () => {
+  // B5 evidence (long-workflows solid 0.3.4, github_lw_open_issue_comments_total_n100-code-r3): after one search_tools
+  // call the second LLM call failed with undici's `TypeError: terminated` (body cut off mid-read) 6.5 s in, and the
+  // attempt ended `endReason: error`, `error: "terminated"`, with no retry.
+  const undiciTerminated = () => Object.assign(new TypeError('terminated'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) });
+  const searchThenAnswer = () => [llmResponse([use('c1', 'list_pets', {})], { input: 1026, output: 35 }), undiciTerminated(), llmResponse([text('46 open items, 2365 comments')], { input: 1200, output: 20 })];
+
+  it('B5: a transient transport error (TypeError: terminated) is retried with backoff and recorded in the attempt', async () => {
+    const sleeps: number[] = [];
+    const r = await runAttempt({ llm: new ScriptedLlmClient(searchThenAnswer()), mcp: fakePetstore(), prompt: 'p', model: 'gpt-6-luna', mode: 'code', sleep: async (ms) => void sleeps.push(ms), random: () => 0.5 });
+    expect(r).toMatchObject({ endReason: 'end_turn', error: null, finalAnswer: '46 open items, 2365 comments', turns: 2 });
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeGreaterThanOrEqual(1000);
+    expect(r.llmRetries).toEqual([{ turn: 2, kind: 'transient', error: 'terminated', waitMs: sleeps[0] }]);
+  });
+
+  it('B5: ECONNRESET, socket hang up, 5xx and overloaded (529) are transient; 4xx validation errors are not', async () => {
+    const transient = [
+      Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
+      new Error('socket hang up'),
+      new LlmError('Internal server error', 500),
+      new LlmError('Bad gateway', 502),
+      new LlmError('Service unavailable', 503),
+      new LlmError('Overloaded', 529),
+      new LlmError('Connection error.', null),
+    ];
+    for (const err of transient) {
+      const llm = new ScriptedLlmClient([err, llmResponse([text('ok')])]);
+      const r = await runAttempt({ llm, mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', sleep: async () => {}, random: () => 0 });
+      expect({ err: err.message, end: r.endReason, retries: r.llmRetries?.length }).toEqual({ err: err.message, end: 'end_turn', retries: 1 });
+    }
+    for (const err of [new LlmError('invalid tool schema', 400), new LlmError('not found', 404), new LlmError('too large', 413), new LlmError('unprocessable', 422)]) {
+      const sleeps: number[] = [];
+      const llm = new ScriptedLlmClient([err, llmResponse([text('ok')])]);
+      const r = await runAttempt({ llm, mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', sleep: async (ms) => void sleeps.push(ms) });
+      expect({ err: err.message, end: r.endReason, sleeps }).toEqual({ err: err.message, end: 'error', sleeps: [] });
+      expect(r.llmRetries ?? []).toEqual([]);
+    }
+  });
+
+  it('B5: transient retries are bounded (3 tries), back off exponentially with jitter and stay inside the wall limit', async () => {
+    const sleeps: number[] = [];
+    const llm = new ScriptedLlmClient([undiciTerminated(), undiciTerminated(), undiciTerminated(), llmResponse([text('never')])]);
+    const r = await runAttempt({ llm, mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', sleep: async (ms) => void sleeps.push(ms), random: () => 0 });
+    expect(r).toMatchObject({ endReason: 'error', error: 'terminated' });
+    expect(llm.requests).toHaveLength(3);
+    expect(sleeps).toEqual([1000, 2000]);
+    expect(r.llmRetries).toHaveLength(2);
+    // jitter: up to +50% of the base wait
+    const jittered: number[] = [];
+    await runAttempt({ llm: new ScriptedLlmClient([undiciTerminated(), llmResponse([text('ok')])]), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', sleep: async (ms) => void jittered.push(ms), random: () => 0.999 });
+    expect(jittered[0]).toBeGreaterThan(1400);
+    expect(jittered[0]).toBeLessThanOrEqual(1500);
+    // a wait that would pass the attempt's wall limit is not taken
+    let t = 0;
+    const late = await runAttempt({ llm: new ScriptedLlmClient([undiciTerminated(), llmResponse([text('ok')])]), mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', limits: { wallMs: 1500 }, now: () => (t += 400), sleep: async () => {}, random: () => 0 });
+    expect(late.endReason).toBe('error');
+    expect(late.llmRetries ?? []).toEqual([]);
+  });
+
+  it('B5: an aborted request is not retried', async () => {
+    const ac = new AbortController();
+    const llm = new ScriptedLlmClient([], () => {
+      ac.abort();
+      throw Object.assign(new Error('Request was aborted.'), { name: 'APIUserAbortError' });
+    });
+    const r = await runAttempt({ llm, mcp: fakePetstore(), prompt: 'p', model: 'm', mode: 'tool', signal: ac.signal, sleep: async () => {} });
+    expect(r.endReason).toBe('cancelled');
+    expect(llm.requests).toHaveLength(1);
+  });
+
+  // B6: --max-run-tokens was checked only before starting an attempt while 4 ran at once, so a run could end ~4 × the
+  // per-attempt limit over its cap. Each attempt here spends ~80k of a 100k per-attempt limit; the cap is 250k.
+  const heavy = () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const llm = new ScriptedLlmClient([], async (req) => {
+      if (req.messages.length === 1) {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        return llmResponse([use(`h${Math.random()}`, 'get_pet_by_id', { petId: 1 })], { input: 40_000, output: 10 });
+      }
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return llmResponse([text('Rex')], { input: 40_000, output: 10 });
+    });
+    return { llm, maxInFlight: () => maxInFlight };
+  };
+  const heavyTask = task({ key: 'h', category: 'single', referenceCalls: [{ tool: 'get_pet_by_id', arguments: { petId: 1 } }], assertions: [{ type: 'answer_contains', anyOf: ['Rex'] }] });
+
+  it('B6: --max-run-tokens is a real cap: each in-flight attempt reserves its per-attempt limit', async () => {
+    const h = heavy();
+    const out = await runSuiteDetailed({ llm: h.llm, tasks: [heavyTask], models: ['m'], modes: ['tool'], repeats: 8, concurrency: 4, maxRunTokens: 250_000, limits: { maxTotalTokens: 100_000 }, equivalenceJudge: false, openSession: async () => ({ mcp: fakePetstore() }) });
+    expect(out.results.every((r) => r.inputTokens + r.outputTokens === 80_020)).toBe(true);
+    expect(out.tokensUsed).toBeLessThanOrEqual(250_000);
+    expect(out.results).toHaveLength(2);
+    expect(h.maxInFlight()).toBe(2);
+    expect(out.incomplete).toMatchObject({ attemptsRun: 2, attemptsPlanned: 8 });
+    expect(out.incomplete!.reason).toContain('--max-run-tokens 250000');
+  });
+
+  it('B6: an attempt whose limit cannot fit the cap never starts (the reason says why)', async () => {
+    const h = heavy();
+    const out = await runSuiteDetailed({ llm: h.llm, tasks: [heavyTask], models: ['m'], modes: ['tool'], repeats: 2, maxRunTokens: 50_000, limits: { maxTotalTokens: 100_000 }, openSession: async () => ({ mcp: fakePetstore() }) });
+    expect(out.results).toHaveLength(0);
+    expect(out.tokensUsed).toBe(0);
+    expect(out.incomplete!.reason).toMatch(/per-attempt token limit 100000/);
+  });
+
+  it('B6: without a cap, concurrency bounds the attempts in flight', async () => {
+    for (const concurrency of [1, 3]) {
+      const h = heavy();
+      const out = await runSuiteDetailed({ llm: h.llm, tasks: [heavyTask], models: ['m'], modes: ['tool'], repeats: 6, concurrency, equivalenceJudge: false, openSession: async () => ({ mcp: fakePetstore() }) });
+      expect(out.results).toHaveLength(6);
+      expect(h.maxInFlight()).toBe(concurrency);
+    }
   });
 });
