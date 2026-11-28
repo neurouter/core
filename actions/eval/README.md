@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: neurouter/core/actions/eval@v0.3.4
+      - uses: neurouter/core/actions/eval@v0.3.5
         with:
           spec: openapi.yaml
           suite: neurouter/suite.json      # optional: freeze a generated suite for stable CI
@@ -22,14 +22,14 @@ With a `neurouter.yaml`, pass `config` and `server` instead of `spec` (the eval 
 server's spec, overlay and environment):
 
 ```yaml
-      - uses: neurouter/core/actions/eval@v0.3.4
+      - uses: neurouter/core/actions/eval@v0.3.5
         with:
           config: neurouter.yaml
           server: acme-orders
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-The action runs the `neurouter` CLI of its own version: the tag you reference (`@v0.3.4` → `neurouter@0.3.4`),
+The action runs the `neurouter` CLI of its own version: the tag you reference (`@v0.3.5` → `neurouter@0.3.5`),
 or the CLI version in the repository at that ref when you pin a branch or commit. Set `neurouter-version`
 to override it.
 

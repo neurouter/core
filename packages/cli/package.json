@@ -1,6 +1,6 @@
 {
   "name": "neurouter",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -43,10 +43,10 @@
     "prepack": "node ../../scripts/prepack.mjs --readme"
   },
   "dependencies": {
-    "@neurouter/shared": "0.3.4",
-    "@neurouter/compiler": "0.3.4",
-    "@neurouter/evals": "0.3.4",
-    "@neurouter/server": "0.3.4",
+    "@neurouter/shared": "0.3.5",
+    "@neurouter/compiler": "0.3.5",
+    "@neurouter/evals": "0.3.5",
+    "@neurouter/server": "0.3.5",
     "commander": "15.1.0",
     "yaml": "2.9.1"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@neurouter/shared",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Neurouter shared contract: API schemas, neurouter.yaml config schema, domain types",
   "keywords": [
     "mcp",

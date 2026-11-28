@@ -1,6 +1,6 @@
 {
   "name": "neurouter-monorepo",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "Neurouter: turn an OpenAPI or GraphQL API into a governed MCP server with code mode, ops tools and evals",
   "license": "Apache-2.0",
