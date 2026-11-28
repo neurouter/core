@@ -13,6 +13,7 @@
  * - `system-job`: a background job that works across tenants on purpose (retention, indexing, GC).
  * - `global-table`: the table holds platform rows here (e.g. client registrations).
  * - `tenant-from-row`: loads one row by its unique id and takes the tenant from it for every later check.
+ * - `user-scope`: an account-level query over the signed-in user's own memberships or invites (across tenants by design).
  *
  * Inserts are checked by the type system: `tenant_id` is required (non-`Generated`) on every tenant
  * table in `kernel/db/schema.ts`, which this test also asserts. Builders from `scoped()` are scoped
@@ -25,7 +26,7 @@ import { describe, expect, it } from 'vitest';
 import { GLOBAL_TABLES, TENANT_ID_OPTIONAL_TABLES } from '../kernel/db/tenant-scope.js';
 
 const SRC = resolve(import.meta.dirname, '..');
-export const TENANT_SCOPE_REASONS = ['child-of-scoped', 'by-secret-hash', 'system-job', 'global-table', 'tenant-from-row'] as const;
+export const TENANT_SCOPE_REASONS = ['child-of-scoped', 'by-secret-hash', 'system-job', 'global-table', 'tenant-from-row', 'user-scope'] as const;
 const STARTS = new Set(['selectFrom', 'updateTable', 'deleteFrom', 'insertInto']);
 /** Calls whose arguments can scope a chain by tenant (filters, joins, inserted/updated values). */
 const PREDICATE_CALLS = new Set(['where', 'whereRef', 'orWhere', 'having', 'on', 'onRef', 'innerJoin', 'leftJoin', 'values', 'set']);

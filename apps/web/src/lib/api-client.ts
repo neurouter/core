@@ -2,12 +2,14 @@ import type * as z from 'zod';
 import {
   PROBLEM_CONTENT_TYPE,
   Problem,
+  TENANT_HEADER,
   buildPath,
   serializeQuery,
   type EndpointDef,
   type ProblemFieldError,
   type QueryValue,
 } from '@/contract';
+import { getTenantSlug } from './tenant';
 
 /** Error thrown for every non-2xx response (RFC 9457 problem+json, or a synthetic one). */
 export class ApiError extends Error {
@@ -38,6 +40,11 @@ export class ApiError extends Error {
   get reason(): string | undefined {
     const r = this.extensions.reason;
     return typeof r === 'string' ? r : undefined;
+  }
+
+  /** 403 `no_tenant`: the signed-in user belongs to no organization (multi-tenancy spec §3.3). */
+  get isNoTenant(): boolean {
+    return this.status === 403 && this.reason === 'no_tenant';
   }
 
   get isDemoReadOnly(): boolean {
@@ -120,6 +127,9 @@ async function toApiError(res: Response): Promise<ApiError> {
 export async function apiFetch<D extends EndpointDef>(def: D, opts: ApiRequestOptions = {}): Promise<D['response'] extends z.ZodType ? z.infer<D['response']> : void> {
   const url = buildPath(def.path, opts.params) + serializeQuery(opts.query);
   const headers: Record<string, string> = { accept: 'application/json', ...opts.headers };
+  // the organization of this tab (spec §3.3); without it the server uses the session's active one
+  const tenant = getTenantSlug();
+  if (tenant && !(TENANT_HEADER in headers)) headers[TENANT_HEADER] = tenant;
   if (def.method !== 'GET') {
     if (csrfToken) headers['x-csrf-token'] = csrfToken;
   }

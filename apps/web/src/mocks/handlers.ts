@@ -3,7 +3,8 @@ import type * as z from 'zod';
 import { ALL_ENDPOINTS, type EndpointDef, type Me } from '@/contract';
 import { DEMO_READ_ONLY_ALLOW_UI } from '@/lib/demo-allow';
 import { createDb, type MockDb } from './db';
-import { contractFixtures, meFixture, problem, type ContractFixtures, type Resolver } from './fixtures';
+import { contractFixtures, meFixture, problem, tenancyGuard, type ContractFixtures, type Resolver } from './fixtures';
+import { loadTenancy, saveTenancy } from './tenancy';
 
 export type { ContractFixtures };
 
@@ -29,7 +30,7 @@ async function demoRefuses(key: string, request: Request): Promise<boolean> {
  * validated against the endpoint's response schema (so mocks can't drift); endpoints without a
  * fixture answer 501 problem+json.
  */
-export function createContractHandlers(fixtures: ContractFixtures = {}, opts: { readOnly?: boolean } = {}): HttpHandler[] {
+export function createContractHandlers(fixtures: ContractFixtures = {}, opts: { readOnly?: boolean; guard?: (def: EndpointDef, request: Request) => Response | null } = {}): HttpHandler[] {
   // static paths first (`/api/tools/search` before `/api/tools/:id`): MSW matches in order
   const params = (path: string) => (path.match(/:/g) ?? []).length;
   const endpoints = [...ALL_ENDPOINTS].sort((a, b) => params(a.def.path) - params(b.def.path));
@@ -38,6 +39,8 @@ export function createContractHandlers(fixtures: ContractFixtures = {}, opts: { 
       if (opts.readOnly && def.method !== 'GET' && (!DEMO_READ_ONLY_ALLOW.has(key) || (await demoRefuses(key, request)))) {
         return problem(403, 'forbidden', 'Read-only demo', DEMO_MESSAGE, { reason: 'demo_read_only' });
       }
+      const refused = opts.guard?.(def, request);
+      if (refused) return refused;
       if (!(key in fixtures)) return problem(501, 'not_implemented', 'Not mocked', `No MSW fixture for ${key} (${def.method} ${def.path})`);
       const f = fixtures[key];
       const value = typeof f === 'function' ? await (f as Resolver)({ request, params }) : f;
@@ -66,5 +69,17 @@ export function defaultFixtures(db: MockDb = mockDb(), me?: Me): ContractFixture
 
 export const handlers = (db: MockDb = mockDb()) => createContractHandlers(defaultFixtures(db));
 
+/**
+ * The read-write browser mocks (dev, the e2e `build:mock` bundle): the tenancy state (session,
+ * organizations, members, invites) persists in localStorage across reloads, and the server's
+ * session/tenant checks run before every handler (401 signed out, 403 `no_tenant`).
+ */
+export function browserHandlers(db: MockDb = mockDb()): HttpHandler[] {
+  db.tenancy = loadTenancy();
+  db.persistTenancy = () => saveTenancy(db.tenancy);
+  db.persistTenancy();
+  return createContractHandlers(defaultFixtures(db), { guard: tenancyGuard(db) });
+}
+
 /** The public demo site: same fixtures, every write refused with `demo_read_only` unless allow-listed. */
-export const demoHandlers = (db: MockDb = mockDb()): HttpHandler[] => createContractHandlers(contractFixtures(db, { demo: true, me: meFixture('admin', { demoReadOnly: true }) }), { readOnly: true });
+export const demoHandlers = (db: MockDb = mockDb()): HttpHandler[] => createContractHandlers(contractFixtures(db, { demo: true, me: meFixture('owner', { demoReadOnly: true }) }), { readOnly: true });

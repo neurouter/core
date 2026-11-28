@@ -5,6 +5,7 @@
 import type { FastifyRequest } from 'fastify';
 
 export type TenantStatus = 'active' | 'suspended' | 'pending_deletion' | 'deleted';
+export type TenantKind = 'personal' | 'org';
 
 export interface TenantRef {
   id: string;
@@ -13,6 +14,8 @@ export interface TenantRef {
   status: TenantStatus;
   /** `oss` in core. */
   plan: string;
+  /** `personal` (created at sign-up) or `org` (spec §2.5); `org` when unknown. */
+  kind?: TenantKind;
 }
 
 export type TenantRole = 'owner' | 'admin' | 'viewer';

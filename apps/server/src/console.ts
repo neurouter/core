@@ -38,11 +38,15 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
     s.envelope,
     s.users,
     s.audit,
-    { redirectUri: `${config.publicUrl}/api/auth/oidc/callback`, scopes: config.env.OIDC_SCOPES, groupsClaim: config.env.OIDC_GROUPS_CLAIM, adminGroups: config.env.OIDC_ADMIN_GROUPS, defaultRole: config.env.OIDC_DEFAULT_ROLE, allowedEmailDomains: config.env.OIDC_ALLOWED_EMAIL_DOMAINS },
+    {
+      redirectUri: `${config.publicUrl}/api/auth/oidc/callback`, scopes: config.env.OIDC_SCOPES, groupsClaim: config.env.OIDC_GROUPS_CLAIM, adminGroups: config.env.OIDC_ADMIN_GROUPS, defaultRole: config.env.OIDC_DEFAULT_ROLE, allowedEmailDomains: config.env.OIDC_ALLOWED_EMAIL_DOMAINS,
+      // an invited email may sign in even outside the allowed domains (multi-tenancy spec §2.4)
+      invited: (email) => s.invites.hasPendingFor(email),
+    },
     oidcProvider,
   );
   const links = new LocalLinkService(s.dbs.main.db, s.clock, s.users, s.audit, config.publicUrl);
-  const views = new Views(s.dbs.main.db, config.publicUrl, s.namedSecrets, s.envRefs);
+  const views = new Views(s.dbs.main.db, config.publicUrl, s.namedSecrets, s.envRefs, async (tenantId) => (s.tenancy.multi ? ((await s.tenancy.byId(tenantId))?.slug ?? null) : null));
 
   const adminCtx = (bundle: RuntimeBundle, userId: string): RunContext => ({
     tenantId: bundle.tenantId,
@@ -141,6 +145,7 @@ export function buildApiContext(s: Services, opts: { oidcProvider?: OidcProvider
     configSync: s.configSync,
     apiKeys: s.apiKeys,
     users: s.users,
+    invites: s.invites,
     sessions,
     login,
     oidcProvider,

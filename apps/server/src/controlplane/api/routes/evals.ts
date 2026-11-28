@@ -13,6 +13,7 @@ import { EvalsService, type EvalRunRowDb, type EvalSuiteRowDb, type EvalTaskRowD
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
 import { OverlayDrafts } from './overlays.js';
+import { serverOr404 } from './servers.js';
 
 
 const userOf = (req: unknown): string | null => ((req as { user?: { id: string } }).user?.id ?? null);
@@ -119,11 +120,15 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
   };
 
   route(app, 'evals.suites', api.evals.suites, async (req) => {
+    // another tenant's server reads as not found (cross-tenant suite §4.8), not as a server without suites
+    await serverOr404(c, req, req.params.id);
     const rows = await db.selectFrom('eval_suites').where('tenant_id', '=', tenantOf(req)).selectAll().where('server_id', '=', req.params.id).orderBy('version', 'desc').execute();
     return { items: await Promise.all(rows.map(suiteRow)) };
   });
 
   route(app, 'evals.generateSuite', api.evals.generateSuite, async (req, reply) => {
+    // no job is started for a server outside the request's tenant
+    await serverOr404(c, req, req.params.id);
     await ev.llm(tenantOf(req));
     const b = req.body ?? {};
     const jobId = await c.jobs.start(tenantOf(req), 'eval_generate', { serverId: req.params.id }, userOf(req), async () => suiteRow(await ev.generateSuite(tenantOf(req), req.params.id, { ...(b.counts ? { counts: b.counts } : {}), ...(b.model ? { model: b.model } : {}), ...(b.seed !== undefined ? { seed: b.seed } : {}), instructions: b.instructions ?? null, ...(b.maxGeneratorTokens ? { maxGeneratorTokens: b.maxGeneratorTokens } : {}), createdBy: userOf(req) })));
@@ -302,6 +307,7 @@ export async function evalsRoutes(app: FastifyInstance, c0: ApiContext): Promise
   /* ---------------------------------------------------------------- suggestions */
 
   route(app, 'suggestions.list', api.suggestions.list, async (req) => {
+    await ev.run(tenantOf(req), req.params.id);
     const rows = await db.selectFrom('suggestions').where('tenant_id', '=', tenantOf(req)).selectAll().where('run_id', '=', req.params.id).orderBy('predicted_delta', 'desc').execute();
     return { items: await Promise.all(rows.map(suggestionRow)) };
   });

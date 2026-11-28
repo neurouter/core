@@ -5,13 +5,14 @@
  */
 import { HttpResponse } from 'msw';
 import {
-  LLM_PROVIDER_KINDS, Me, PROBLEM_CONTENT_TYPE, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, capabilitiesFor, providerForModel, problemType, readinessBand, type Badges, type EnvironmentDetail, type EvalRunRow, type OverlayDraft, type OverlayPatchOp, type ReadinessComponent,
+  INVITE_TTL_MS, LLM_PROVIDER_KINDS, Me, type Capability, type EndpointDef, type InviteRole, type MemberPatch, PROBLEM_CONTENT_TYPE, PROVIDER_ENV_KEYS, PROVIDER_LABELS, PROVIDER_MODELS, capabilitiesFor, providerForModel, problemType, readinessBand, type Badges, type EnvironmentDetail, type EvalRunRow, type OverlayDraft, type OverlayPatchOp, type ReadinessComponent,
   type SpecPreview, type UpstreamAuthIn, type UpstreamAuthOut,
 } from '@neurouter/shared';
 import {
   DAY, HOUR, MIN, auditRows, buildRow, createDb, draftChanges, effectiveEntry, entryYaml, generateTask, keyOf, matrixFrom, overlayYaml, parseToolId, readinessFor, serverDetail, serverRow, shapingPreview,
   taskDetail, taskResults, tickRun, tokens, toolDetail, toolId, toolName, toolRow, toolVisible, visibleCount, type Entry, type MockDb, type RunState, type ServerState, type SuggestionState,
 } from './db';
+import { ACME_TENANT, activeMemberships, capabilitiesOf, inviteRow, inviteStatus, keepsAnOwner, memberRows, nameFromEmail, resolveTenant, summary, type MockInvite, type TenancyState } from './tenancy';
 import { ACME_BASELINE_BREAKDOWN, ACME_BREAKDOWN, ACME_LINT, BLUEFIN_LINT, EVAL_TASK_PROMPTS, INSTANCE, MODELS, PEOPLE, iso, type RUNS, type ToolSeed } from './demo-data';
 
 type Ctx = { request: Request; params: Record<string, string | readonly string[] | undefined> };
@@ -43,19 +44,64 @@ function page<T>(items: T[], ctx: Ctx, def = 50) {
 
 /* ================================================================== people */
 
-export type PersonKey = 'admin' | 'admin2' | 'viewer';
-const PERSON = { admin: PEOPLE.maya, admin2: PEOPLE.jon, viewer: PEOPLE.priya };
+export type PersonKey = 'owner' | 'admin' | 'admin2' | 'viewer';
+const PERSON = { owner: PEOPLE.maya, admin: PEOPLE.jon, admin2: PEOPLE.jon, viewer: PEOPLE.priya };
 
-export function meFixture(who: PersonKey = 'admin', patch: { demoReadOnly?: boolean; badges?: Partial<Badges>; features?: Partial<Me['features']> } = {}): Me {
-  const person = PERSON[who];
-  return Me.parse({
-    user: { id: person.id, email: person.email, name: person.name, role: person.role, anonymous: false },
-    capabilities: capabilitiesFor(person.role),
+type MePatch = { demoReadOnly?: boolean; badges?: Partial<Badges>; features?: Partial<Me['features']>; multi?: boolean; noTenant?: boolean };
+
+function meBase(patch: MePatch) {
+  return {
     csrfToken: 'csrf-test-token',
     features: { codeMode: true, embeddings: 'ready', evals: true, oauthBroker: true, externalAs: false, events: false, configMode: 'hybrid', ...patch.features },
     badges: { inboxOpen: 6, evalsRunning: 0, ...patch.badges },
     instance: { name: INSTANCE.name, version: INSTANCE.version, demoReadOnly: patch.demoReadOnly ?? false },
+  };
+}
+
+/** A static `me` for one persona in the Acme organization (`noTenant`: signed in, no membership). */
+export function meFixture(who: PersonKey = 'owner', patch: MePatch = {}): Me {
+  const person = PERSON[who];
+  const tenant = patch.noTenant ? null : { ...ACME_TENANT, role: person.role };
+  return Me.parse({
+    user: { id: person.id, email: person.email, name: person.name, role: tenant?.role ?? 'viewer', anonymous: false },
+    tenant,
+    tenants: tenant ? [tenant] : [],
+    tenancy: { multi: !!patch.multi },
+    capabilities: tenant ? capabilitiesFor(tenant.role) : [],
+    ...meBase(patch),
   });
+}
+
+/** `me` from the mock tenancy state: the signed-in user in the request's organization (spec §3.3). */
+export function meFromTenancy(t: TenancyState, request: Request | null, patch: MePatch = {}): Me | null {
+  const r = resolveTenant(t, request);
+  if (!r) return null;
+  const tenant = r.membership ? summary(t, r.membership) : null;
+  return Me.parse({
+    user: { id: r.user.id, email: r.user.email, name: r.user.name, role: tenant?.role ?? 'viewer', anonymous: false },
+    tenant,
+    tenants: activeMemberships(t, r.user.id).map((m) => summary(t, m)),
+    tenancy: { multi: t.multi },
+    capabilities: capabilitiesOf(r.membership),
+    ...meBase(patch),
+  });
+}
+
+const unauthenticated = () => problem(401, 'unauthenticated', 'Authentication required', 'Sign in to continue.');
+const noTenant = () => problem(403, 'forbidden', 'No organization', 'You are not a member of any organization on this server.', { reason: 'no_tenant' });
+
+/**
+ * Session and tenant checks the real server makes before a handler (browser mock bundle): 401
+ * when signed out, 403 `no_tenant` on tenant-scoped endpoints for a user without a membership.
+ */
+export function tenancyGuard(db: MockDb) {
+  return (def: EndpointDef, request: Request): Response | null => {
+    if (def.access.includes('public')) return null;
+    const r = resolveTenant(db.tenancy, request);
+    if (!r) return unauthenticated();
+    if (def.tenant !== false && !r.membership) return noTenant();
+    return null;
+  };
 }
 
 /* ================================================================== overlay draft */
@@ -293,7 +339,30 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
     const t = s?.tools.find((x) => x.orig === parsed!.orig);
     return s && t ? { s, t } : null;
   };
-  const me = opts.me ?? meFixture('admin', { demoReadOnly: !!opts.demo });
+  const t = db.tenancy;
+  const save = () => db.persistTenancy?.();
+  /** A fixed `me` (tests, the demo) or the signed-in user of the mock tenancy state. */
+  const staticMe = opts.me ?? (opts.demo ? meFixture('owner', { demoReadOnly: true }) : null);
+  const meOf = (request: Request | null): Me | null => staticMe ?? meFromTenancy(t, request);
+  /** The request's organization and the caller's capabilities in it. */
+  const ctxOf = (ctx: Ctx) => {
+    const r = resolveTenant(t, ctx.request);
+    return r?.membership ? { user: r.user, tenantId: r.membership.tenantId, caps: capabilitiesOf(r.membership) as Capability[] } : null;
+  };
+  const deny = (cap: Capability) => problem(403, 'forbidden', 'Forbidden', `Requires ${cap}.`, { reason: 'capability' });
+  /** Runs `fn` when the caller holds `cap` in the request's organization. */
+  const withCap = (cap: Capability, fn: (c: NonNullable<ReturnType<typeof ctxOf>>, ctx: Ctx) => unknown) => async (ctx: Ctx) => {
+    const c = ctxOf(ctx);
+    if (!c) return noTenant();
+    if (!c.caps.includes(cap)) return deny(cap);
+    return fn(c, ctx);
+  };
+  const inviteByToken = async (ctx: Ctx): Promise<MockInvite | Response> => {
+    const token = (await body<{ token?: string }>(ctx)).token ?? '';
+    const inv = t.invites.find((i) => i.token === token);
+    if (!inv || inviteStatus(inv) !== 'pending') return problem(404, 'not_found', 'Invite not found', 'This invite link is invalid, expired, revoked or was already used.');
+    return inv;
+  };
   const badges = (): Badges => ({
     inboxOpen: db.needGroups.filter((g) => g.status === 'open' || g.status === 'planned').length + db.issues.filter((i) => i.status === 'open').length,
     evalsRunning: db.runs.filter((r) => (tickRun(db, r), r.row.status === 'running')).length,
@@ -308,10 +377,122 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
   const fixtures: ContractFixtures = {
     /* ---------------------------------------------------------------- auth, me */
     'auth.config': { oidc: { enabled: true, displayName: 'Acme SSO' }, localLink: true, demoReadOnly: !!opts.demo, orgName: INSTANCE.name },
-    'auth.link': async (ctx) => (/expired/.test((await body<{ token?: string }>(ctx)).token ?? '') ? problem(401, 'unauthenticated', 'Link expired', 'This sign-in link has expired or was already used. Run `neurouter console-link` for a new one.') : me),
-    'auth.logout': { endSessionUrl: null },
-    'me.get': () => ({ ...me, badges: badges() }),
+    'auth.link': async (ctx) => {
+      const token = (await body<{ token?: string }>(ctx)).token ?? '';
+      if (/expired/.test(token)) return problem(401, 'unauthenticated', 'Link expired', 'This sign-in link has expired or was already used. Run `neurouter console-link` for a new one.');
+      // mock-only identity switch: `as:<email>` signs in as that user (created on first use)
+      const as = /^as:(.+@.+)$/.exec(token.trim())?.[1]?.toLowerCase();
+      let user = as ? t.users.find((u) => u.email.toLowerCase() === as) : t.users.find((u) => u.id === PEOPLE.maya.id);
+      if (as && !user) {
+        user = { id: `usr_${++t.seq}_${as.split('@')[0]!.replace(/[^a-z0-9]/g, '')}`, email: as, name: nameFromEmail(as), lastLoginAt: null };
+        t.users.push(user);
+      }
+      t.sessionUserId = user!.id;
+      user!.lastLoginAt = iso(Date.now());
+      t.activeTenantId = activeMemberships(t, user!.id)[0]?.tenantId ?? null;
+      save();
+      return meOf(null);
+    },
+    'auth.logout': () => {
+      t.sessionUserId = null;
+      save();
+      return { endSessionUrl: null };
+    },
+    'me.get': (ctx) => {
+      const me = meOf(ctx.request);
+      return me ? { ...me, badges: badges() } : unauthenticated();
+    },
     'me.badges': () => badges(),
+
+    /* ---------------------------------------------------------------- tenants, members, invites (multi-tenancy spec §2) */
+    'tenants.list': (ctx) => {
+      const r = resolveTenant(t, ctx.request);
+      return r ? { items: activeMemberships(t, r.user.id).map((m) => summary(t, m)) } : unauthenticated();
+    },
+    'tenants.switch': async (ctx) => {
+      const r = resolveTenant(t, ctx.request);
+      if (!r) return unauthenticated();
+      const slug = (await body<{ slug?: string }>(ctx)).slug;
+      const m = activeMemberships(t, r.user.id).find((x) => t.tenants.find((tt) => tt.id === x.tenantId)?.slug === slug);
+      if (!m) return notFound('Organization');
+      t.activeTenantId = m.tenantId;
+      save();
+      return { tenant: summary(t, m) };
+    },
+    'members.list': withCap('members:read', (c, ctx) => {
+      const needle = q(ctx).get('q')?.toLowerCase();
+      const rows = memberRows(t, c.tenantId).filter((m) => !needle || m.email.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle));
+      return page(rows, ctx, 200);
+    }),
+    'members.update': withCap('members:manage', async (c, ctx) => {
+      const m = t.memberships.find((x) => x.tenantId === c.tenantId && x.userId === p(ctx, 'id'));
+      if (!m) return notFound('Member');
+      const b = await body<MemberPatch>(ctx);
+      const next = { role: b.role ?? m.role, status: b.status ?? m.status };
+      if (!keepsAnOwner(t, c.tenantId, m.userId, next)) return problem(409, 'conflict', 'Last owner', 'An organization needs at least one active owner. Make someone else an owner first.');
+      Object.assign(m, next);
+      save();
+      return memberRows(t, c.tenantId).find((x) => x.id === m.userId);
+    }),
+    'members.remove': withCap('members:manage', (c, ctx) => {
+      const m = t.memberships.find((x) => x.tenantId === c.tenantId && x.userId === p(ctx, 'id'));
+      if (!m) return notFound('Member');
+      if (!keepsAnOwner(t, c.tenantId, m.userId, null)) return problem(409, 'conflict', 'Last owner', 'An organization needs at least one active owner. Make someone else an owner first.');
+      t.memberships = t.memberships.filter((x) => x !== m);
+      save();
+      return null;
+    }),
+    'members.invites': withCap('members:invite', (c) => {
+      const rows = t.invites.filter((i) => i.tenantId === c.tenantId).map(inviteRow);
+      return { items: rows.sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending') || b.createdAt.localeCompare(a.createdAt)) };
+    }),
+    'members.invite': withCap('members:invite', async (c, ctx) => {
+      const b = await body<{ email?: string; role?: InviteRole }>(ctx);
+      const email = (b.email ?? '').trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return problem(422, 'validation_failed', 'Validation failed', '1 field is invalid', { errors: [{ path: ['email'], message: 'Enter a valid email address', code: 'invalid_format' }] });
+      if (memberRows(t, c.tenantId).some((m) => m.email.toLowerCase() === email.toLowerCase())) return problem(409, 'conflict', 'Already a member', `${email} is already a member of this organization.`);
+      const now = Date.now();
+      const token = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+      const inv: MockInvite = { id: `inv_${++t.seq}_${now.toString(36)}`, tenantId: c.tenantId, email, role: b.role === 'admin' ? 'admin' : 'viewer', token, invitedBy: { id: c.user.id, email: c.user.email }, createdAt: iso(now), expiresAt: iso(now + INVITE_TTL_MS), acceptedAt: null, revokedAt: null };
+      t.invites.push(inv);
+      save();
+      return { invite: inviteRow(inv), url: `${new URL(ctx.request.url).origin}/invite#t=${token}` };
+    }),
+    'members.revokeInvite': withCap('members:invite', (c, ctx) => {
+      const inv = t.invites.find((i) => i.id === p(ctx, 'id') && i.tenantId === c.tenantId);
+      if (!inv) return notFound('Invite');
+      inv.revokedAt ??= iso(Date.now());
+      save();
+      return null;
+    }),
+    'invites.preview': async (ctx) => {
+      const r = resolveTenant(t, ctx.request);
+      if (!r) return unauthenticated();
+      const inv = await inviteByToken(ctx);
+      if (inv instanceof Response) return inv;
+      const tenant = t.tenants.find((x) => x.id === inv.tenantId)!;
+      return {
+        tenant: { slug: tenant.slug, name: tenant.name }, email: inv.email, role: inv.role, expiresAt: inv.expiresAt,
+        emailMatches: r.user.email.toLowerCase() === inv.email.toLowerCase(),
+        alreadyMember: t.memberships.some((m) => m.tenantId === inv.tenantId && m.userId === r.user.id),
+      };
+    },
+    'invites.accept': async (ctx) => {
+      const r = resolveTenant(t, ctx.request);
+      if (!r) return unauthenticated();
+      const inv = await inviteByToken(ctx);
+      if (inv instanceof Response) return inv;
+      if (r.user.email.toLowerCase() !== inv.email.toLowerCase()) return problem(403, 'forbidden', 'Wrong account', `This invite was sent to ${inv.email}. Sign in with that account to accept it.`, { reason: 'invite_email_mismatch' });
+      let m = t.memberships.find((x) => x.tenantId === inv.tenantId && x.userId === r.user.id);
+      if (!m) {
+        m = { tenantId: inv.tenantId, userId: r.user.id, role: inv.role, roleSource: 'invite', status: 'active', createdAt: iso(Date.now()) };
+        t.memberships.push(m);
+      }
+      inv.acceptedAt = iso(Date.now());
+      t.activeTenantId = inv.tenantId;
+      save();
+      return { tenant: summary(t, m) };
+    },
 
     /* ---------------------------------------------------------------- metrics */
     'metrics.overview': (ctx) => {
@@ -1255,15 +1436,6 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
     'config.export': () => new HttpResponse('# neurouter.yaml (effective, secrets as refs)\nservers: []\n', { headers: { 'content-type': 'text/yaml' } }),
     'config.validate': () => ({ ok: true, diagnostics: [] }),
     'system.info': { version: INSTANCE.version, commit: '3f2a9c1', nodeVersion: 'v24.11.0', db: { dialect: 'sqlite', version: '3.51.0' }, executor: { mode: 'embedded', ok: true, montyVersion: '0.4.2', poolMax: 8, busy: 1, detail: null }, embedder: { status: 'ready', model: 'local-minilm' }, coordination: 'memory', instanceId: 'nr-acme-01', publicUrl: 'https://mcp.acme.test', protocolVersions: ['2025-11-25', '2025-06-18'] },
-    'users.list': (ctx) => page(db.users, ctx),
-    'users.update': async (ctx) => {
-      const u = db.users.find((x) => x.id === p(ctx, 'id'));
-      if (!u) return notFound('User');
-      const b = await body<{ role?: 'admin' | 'viewer' }>(ctx);
-      if (b.role === 'viewer' && u.role === 'admin' && db.users.filter((x) => x.role === 'admin').length === 1) return problem(409, 'conflict', 'Last admin', 'The last admin cannot be demoted.');
-      if (b.role) u.role = b.role;
-      return u;
-    },
     'jobs.get': (ctx) => {
       const id = p(ctx, 'id');
       if (id === 'job_audit_verify') return { id, kind: 'audit_verify', status: 'succeeded', progress: 1, result: { ok: true, checked: 18_442, fromSeq: 1, toSeq: 18_442, checkpointsVerified: 18, firstBrokenSeq: null, reason: null }, error: null, problem: null, createdAt: iso(Date.now() - 2000), finishedAt: iso(Date.now()) };

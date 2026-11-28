@@ -62,14 +62,16 @@ describe('settings, model providers, kill switches, system, users, public report
     expect((await t.as(t.admin, { method: 'DELETE', url: `/api/kill-switches?scope=server&target=${server.id}&kind=writes` })).statusCode).toBe(204);
   });
 
-  it('system info, users (last admin protected), jobs', async () => {
+  it('system info, members (last owner protected), jobs', async () => {
     const i = await t.json(t.admin, { url: '/api/system/info' }, 200);
     expect(i).toMatchObject({ db: { dialect: 'sqlite' }, coordination: 'memory', protocolVersions: ['2026-07-28', '2025-11-25'] });
-    const users = await t.json(t.admin, { url: '/api/users' }, 200);
-    const admins = users.items.filter((u: any) => u.role === 'admin');
-    expect(admins.length).toBeGreaterThan(0);
+    const members = await t.json(t.admin, { url: '/api/members' }, 200);
+    const owners = members.items.filter((u: any) => u.role === 'owner');
+    expect(owners.map((o: any) => o.id)).toContain(t.admin.id);
     const v = await t.user('v2@test.dev', 'viewer');
-    expect((await t.json(t.admin, { method: 'PATCH', url: `/api/users/${v.id}`, payload: { role: 'admin' } }, 200)).role).toBe('admin');
+    expect((await t.json(t.admin, { method: 'PATCH', url: `/api/members/${v.id}`, payload: { role: 'admin' } }, 200)).role).toBe('admin');
+    // the role is the membership's; the deprecated users.role mirrors it for a 0.3.x rollback
+    expect((await t.s.services.dbs.main.db.selectFrom('users').select('role').where('id', '=', v.id).executeTakeFirstOrThrow()).role).toBe('admin');
   });
 
   it('public report and badge: 404 until publicReport + measured run', async () => {

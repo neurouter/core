@@ -4,12 +4,12 @@ import type { Dialect } from '../db/url.js';
 import { systemClock, type Clock } from '../lib/clock.js';
 import type { ArchiveStore } from './archive/store.js';
 import { auditMacKey } from './chain.js';
-import { maybePeriodicCheckpoint, toCheckpoint, writeCheckpoint, type MacSigner } from './checkpoints.js';
+import { checkpointAll, maybePeriodicCheckpoint, toCheckpoint, writeCheckpoint, type MacSigner } from './checkpoints.js';
 import { ensurePartitions } from './partitions.js';
 import { countCapped, countsByMinute, decisionCounts, queryRows, streamRows } from './query.js';
 import { applyRetention } from './retention.js';
 import type { AuditCheckpoint, AuditEventInput, AuditQuery, AuditRow, AuditStats, AuditVerifyOutcome, DecisionCount, RetentionOutcome } from './types.js';
-import { verifyChain } from './verify.js';
+import { verifyTenant } from './verify.js';
 import { AuditWriter, DEFAULT_WRITE_CONTEXT, type AuditWriteContext, type AuditWriterHooks, type CommittedAuditRow } from './writer.js';
 import type { CheckpointKind } from './chain.js';
 
@@ -39,9 +39,10 @@ export interface AuditStore {
   countsByMinute(q: Omit<AuditQuery, 'limit' | 'cursorSeq' | 'order'>): Promise<{ t: number; calls: number }[]>;
   /** seq range covering a time range (verify by time). */
   seqRange(from?: number, to?: number): Promise<{ fromSeq?: number; toSeq?: number } | null>;
-  verify(range: { fromSeq?: number; toSeq?: number }, onProgress?: (checked: number) => void | Promise<void>): Promise<AuditVerifyOutcome>;
-  checkpoint(kind: CheckpointKind): Promise<AuditCheckpoint | null>;
-  periodicCheckpoint(): Promise<AuditCheckpoint | null>;
+  /** Verifies a tenant's hash chain (plus the legacy instance-wide chain with `includeLegacy`). */
+  verify(tenantId: string, range: { fromSeq?: number; toSeq?: number }, opts?: { includeLegacy?: boolean; onProgress?: (checked: number) => void | Promise<void> }): Promise<AuditVerifyOutcome>;
+  checkpoint(kind: CheckpointKind, tenantId?: string): Promise<AuditCheckpoint[]>;
+  periodicCheckpoint(): Promise<AuditCheckpoint[]>;
   /** Rows after `seq` in order (sink dispatcher), plus checkpoints in that seq range. */
   readAfter(seq: number, limit: number, tenantId?: string): Promise<{ rows: AuditRow[]; checkpoints: AuditCheckpoint[] }>;
   headSeq(): Promise<number>;
@@ -188,15 +189,23 @@ export class SqlAuditStore implements AuditStore {
     return out;
   }
 
-  async verify(range: { fromSeq?: number; toSeq?: number }, onProgress?: (checked: number) => void | Promise<void>): Promise<AuditVerifyOutcome> {
-    return verifyChain({ db: this.db, installId: await this.currentInstallId(), macKeyFor: (k) => this.keyFor(k), ...(onProgress ? { onProgress } : {}) }, range);
+  /**
+   * Verifies a tenant's own hash chain (multi-tenancy spec §4.5); `includeLegacy` also verifies the
+   * legacy instance-wide chain of the rows written before per-tenant chains (the single-tenant
+   * install's default tenant).
+   */
+  async verify(tenantId: string, range: { fromSeq?: number; toSeq?: number }, opts: { includeLegacy?: boolean; onProgress?: (checked: number) => void | Promise<void> } = {}): Promise<AuditVerifyOutcome> {
+    return verifyTenant({ db: this.db, installId: await this.currentInstallId(), macKeyFor: (k) => this.keyFor(k), ...(opts.onProgress ? { onProgress: opts.onProgress } : {}) }, tenantId, range, { includeLegacy: opts.includeLegacy ?? false });
   }
 
-  checkpoint(kind: CheckpointKind): Promise<AuditCheckpoint | null> {
-    return writeCheckpoint(this.db, kind, this.signer(), this.clock.now());
+  /** Checkpoints one tenant's chain at its head, or every tenant chain without `tenantId`. */
+  async checkpoint(kind: CheckpointKind, tenantId?: string): Promise<AuditCheckpoint[]> {
+    if (tenantId === undefined) return checkpointAll(this.db, kind, this.signer(), this.clock.now());
+    const cp = await writeCheckpoint(this.db, kind, this.signer(), this.clock.now(), undefined, tenantId);
+    return cp ? [cp] : [];
   }
 
-  periodicCheckpoint(): Promise<AuditCheckpoint | null> {
+  periodicCheckpoint(): Promise<AuditCheckpoint[]> {
     return maybePeriodicCheckpoint(this.db, this.signer(), this.clock.now());
   }
 
@@ -207,7 +216,10 @@ export class SqlAuditStore implements AuditStore {
     const rows = (await qb.orderBy('seq', 'asc').limit(limit).execute()) as AuditRow[];
     if (!rows.length) return { rows, checkpoints: [] };
     const hi = Number(rows[rows.length - 1]!.seq);
-    const cps = await this.db.selectFrom('audit_checkpoints').selectAll().where('seq', '>', seq).where('seq', '<=', hi).orderBy('seq', 'asc').execute();
+    // a tenant's delivery carries only its own chain's checkpoints (spec §4.5)
+    let cq = this.db.selectFrom('audit_checkpoints').selectAll().where('seq', '>', seq).where('seq', '<=', hi);
+    if (tenantId !== undefined) cq = cq.where('tenant_id', '=', tenantId);
+    const cps = await cq.orderBy('seq', 'asc').execute();
     return { rows, checkpoints: cps.map((c) => toCheckpoint(c)) };
   }
 

@@ -3,6 +3,7 @@ import { Capability } from '../domain/capabilities.js';
 import { ConfigMode } from '../domain/enums.js';
 import { Role } from '../domain/roles.js';
 import { Id } from './common.js';
+import { TenantSummary } from './members.js';
 import { endpoint } from './endpoint.js';
 
 /* ------------------------------------------------------------------ auth (§14.2) */
@@ -65,11 +66,18 @@ export type Features = z.infer<typeof Features>;
 export const Badges = z.object({ inboxOpen: z.number().int().nonnegative(), evalsRunning: z.number().int().nonnegative() });
 export type Badges = z.infer<typeof Badges>;
 
+/** `role` is the user's role in the active organization (`viewer` with no capabilities when there is none). */
 export const MeUser = z.object({ id: Id, email: z.string(), name: z.string(), role: Role, anonymous: z.boolean() });
 export type MeUser = z.infer<typeof MeUser>;
 
 export const Me = z.object({
   user: MeUser,
+  /** The active organization of this request (multi-tenancy spec §3.3); null when the user has no membership. */
+  tenant: TenantSummary.nullable(),
+  /** Every organization the user belongs to (the switcher lists them when `tenancy.multi`). */
+  tenants: z.array(TenantSummary),
+  /** Several organizations on this deployment (cloud); false on a self-hosted install. */
+  tenancy: z.object({ multi: z.boolean() }),
   capabilities: z.array(Capability),
   csrfToken: z.string(),
   features: Features,
@@ -96,18 +104,18 @@ export const authEndpoints = {
     summary: 'Exchange a one-time local sign-in link token for a session (401 when expired or used)', body: LinkLoginBody, response: Me,
   }),
   logout: endpoint({
-    method: 'POST', path: '/api/auth/logout', kind: 'json', access: ['user'],
+    method: 'POST', path: '/api/auth/logout', kind: 'json', access: ['user'], tenant: false,
     summary: 'Sign out of the current session', response: LogoutResult,
   }),
 } as const;
 
 export const meEndpoints = {
   get: endpoint({
-    method: 'GET', path: '/api/me', kind: 'json', access: ['user'],
+    method: 'GET', path: '/api/me', kind: 'json', access: ['user'], tenant: false,
     summary: 'Current user, capabilities, CSRF token, features and badges (demo mode: anonymous viewer)', response: Me,
   }),
   badges: endpoint({
-    method: 'GET', path: '/api/me/badges', kind: 'json', access: ['user'],
+    method: 'GET', path: '/api/me/badges', kind: 'json', access: ['user'], tenant: false,
     summary: 'Sidebar badge counts', response: Badges,
   }),
 } as const;

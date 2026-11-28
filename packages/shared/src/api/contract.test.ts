@@ -45,17 +45,20 @@ const SPEC_KEYS = [
   'audit.list', 'audit.get', 'audit.export', 'audit.verify',
   // §14.13
   'settings.get', 'settings.update', 'settings.testModel', 'killSwitches.list', 'killSwitches.set', 'killSwitches.clear',
-  'config.status', 'config.reload', 'config.export', 'config.validate', 'system.info', 'users.list', 'users.update', 'jobs.get', 'events.stream',
+  'config.status', 'config.reload', 'config.export', 'config.validate', 'system.info', 'jobs.get', 'events.stream',
   // §14.14
   'public.report', 'public.badge',
   // §14.15
   'specs.preview', 'specs.draft', 'specs.draftUpdate', 'specs.cancelPreview', 'environments.testDraft', 'tools.searchAll', 'overlays.preview',
   'writeSwitches.get', 'opsTools.list', 'opsTools.set', 'tasks.events', 'inbox.list', 'inbox.splitNeed', 'evals.runTasks', 'suggestions.get',
   'suggestions.search', 'modelProviders.list', 'modelProviders.create', 'modelProviders.update', 'modelProviders.delete', 'modelProviders.test', 'telemetry.test',
+  // multi-tenancy spec §2.4, §3.3 (P1)
+  'tenants.list', 'tenants.switch', 'members.list', 'members.update', 'members.remove', 'members.invites', 'members.invite', 'members.revokeInvite',
+  'invites.preview', 'invites.accept',
 ] as const;
 
 /** Keys of §14 that are aliases of another key (registered once). */
-const SPEC_ALIAS_KEYS = ['tools.searchPreview', 'writeSwitches.set', 'inbox.exportMarkdown', 'settings.modelProviders.list', 'settings.modelProviders.test'];
+const SPEC_ALIAS_KEYS = ['tools.searchPreview', 'writeSwitches.set', 'inbox.exportMarkdown', 'settings.modelProviders.list', 'settings.modelProviders.test', 'users.list', 'users.update'];
 
 describe('endpoint registry', () => {
   const keys = ALL_ENDPOINTS.map((e) => e.key as string);

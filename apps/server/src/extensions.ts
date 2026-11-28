@@ -5,6 +5,10 @@
  *
  * Wired in P0: `tenancy`, `secretRefs`, `modelKeys`, `executor`, `routes`, `migrations`, `jobs`,
  * `features`, and `usage` (fed one `tool_calls` event per committed tool-call audit row).
+ * P1 (tenancy model): a resolver with `multi: true` registers `/mcp/{tenant}/{server}/{env}` and its
+ * PRM, makes console MCP URLs 3-segment and stops auto-joining OIDC sign-ins to the default tenant.
+ * Core exports the building blocks a multi-tenant resolver needs (`TenantDirectory`,
+ * `MembershipDirectory`, `pickConsoleTenant`); memberships, roles and invites are core features.
  * Declared with core defaults and wired later: `quotas` (enforcement points, P3), `netPolicy`
  * (per-tenant upstream policy; needs tenant-aware upstream fetchers, P2/P3), `identityProviders` (P2).
  */
@@ -16,8 +20,9 @@ import type { JobScheduler } from './kernel/jobs/scheduler.js';
 import type { NetPolicy } from './kernel/lib/net/ssrf-guard.js';
 import type { ModelKeyPolicy, SecretRefPolicy, TenantRef, TenantResolver } from './kernel/tenancy/types.js';
 
-export type { ModelKeyPolicy, SecretRefPolicy, TenantContext, TenantRef, TenantResolver, TenantRole, TenantStatus } from './kernel/tenancy/types.js';
-export { SingleTenantResolver, INSTANCE_SCOPE_ID } from './kernel/tenancy/index.js';
+export type { ModelKeyPolicy, SecretRefPolicy, TenantContext, TenantKind, TenantRef, TenantResolver, TenantRole, TenantStatus } from './kernel/tenancy/types.js';
+// building blocks for a multi-tenant resolver (the cloud's): tenant/alias lookups, memberships, console tenant pick
+export { SingleTenantResolver, INSTANCE_SCOPE_ID, MembershipDirectory, TenantDirectory, isLive, pickConsoleTenant, tenantRef } from './kernel/tenancy/index.js';
 export type { NetPolicy };
 
 export type QuotaOp =

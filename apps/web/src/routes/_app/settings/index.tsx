@@ -13,15 +13,14 @@ import { Pill } from '@/components/status/status';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { configStatusQuery, killSwitchesQuery, settingsQuery, systemInfoQuery, useClearKillSwitch, useReloadConfig, useSetKillSwitch, useTestProvider, useTestTelemetry, useUpdateSettings, useUpdateUser, usersQuery } from '@/features/settings/queries';
+import { configStatusQuery, killSwitchesQuery, settingsQuery, systemInfoQuery, useClearKillSwitch, useReloadConfig, useSetKillSwitch, useTestProvider, useTestTelemetry, useUpdateSettings } from '@/features/settings/queries';
 import { modelGroups } from '@/features/settings/models';
-import { useMe } from '@/hooks/use-me';
 import { configExportUrl } from '@/lib/download';
 import { formatBytes, formatDuration, formatRelative } from '@/lib/format';
 import { notifyError, notifySuccess } from '@/lib/notify';
 
-const TABS = ['general', 'models', 'members', 'config', 'kill-switches', 'code-mode', 'retention', 'telemetry'] as const;
-const LABEL: Record<(typeof TABS)[number], string> = { general: 'General', models: 'Models', members: 'Members', config: 'Config', 'kill-switches': 'Kill switches', 'code-mode': 'Code mode', retention: 'Retention', telemetry: 'Telemetry' };
+const TABS = ['general', 'models', 'config', 'kill-switches', 'code-mode', 'retention', 'telemetry'] as const;
+const LABEL: Record<(typeof TABS)[number], string> = { general: 'General', models: 'Models', config: 'Config', 'kill-switches': 'Kill switches', 'code-mode': 'Code mode', retention: 'Retention', telemetry: 'Telemetry' };
 const search = z.object({ tab: z.enum(TABS).optional().catch(undefined) });
 
 export const Route = createFileRoute('/_app/settings/')({
@@ -44,7 +43,6 @@ function SettingsPage() {
         <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="flex max-w-3xl flex-col gap-5">
           {tab === 'general' ? <General /> : null}
           {tab === 'models' ? <Models /> : null}
-          {tab === 'members' ? <Members /> : null}
           {tab === 'config' ? <Config /> : null}
           {tab === 'kill-switches' ? <KillSwitches /> : null}
           {tab === 'code-mode' ? <CodeMode /> : null}
@@ -175,39 +173,6 @@ function Models() {
         {select('m-judge', 'judgeModel', 'Judge model')}
         {select('m-gen', 'generatorModel', 'Task generator')}
       </div>
-    </section>
-  );
-}
-
-function Members() {
-  const users = useQuery(usersQuery());
-  const update = useUpdateUser();
-  const gate = useGate('settings:write');
-  const me = useMe();
-  return (
-    <section className="overflow-hidden rounded-xl border bg-card" aria-labelledby="mem-title">
-      <h2 id="mem-title" className="px-5 pt-4 pb-2 text-base font-semibold">
-        Members
-      </h2>
-      <p className="px-5 pb-3 text-[13px] text-muted-foreground">Admins change everything; Viewers see everything read-only. The last admin cannot be demoted.</p>
-      <ul className="divide-y border-t">
-        {users.data?.items.map((u) => (
-          <li key={u.id} className="flex flex-wrap items-center gap-3 px-5 py-2.5 text-[13.5px]">
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="font-medium">
-                {u.name} {u.id === me.user.id ? <span className="text-xs text-muted-foreground">(you)</span> : null}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {u.email} · {u.roleSource} · last sign-in {formatRelative(u.lastLoginAt)}
-              </span>
-            </span>
-            <select aria-label={`Role of ${u.name}`} className="h-8 rounded-lg border bg-background px-2 text-[13px]" disabled={gate.disabled} value={u.role} onChange={(e) => update.mutate({ id: u.id, role: e.target.value as 'admin' | 'viewer' }, { onSuccess: () => notifySuccess('Role changed'), onError: (err) => notifyError(err, 'Could not change the role') })}>
-              <option value="admin">Admin</option>
-              <option value="viewer">Viewer</option>
-            </select>
-          </li>
-        ))}
-      </ul>
     </section>
   );
 }

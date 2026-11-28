@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { api } from '@/contract';
 import { apiFetch, setCsrfToken } from '@/lib/api-client';
+import { setTenantSlug } from '@/lib/tenant';
 
 export const authKeys = {
   me: ['me'] as const,
@@ -15,6 +16,8 @@ export function meQueryOptions() {
     queryFn: async ({ signal }) => {
       const me = await apiFetch(api.me.get, { signal });
       setCsrfToken(me.csrfToken);
+      // the tab keeps the organization the server resolved (header, session or only membership)
+      setTenantSlug(me.tenant?.slug ?? null);
       return me;
     },
     staleTime: 5 * 60_000,

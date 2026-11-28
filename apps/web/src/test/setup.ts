@@ -61,6 +61,7 @@ afterEach(() => {
   listeners.clear();
   try {
     window.localStorage.clear();
+    window.sessionStorage.clear(); // the tab's organization and a pending invite token
   } catch {
     // ignore
   }

@@ -3,7 +3,8 @@ import { api, capabilitiesFor, isSafeReturnTo, type Me } from '@neurouter/shared
 import { AppError } from '../../../kernel/lib/errors.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { loadConsoleUser, type ConsoleUser } from '../../../kernel/principal.js';
-import { capabilityRole, clientMeta, requireUser } from '../../auth/guards.js';
+import { clientMeta, requireUser } from '../../auth/guards.js';
+import { tenantSummary, tenantsOf } from './members.js';
 import { anyProviderKey } from '../../evals/model-keys.js';
 import { liveIssue, notEvalOnlyGroup } from '../../traces/origin.js';
 import type { ApiContext } from '../context.js';
@@ -34,12 +35,20 @@ export async function evalsConfigured(c: ApiContext, t: TenantRef | null): Promi
 export async function buildMe(c: ApiContext, req: FastifyRequest, user: ConsoleUser, csrfToken: string): Promise<Me> {
   // the session may be brand new (link sign-in, demo visitor): resolve the tenant here when the guard did not
   // (public routes carry the public tenant with no role: resolve the user's membership instead)
-  const tc = req.tenantCtx?.role ? req.tenantCtx : await c.tenancy.forConsole(req, user.id, null);
+  // a stale or foreign `X-Neurouter-Tenant` (another tab, a removed membership) must not lock the console out:
+  // `me` falls back to the session's organization, and the SPA then corrects its stored slug
+  const sessionTenant = req.webAuth?.session.activeTenantId ?? null;
+  const tc = req.tenantCtx?.role
+    ? req.tenantCtx
+    : ((await c.tenancy.forConsole(req, user.id, sessionTenant)) ?? (await c.tenancy.forConsole({ ...req, headers: {}, query: {} } as FastifyRequest, user.id, sessionTenant)));
   const t = tc?.tenant ?? null;
-  const role = tc ? capabilityRole(tc.role) : user.role;
+  const role = tc?.role ?? 'viewer';
   const codeMode = t ? (await c.settings.get('codeModeEnabled', t.id)) && c.ports.executorStatus().ok : false;
   return {
     user: { id: user.id, email: user.email, name: user.name, role, anonymous: user.anonymous },
+    tenant: t && tc?.role ? tenantSummary(t, tc.role) : null,
+    tenants: user.anonymous ? (t && tc?.role ? [tenantSummary(t, tc.role)] : []) : await tenantsOf(c, user.id),
+    tenancy: { multi: c.tenancy.multi },
     capabilities: tc ? capabilitiesFor(role) : [],
     csrfToken,
     features: {
@@ -66,7 +75,10 @@ async function anonymousUser(c: ApiContext): Promise<string> {
   const id = newId();
   const now = c.clock.now();
   await db.insertInto('users').values({ id, tenant_id: t.id, email: ANONYMOUS_EMAIL, name: 'Demo visitor', role: 'viewer', role_source: 'local', created_at: now, updated_at: now }).onConflict((oc) => oc.doNothing()).execute();
-  return (await db.selectFrom('users').select('id').where('tenant_id', '=', t.id).where('email', '=', ANONYMOUS_EMAIL).executeTakeFirstOrThrow()).id;
+  const uid = (await db.selectFrom('users').select('id').where('tenant_id', '=', t.id).where('email', '=', ANONYMOUS_EMAIL).executeTakeFirstOrThrow()).id;
+  // the demo visitor is a viewer of the demo tenant
+  await db.insertInto('memberships').values({ tenant_id: t.id, user_id: uid, role: 'viewer', role_source: 'local', status: 'active', invited_by: null, created_at: now, updated_at: now }).onConflict((oc) => oc.doNothing()).execute();
+  return uid;
 }
 
 async function startSession(c: ApiContext, req: FastifyRequest, reply: Parameters<Parameters<typeof route>[3]>[1], userId: string, opts: { anonymous?: boolean; idTokenHint?: string | null } = {}) {

@@ -4,6 +4,8 @@ import type { Capability } from '@neurouter/shared';
 import { ErrorState, ForbiddenState } from '@/components/feedback/states';
 import { isForbiddenError, requireAnyCapability } from '@/features/auth/guards';
 import { meQueryOptions } from '@/features/auth/queries';
+import { NoOrganizationState } from '@/features/tenancy/no-organization';
+import { ApiError } from '@/lib/api-client';
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -17,8 +19,9 @@ export function guard(caps: readonly Capability[]) {
   };
 }
 
-/** Area error boundary: 403 → ForbiddenState in place, anything else → ErrorState. */
+/** Area error boundary: 403 → ForbiddenState in place (`no_tenant` → the no-organization state), anything else → ErrorState. */
 export function AreaError({ error, reset }: ErrorComponentProps) {
+  if (error instanceof ApiError && error.isNoTenant) return <NoOrganizationState />;
   if (isForbiddenError(error)) return <ForbiddenState />;
   return <ErrorState error={error} onRetry={reset} />;
 }

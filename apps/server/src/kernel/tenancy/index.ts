@@ -1,5 +1,6 @@
 export * from './types.js';
 export { SingleTenantResolver } from './single.js';
+export { MembershipDirectory, TenantDirectory, isLive, pickConsoleTenant, tenantRef, type MembershipView } from './directory.js';
 
 /**
  * Scope id for instance-level rows that are not owned by any tenant: instance settings (spec §4.6)

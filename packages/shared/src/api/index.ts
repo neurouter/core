@@ -14,5 +14,6 @@ export * from './inbox.js';
 export * from './evals.js';
 export * from './audit.js';
 export * from './settings.js';
+export * from './members.js';
 export * from './public.js';
 export * from './routes.js';

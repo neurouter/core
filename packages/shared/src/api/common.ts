@@ -174,7 +174,7 @@ export const TokenEstimate = z.number().int().nonnegative();
 export type ClientInfo = z.infer<typeof ClientInfo>;
 
 /** `403 forbidden` reasons (problem extension `reason`). */
-export const ForbiddenReason = z.enum(['csrf', 'demo_read_only', 'capability']);
+export const ForbiddenReason = z.enum(['csrf', 'demo_read_only', 'capability', 'no_tenant', 'instance_setting', 'invite_email_mismatch', 'tenant_suspended']);
 export type ForbiddenReason = z.infer<typeof ForbiddenReason>;
 
 /** `spec_fetch_failed` reasons (problem extension `reason`). */

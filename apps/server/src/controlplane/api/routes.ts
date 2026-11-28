@@ -42,7 +42,7 @@ export function registerEndpoint<D extends EndpointDef>(
     schema,
     ...opts,
     // the contract's access levels drive the coarse auth gate (installWebAuth) before validation
-    config: { ...((opts.config as object | undefined) ?? {}), access: def.access },
+    config: { ...((opts.config as object | undefined) ?? {}), access: def.access, tenant: def.tenant !== false },
     handler: async (req, reply) => {
       const out = await handler(req as unknown as EndpointRequest<D>, reply);
       if (reply.sent) return reply;

@@ -78,7 +78,7 @@ export class AuthorizationService {
       codeModeEnabled: (tenantId: string) => Promise<boolean>;
       /** Spec §3.4: consent needs a membership in the resource's tenant. */
       isMember: (tenantId: string, userId: string) => Promise<boolean>;
-      tenancy: Pick<TenantResolver, 'forMcp'>;
+      tenancy: Pick<TenantResolver, 'forMcp' | 'multi'>;
       resourceAliases?: readonly string[];
       loginUrl: (returnTo: string) => string;
     },

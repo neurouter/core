@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as InviteRouteImport } from './routes/invite'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppConnectRouteImport } from './routes/_app/connect'
@@ -25,6 +26,7 @@ import { Route as AppServersServerIdRouteRouteImport } from './routes/_app/serve
 import { Route as AppServersNewRouteImport } from './routes/_app/servers/new'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
+import { Route as AppSettingsMembersRouteImport } from './routes/_app/settings/members'
 import { Route as AppTasksIndexRouteImport } from './routes/_app/tasks/index'
 import { Route as AppTasksTaskIdRouteImport } from './routes/_app/tasks/$taskId'
 import { Route as AppEvalsRunsRunIdRouteImport } from './routes/_app/evals/runs/$runId'
@@ -40,6 +42,11 @@ import { Route as AppServersServerIdToolsToolIdRouteImport } from './routes/_app
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InviteRoute = InviteRouteImport.update({
+  id: '/invite',
+  path: '/invite',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -117,6 +124,11 @@ const AppSettingsAppearanceRoute = AppSettingsAppearanceRouteImport.update({
   path: '/settings/appearance',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsMembersRoute = AppSettingsMembersRouteImport.update({
+  id: '/settings/members',
+  path: '/settings/members',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppTasksIndexRoute = AppTasksIndexRouteImport.update({
   id: '/tasks/',
   path: '/tasks/',
@@ -185,6 +197,7 @@ const AppServersServerIdToolsToolIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/invite': typeof InviteRoute
   '/audit': typeof AppAuditRoute
   '/connect': typeof AppConnectRoute
   '/keys': typeof AppKeysRoute
@@ -195,6 +208,7 @@ export interface FileRoutesByFullPath {
   '/evals/compare': typeof AppEvalsCompareRoute
   '/servers/new': typeof AppServersNewRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/settings/members': typeof AppSettingsMembersRoute
   '/tasks/$taskId': typeof AppTasksTaskIdRoute
   '/evals/': typeof AppEvalsIndexRoute
   '/inbox/': typeof AppInboxIndexRoute
@@ -213,6 +227,7 @@ export interface FileRoutesByFullPath {
   '/servers/$serverId/tools/': typeof AppServersServerIdToolsIndexRoute
 }
 export interface FileRoutesByTo {
+  '/invite': typeof InviteRoute
   '/audit': typeof AppAuditRoute
   '/connect': typeof AppConnectRoute
   '/keys': typeof AppKeysRoute
@@ -223,6 +238,7 @@ export interface FileRoutesByTo {
   '/evals/compare': typeof AppEvalsCompareRoute
   '/servers/new': typeof AppServersNewRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/settings/members': typeof AppSettingsMembersRoute
   '/tasks/$taskId': typeof AppTasksTaskIdRoute
   '/evals': typeof AppEvalsIndexRoute
   '/inbox': typeof AppInboxIndexRoute
@@ -243,6 +259,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
+  '/invite': typeof InviteRoute
   '/_app/audit': typeof AppAuditRoute
   '/_app/connect': typeof AppConnectRoute
   '/_app/keys': typeof AppKeysRoute
@@ -254,6 +271,7 @@ export interface FileRoutesById {
   '/_app/evals/compare': typeof AppEvalsCompareRoute
   '/_app/servers/new': typeof AppServersNewRoute
   '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/_app/settings/members': typeof AppSettingsMembersRoute
   '/_app/tasks/$taskId': typeof AppTasksTaskIdRoute
   '/_app/evals/': typeof AppEvalsIndexRoute
   '/_app/inbox/': typeof AppInboxIndexRoute
@@ -275,6 +293,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/invite'
     | '/audit'
     | '/connect'
     | '/keys'
@@ -285,6 +304,7 @@ export interface FileRouteTypes {
     | '/evals/compare'
     | '/servers/new'
     | '/settings/appearance'
+    | '/settings/members'
     | '/tasks/$taskId'
     | '/evals/'
     | '/inbox/'
@@ -303,6 +323,7 @@ export interface FileRouteTypes {
     | '/servers/$serverId/tools/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/invite'
     | '/audit'
     | '/connect'
     | '/keys'
@@ -313,6 +334,7 @@ export interface FileRouteTypes {
     | '/evals/compare'
     | '/servers/new'
     | '/settings/appearance'
+    | '/settings/members'
     | '/tasks/$taskId'
     | '/evals'
     | '/inbox'
@@ -332,6 +354,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_app'
+    | '/invite'
     | '/_app/audit'
     | '/_app/connect'
     | '/_app/keys'
@@ -343,6 +366,7 @@ export interface FileRouteTypes {
     | '/_app/evals/compare'
     | '/_app/servers/new'
     | '/_app/settings/appearance'
+    | '/_app/settings/members'
     | '/_app/tasks/$taskId'
     | '/_app/evals/'
     | '/_app/inbox/'
@@ -363,6 +387,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  InviteRoute: typeof InviteRoute
   AuthLinkRoute: typeof AuthLinkRoute
   AuthLoggedOutRoute: typeof AuthLoggedOutRoute
   AuthLoginRoute: typeof AuthLoginRoute
@@ -375,6 +400,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invite': {
+      id: '/invite'
+      path: '/invite'
+      fullPath: '/invite'
+      preLoaderRoute: typeof InviteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/': {
@@ -480,6 +512,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/appearance'
       fullPath: '/settings/appearance'
       preLoaderRoute: typeof AppSettingsAppearanceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/members': {
+      id: '/_app/settings/members'
+      path: '/settings/members'
+      fullPath: '/settings/members'
+      preLoaderRoute: typeof AppSettingsMembersRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/tasks/': {
@@ -604,6 +643,7 @@ interface AppRouteChildren {
   AppEvalsCompareRoute: typeof AppEvalsCompareRoute
   AppServersNewRoute: typeof AppServersNewRoute
   AppSettingsAppearanceRoute: typeof AppSettingsAppearanceRoute
+  AppSettingsMembersRoute: typeof AppSettingsMembersRoute
   AppTasksTaskIdRoute: typeof AppTasksTaskIdRoute
   AppEvalsIndexRoute: typeof AppEvalsIndexRoute
   AppInboxIndexRoute: typeof AppInboxIndexRoute
@@ -624,6 +664,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppEvalsCompareRoute: AppEvalsCompareRoute,
   AppServersNewRoute: AppServersNewRoute,
   AppSettingsAppearanceRoute: AppSettingsAppearanceRoute,
+  AppSettingsMembersRoute: AppSettingsMembersRoute,
   AppTasksTaskIdRoute: AppTasksTaskIdRoute,
   AppEvalsIndexRoute: AppEvalsIndexRoute,
   AppInboxIndexRoute: AppInboxIndexRoute,
@@ -639,6 +680,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  InviteRoute: InviteRoute,
   AuthLinkRoute: AuthLinkRoute,
   AuthLoggedOutRoute: AuthLoggedOutRoute,
   AuthLoginRoute: AuthLoginRoute,

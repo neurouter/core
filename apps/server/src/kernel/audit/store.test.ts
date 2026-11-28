@@ -8,7 +8,10 @@ import { newId } from '../lib/ids.js';
 import { createTestDatabases } from '../../test/fakes/test-db.js';
 import { LocalFsArchive } from './archive/local-fs.js';
 import type { ArchiveStore } from './archive/store.js';
-import { auditMacKey } from './chain.js';
+import { auditMacKey, genesisPrev, hashRow, LEGACY_CHAIN_ID } from './chain.js';
+import { m0006_audit } from '../db/migrations/audit/0006_audit.js';
+import { m0007_metrics } from '../db/migrations/audit/0007_metrics.js';
+import { m0015_audit_tenant_chains } from '../db/migrations/audit/0015_audit_tenant_chains.js';
 import { csvCell, csvHeader, csvLine } from './export.js';
 import { SqlAuditStore, type SqlAuditStoreOptions } from './store.js';
 import type { AuditEventInput } from './types.js';
@@ -53,7 +56,7 @@ describe('SqlAuditStore writer + chain', () => {
     for (let i = 0; i < 450; i++) expect(s.record(ev())).toBe(true);
     await s.flush();
     expect(await s.headSeq()).toBe(450);
-    const v = await s.verify({});
+    const v = await s.verify('t1', {});
     expect(v).toMatchObject({ ok: true, checked: 450, firstSeq: 1, lastSeq: 450, brokenAt: null });
     expect(s.stats()).toEqual({ queueDepth: 0, dropped: 0, lastError: null });
     expect(await s.health()).toEqual({ ok: true });
@@ -81,44 +84,44 @@ describe('SqlAuditStore writer + chain', () => {
     expect(JSON.stringify(row)).not.toContain('hunter2');
   });
 
-  it('verify points at an edited row (hash_mismatch) and a deleted middle row (gap)', async () => {
+  it('verify points at an edited row (hash_mismatch) and a deleted middle row (the next row no longer links)', async () => {
     const s = store();
     for (let i = 0; i < 10; i++) s.record(ev());
     await s.flush();
     await dbs.audit.db.updateTable('audit_log').set({ status: 'tool_error' }).where('seq', '=', 4).execute();
-    expect((await s.verify({})).brokenAt).toMatchObject({ seq: 4, reason: 'hash_mismatch' });
+    expect((await s.verify('t1', {})).brokenAt).toMatchObject({ seq: 4, reason: 'hash_mismatch' });
     await dbs.audit.db.updateTable('audit_log').set({ status: 'ok' }).where('seq', '=', 4).execute();
-    expect((await s.verify({})).ok).toBe(true);
+    expect((await s.verify('t1', {})).ok).toBe(true);
     await dbs.audit.db.deleteFrom('audit_log').where('seq', '=', 6).execute();
-    expect((await s.verify({})).brokenAt).toMatchObject({ seq: 6, reason: 'gap' });
+    expect((await s.verify('t1', {})).brokenAt).toMatchObject({ seq: 7, reason: 'broken_link' });
   });
 
   it('detects a recomputed chain via checkpoint MACs, and tail deletion past a checkpoint', async () => {
     const s = store();
     for (let i = 0; i < 5; i++) s.record(ev());
     await s.flush();
-    const cp = await s.checkpoint('periodic');
-    expect(cp).toMatchObject({ seq: 5, kind: 'periodic', keyId: 'k1' });
-    expect(await s.verify({})).toMatchObject({ ok: true, checkpointsVerified: 1 });
+    const [cp] = await s.checkpoint('periodic');
+    expect(cp).toMatchObject({ seq: 5, kind: 'periodic', keyId: 'k1', tenantId: 't1' });
+    expect(await s.verify('t1', {})).toMatchObject({ ok: true, checkpointsVerified: 1 });
     await dbs.audit.db.updateTable('audit_checkpoints').set({ mac: 'f'.repeat(64) }).execute();
-    expect((await s.verify({})).brokenAt).toMatchObject({ seq: 5, reason: 'bad_checkpoint_mac' });
+    expect((await s.verify('t1', {})).brokenAt).toMatchObject({ seq: 5, reason: 'bad_checkpoint_mac' });
     await dbs.audit.db.updateTable('audit_checkpoints').set({ mac: cp!.mac }).execute();
     await dbs.audit.db.deleteFrom('audit_log').where('seq', '>=', 4).execute();
-    expect((await s.verify({})).brokenAt).toMatchObject({ reason: 'gap' });
+    expect((await s.verify('t1', {})).brokenAt).toMatchObject({ reason: 'gap' });
   });
 
   it('periodic checkpoints every 10k rows or 5 minutes, only when the head moved', async () => {
     const s = store();
-    expect(await s.periodicCheckpoint()).toBeNull();
+    expect(await s.periodicCheckpoint()).toEqual([]);
     s.record(ev());
     await s.flush();
-    expect(await s.periodicCheckpoint()).toMatchObject({ seq: 1 });
-    expect(await s.periodicCheckpoint()).toBeNull();
+    expect(await s.periodicCheckpoint()).toMatchObject([{ seq: 1, tenantId: 't1' }]);
+    expect(await s.periodicCheckpoint()).toEqual([]);
     s.record(ev());
     await s.flush();
-    expect(await s.periodicCheckpoint()).toBeNull();
+    expect(await s.periodicCheckpoint()).toEqual([]);
     now += 5 * 60_000;
-    expect(await s.periodicCheckpoint()).toMatchObject({ seq: 2 });
+    expect(await s.periodicCheckpoint()).toMatchObject([{ seq: 2 }]);
   });
 
   it('fails closed when the queue is full (and drops/counts when fail-open)', async () => {
@@ -207,6 +210,97 @@ describe('SqlAuditStore query', () => {
   });
 });
 
+describe('per-tenant hash chains (multi-tenancy spec §4.5)', () => {
+  it('links each row to the previous row of its own tenant; tenants verify independently', async () => {
+    const s = store();
+    for (let i = 0; i < 6; i++) s.record(ev({ tenantId: i % 2 ? 'tb' : 'ta' }));
+    await s.flush();
+    const rows = await dbs.audit.db.selectFrom('audit_log').select(['seq', 'tenant_id', 'prev_hash', 'hash']).orderBy('seq').execute();
+    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+    // the first row of each tenant links to that tenant's genesis, later rows to the tenant's previous row
+    expect(rows[0]!.prev_hash).toBe(genesisPrev('test-install', 'ta'));
+    expect(rows[1]!.prev_hash).toBe(genesisPrev('test-install', 'tb'));
+    expect(rows[2]!.prev_hash).toBe(rows[0]!.hash);
+    expect(rows[3]!.prev_hash).toBe(rows[1]!.hash);
+    const heads = await dbs.audit.db.selectFrom('audit_chain_heads').selectAll().where('tenant_id', 'in', ['ta', 'tb']).orderBy('tenant_id').execute();
+    expect(heads.map((h) => [h.tenant_id, Number(h.seq), h.hash])).toEqual([['ta', 5, rows[4]!.hash], ['tb', 6, rows[5]!.hash]]);
+    expect(await s.verify('ta', {})).toMatchObject({ ok: true, checked: 3, firstSeq: 1, lastSeq: 5 });
+    expect(await s.verify('tb', {})).toMatchObject({ ok: true, checked: 3, firstSeq: 2, lastSeq: 6 });
+    // deleting a row of B breaks B's chain only
+    await dbs.audit.db.deleteFrom('audit_log').where('seq', '=', 4).execute();
+    expect(await s.verify('ta', {})).toMatchObject({ ok: true, checked: 3 });
+    expect((await s.verify('tb', {})).brokenAt).toMatchObject({ seq: 6, reason: 'broken_link' });
+  });
+
+  it('binds checkpoints to their tenant and detects tail deletion through the chain head', async () => {
+    const s = store();
+    for (let i = 0; i < 4; i++) s.record(ev({ tenantId: i % 2 ? 'tb' : 'ta' }));
+    await s.flush();
+    const cps = await s.checkpoint('periodic');
+    expect(cps.map((c) => [c.tenantId, c.seq])).toEqual([['ta', 3], ['tb', 4]]);
+    expect(await s.verify('ta', {})).toMatchObject({ ok: true, checkpointsVerified: 1 });
+    // a checkpoint moved to another tenant's chain fails its MAC
+    await dbs.audit.db.updateTable('audit_checkpoints').set({ tenant_id: 'tb' }).where('tenant_id', '=', 'ta').execute();
+    expect((await s.verify('tb', {})).ok).toBe(false);
+    await dbs.audit.db.updateTable('audit_checkpoints').set({ tenant_id: 'ta' }).where('seq', '=', 3).execute();
+    expect((await s.verify('tb', {})).ok).toBe(true);
+    // the last row of A removed (no checkpoint after it): the chain head still names it
+    s.record(ev({ tenantId: 'ta' }));
+    await s.flush();
+    await dbs.audit.db.deleteFrom('audit_log').where('seq', '=', 5).execute();
+    expect((await s.verify('ta', {})).brokenAt).toMatchObject({ reason: 'gap' });
+    expect((await s.verify('tb', {})).ok).toBe(true);
+  });
+
+  it('retention cuts every chain and each tenant keeps verifying from its cut', async () => {
+    const s = store();
+    for (const [d, t] of [[-10, 'ta'], [-10, 'tb'], [-10, 'ta'], [0, 'tb'], [0, 'ta']] as const) s.record(ev({ tenantId: t, ts: T0 + d * DAY }));
+    await s.flush();
+    expect(await s.applyRetention(T0 - 5 * DAY)).toMatchObject({ cutSeq: 3, deleted: 3 });
+    const cuts = await dbs.audit.db.selectFrom('audit_checkpoints').select(['tenant_id', 'seq']).where('kind', '=', 'retention_cut').orderBy('tenant_id').execute();
+    expect(cuts.map((c) => [c.tenant_id, Number(c.seq)])).toEqual([['ta', 3], ['tb', 2]]);
+    expect(await s.verify('ta', {})).toMatchObject({ ok: true, checked: 1, firstSeq: 5 });
+    expect(await s.verify('tb', {})).toMatchObject({ ok: true, checked: 1, firstSeq: 4 });
+  });
+});
+
+describe('legacy instance-wide chain (rows written before 0015)', () => {
+  it('stays verifiable next to the per-tenant chains, and the default tenant verifies both', async () => {
+    const raw = createDatabases({ databaseUrl: 'sqlite::memory:' });
+    try {
+      const db = raw.audit.db;
+      const ctx = { dialect: 'sqlite' as const, embeddingDims: 384 };
+      await m0006_audit.up(db, ctx);
+      await m0007_metrics.up(db, ctx);
+      // three rows chained the 0.3.x way: one instance-wide chain from the install genesis
+      let prev = genesisPrev('test-install');
+      for (let i = 1; i <= 3; i++) {
+        const row = { seq: i, id: newId(), ts: T0 + i, kind: 'tool_call', tenant_id: 'ta', decision: 'allowed', status: 'ok', write: 0, dry_run: 0, prev_hash: prev, hash: '' } as Record<string, unknown>;
+        row.hash = hashRow(prev, row);
+        prev = row.hash as string;
+        await db.insertInto('audit_log').values(row as never).execute();
+      }
+      await m0015_audit_tenant_chains.up(db, ctx);
+      expect(await db.selectFrom('audit_chain_heads').select(['tenant_id', 'seq', 'hash']).execute()).toEqual([{ tenant_id: LEGACY_CHAIN_ID, seq: 3, hash: prev }]);
+      const s = new SqlAuditStore(db, 'sqlite', { clock, mac, context: async () => ({ ...DEFAULT_WRITE_CONTEXT, installId: 'test-install' }), flushIntervalMs: 5 });
+      s.record(ev({ tenantId: 'ta' }));
+      s.record(ev({ tenantId: 'tb' }));
+      await s.flush();
+      const next = await db.selectFrom('audit_log').select(['seq', 'prev_hash']).where('seq', '=', 4).executeTakeFirstOrThrow();
+      expect(next.prev_hash).toBe(genesisPrev('test-install', 'ta'));
+      expect(await s.verify('ta', {}, { includeLegacy: true })).toMatchObject({ ok: true, checked: 4, firstSeq: 1, lastSeq: 4 });
+      expect(await s.verify('tb', {})).toMatchObject({ ok: true, checked: 1 });
+      await db.updateTable('audit_log').set({ status: 'tool_error' }).where('seq', '=', 2).execute();
+      expect((await s.verify('ta', {}, { includeLegacy: true })).brokenAt).toMatchObject({ seq: 2, reason: 'hash_mismatch' });
+      // the tenant's own chain doesn't depend on the legacy rows
+      expect((await s.verify('ta', {})).ok).toBe(true);
+      await s.close();
+    } finally {
+      await raw.close();
+    }
+  });
+});
+
 describe('Neurouter chain fields', () => {
   it('chains task/environment/policy fields and keeps the output preview outside the chain', async () => {
     const s = store();
@@ -215,12 +309,12 @@ describe('Neurouter chain fields', () => {
     const rows = await dbs.audit.db.selectFrom('audit_log').selectAll().execute();
     expect(rows[0]).toMatchObject({ environment_id: 'e1', task_id: 'task1', via: 'script', mode: 'code', write: 1, dry_run: 1, error_id: 'err_x' });
     expect(JSON.parse(rows[0]!.output_preview!)).toEqual({ a: 1 });
-    expect((await s.verify({})).ok).toBe(true);
+    expect((await s.verify('t1', {})).ok).toBe(true);
     // the preview is not chained: editing it keeps the chain valid; editing a chained field breaks it
     await dbs.audit.db.updateTable('audit_log').set({ output_preview: '{"a":2}' }).execute();
-    expect((await s.verify({})).ok).toBe(true);
+    expect((await s.verify('t1', {})).ok).toBe(true);
     await dbs.audit.db.updateTable('audit_log').set({ task_id: 'other' }).execute();
-    expect((await s.verify({})).brokenAt?.reason).toBe('hash_mismatch');
+    expect((await s.verify('t1', {})).brokenAt?.reason).toBe('hash_mismatch');
   });
 });
 
@@ -244,7 +338,7 @@ describe('retention + archive', () => {
     const out = await s.applyRetention(T0 - 5 * DAY);
     expect(out).toMatchObject({ cutSeq: 5, deleted: 5, archived: true, skipped: false });
     expect((await s.query({ tenantId: 't1', from: T0 - 30 * DAY, to: T0 + DAY, limit: 50 })).rows.map((r) => r.seq)).toEqual([7, 6]);
-    expect(await s.verify({})).toMatchObject({ ok: true, firstSeq: 6, lastSeq: 7 });
+    expect(await s.verify('t1', {})).toMatchObject({ ok: true, firstSeq: 6, lastSeq: 7 });
     // FTS rows were deleted with the data
     expect((await s.query({ tenantId: 't1', from: T0 - 30 * DAY, to: T0 + DAY, limit: 50, q: 'd-10' })).rows).toEqual([]);
     const days = await readdir(join(dir, 'audit/2026/11'));
@@ -258,7 +352,7 @@ describe('retention + archive', () => {
     // new rows keep chaining after the cut
     s.record(ev());
     await s.flush();
-    expect(await s.verify({})).toMatchObject({ ok: true, checked: 3 });
+    expect(await s.verify('t1', {})).toMatchObject({ ok: true, checked: 3 });
   });
 
   it('skips the delete (and alerts) when archiving fails', async () => {
@@ -270,7 +364,7 @@ describe('retention + archive', () => {
     expect(out).toMatchObject({ skipped: true, deleted: 0, archived: false });
     expect(await s.headSeq()).toBe(7);
     expect(errors[0]).toMatch(/ALERT/);
-    expect(await s.verify({})).toMatchObject({ ok: true, checked: 7, checkpointsVerified: 1 });
+    expect(await s.verify('t1', {})).toMatchObject({ ok: true, checked: 7, checkpointsVerified: 1 });
   });
 
   it('without archive: deletes old rows, no-op when nothing is due', async () => {
@@ -279,10 +373,10 @@ describe('retention + archive', () => {
     expect(await s.applyRetention(T0 - 30 * DAY)).toMatchObject({ cutSeq: null, deleted: 0 });
     const out = await s.applyRetention(T0 - 5 * DAY);
     expect(out).toMatchObject({ deleted: 5, archived: false });
-    expect((await s.verify({})).ok).toBe(true);
+    expect((await s.verify('t1', {})).ok).toBe(true);
     // deleting the earliest retained row without a cut is detected
     await dbs.audit.db.deleteFrom('audit_log').where('seq', '=', 6).execute();
-    expect((await s.verify({})).brokenAt).toMatchObject({ seq: 7, reason: 'broken_link' });
+    expect((await s.verify('t1', {})).brokenAt).toMatchObject({ seq: 7, reason: 'broken_link' });
   });
 
   it('maps a time range to a seq range and reads rows after a cursor with checkpoints', async () => {

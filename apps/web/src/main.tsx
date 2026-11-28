@@ -6,6 +6,7 @@ import { createQueryClient } from '@/app/query-client';
 import { createAppRouter } from '@/app/router';
 import { toast } from '@/components/ui/toast';
 import { getDisplayPrefs } from '@/lib/display-prefs';
+import { consumeOrgParam } from '@/lib/tenant';
 import './styles/globals.css';
 
 const DEMO = import.meta.env.VITE_DEMO === 'true';
@@ -25,6 +26,7 @@ async function enableMocks(): Promise<void> {
 }
 
 getDisplayPrefs(); // applies the stored table density
+consumeOrgParam(); // `?org=<slug>` deep link: kept for this tab, stripped from the URL (spec §3.3)
 
 const queryClient = createQueryClient({
   onUnauthorized: () => {

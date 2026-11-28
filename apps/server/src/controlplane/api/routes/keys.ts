@@ -9,7 +9,7 @@ import { blockClient, isClientBlocked, unblockClient } from '../../../kernel/ten
 import { ApiKeysService, AUTH_REVOKED_CHANNEL, type ApiKeyRowDb } from '../../keys/api-keys.service.js';
 import type { ApiContext } from '../context.js';
 import { route } from '../routes.js';
-import { connectConfig } from './servers.js';
+import { connectConfig, mcpTenantOf } from './servers.js';
 import { mask, DELETED } from '../views.js';
 
 /** `keys.*`, `oauthClients.*`, `oauthGrants.*` (§14.8). */
@@ -65,7 +65,7 @@ export async function keyRoutes(app: FastifyInstance, c: ApiContext): Promise<vo
     const e = await db.selectFrom('environments').where('tenant_id', '=', tenantOf(req)).selectAll().where('id', '=', b.environmentId).executeTakeFirstOrThrow();
     const build = e.build_id ? await db.selectFrom('builds').where('tenant_id', '=', tenantOf(req)).select('visible_count').where('id', '=', e.build_id).executeTakeFirst() : null;
     reply.status(201);
-    return { key: await row(out.key, false), token: out.token, connect: connectConfig(c, s, e, build?.visible_count ?? 0, c.ports.executorStatus().ok && e.code_mode === 1 && b.scopes.includes('code:run')), warnings: out.warnings };
+    return { key: await row(out.key, false), token: out.token, connect: connectConfig(c, s, e, build?.visible_count ?? 0, c.ports.executorStatus().ok && e.code_mode === 1 && b.scopes.includes('code:run'), mcpTenantOf(c, req)), warnings: out.warnings };
   });
 
   route(app, 'keys.update', api.keys.update, async (req) => {

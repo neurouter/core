@@ -76,14 +76,16 @@ export class UpstreamOAuthService {
 
   /** Starts a connection: single-use state bound to the user (10 min) + PKCE S256. Returns the upstream authorize URL. */
   async authorizeUrl(environmentId: string, viewer: { id: string }, returnTo: string | undefined): Promise<string> {
+    // membership of the environment's tenant first (spec §3.5): another tenant's environment reads exactly like an unknown one
+    // tenant-scope: tenant-from-row (the environment's tenant, then the viewer's membership in it)
+    const owner = await this.d.db.selectFrom('environments').select('tenant_id').where('id', '=', environmentId).executeTakeFirst();
+    if (!owner || !(await this.d.isMember(owner.tenant_id, viewer.id))) throw AppError.notFound('Environment');
     const env = await this.environment(environmentId);
-    // membership of the environment's tenant is checked here (spec §3.5)
-    if (!(await this.d.isMember(env.tenant_id, viewer.id))) throw AppError.notFound('Environment');
     if (env.status !== 'active') throw AppError.conflict('This environment is disabled');
     const state = randomToken(32);
     const verifier = randomToken(48);
     const hash = hmacSha256(this.d.pepper, state);
-    const sealed = await this.d.envelope.seal(Buffer.from(verifier), stateAad(hash.toString('hex')));
+    const sealed = await this.d.envelope.seal(env.tenant_id, Buffer.from(verifier), stateAad(hash.toString('hex')));
     await this.d.db
       .insertInto('upstream_oauth_states')
       .values({
@@ -131,7 +133,7 @@ export class UpstreamOAuthService {
       const env = await this.environment(row.environment_id);
       if (env.tenant_id !== row.tenant_id || !(await this.d.isMember(env.tenant_id, viewer.id))) return fail(back, 'session_mismatch', row.environment_id);
       const dekId = row.code_verifier_enc.subarray(0, 36).toString().trim();
-      const verifier = (await this.d.envelope.open({ dekId, ...unpack(row.code_verifier_enc.subarray(36)) }, stateAad(hash.toString('hex')))).toString();
+      const verifier = (await this.d.envelope.open(row.tenant_id, { dekId, ...unpack(row.code_verifier_enc.subarray(36)) }, stateAad(hash.toString('hex')))).toString();
       const tokens = await this.tokenRequest(env, env.auth, env.allow_http === 1, { grant_type: 'authorization_code', code: q.code, redirect_uri: this.callbackUrl, code_verifier: verifier });
       await this.save(env.tenant_id, env.id, row.user_id, tokens, null);
       this.d.audit.auth({ tenantId: env.tenant_id, userId: viewer.id, action: 'upstream_oauth.connect', reason: `environment ${env.id}` });
@@ -157,9 +159,9 @@ export class UpstreamOAuthService {
   /** Encrypts and upserts the user's tokens (keeps the old refresh token when the AS does not rotate). */
   async save(tenantId: string, envId: string, userId: string, t: TokenResponse, previousRefresh: string | null): Promise<void> {
     const now = this.d.clock.now();
-    const access = await this.d.envelope.seal(Buffer.from(t.access_token), tokenAad(envId, userId, 'access'));
+    const access = await this.d.envelope.seal(tenantId, Buffer.from(t.access_token), tokenAad(envId, userId, 'access'));
     const refreshValue = t.refresh_token ?? previousRefresh;
-    const refresh = refreshValue ? await this.d.envelope.seal(Buffer.from(refreshValue), tokenAad(envId, userId, 'refresh')) : null;
+    const refresh = refreshValue ? await this.d.envelope.seal(tenantId, Buffer.from(refreshValue), tokenAad(envId, userId, 'refresh')) : null;
     const values = {
       dek_id: access.dekId,
       access_nonce: access.nonce,
@@ -178,9 +180,9 @@ export class UpstreamOAuthService {
       .execute();
   }
 
-  private async readRefresh(row: { dek_id: string; refresh_nonce: Buffer | null; refresh_ciphertext: Buffer | null; environment_id: string; user_id: string }): Promise<string | null> {
+  private async readRefresh(row: { tenant_id: string; dek_id: string; refresh_nonce: Buffer | null; refresh_ciphertext: Buffer | null; environment_id: string; user_id: string }): Promise<string | null> {
     if (!row.refresh_ciphertext || !row.refresh_nonce) return null;
-    return (await this.d.envelope.open({ dekId: row.dek_id, nonce: row.refresh_nonce, ciphertext: row.refresh_ciphertext }, tokenAad(row.environment_id, row.user_id, 'refresh'))).toString('utf8');
+    return (await this.d.envelope.open(row.tenant_id, { dekId: row.dek_id, nonce: row.refresh_nonce, ciphertext: row.refresh_ciphertext }, tokenAad(row.environment_id, row.user_id, 'refresh'))).toString('utf8');
   }
 
   /** The data plane's `UpstreamTokenSource`: decrypts the user's token, refreshing it first when it is about to expire. */
@@ -199,8 +201,8 @@ export class UpstreamOAuthService {
     return this.decryptAccess(row);
   };
 
-  private async decryptAccess(row: { dek_id: string; access_nonce: Buffer; access_ciphertext: Buffer; environment_id: string; user_id: string }): Promise<string> {
-    return (await this.d.envelope.open({ dekId: row.dek_id, nonce: row.access_nonce, ciphertext: row.access_ciphertext }, tokenAad(row.environment_id, row.user_id, 'access'))).toString('utf8');
+  private async decryptAccess(row: { tenant_id: string; dek_id: string; access_nonce: Buffer; access_ciphertext: Buffer; environment_id: string; user_id: string }): Promise<string> {
+    return (await this.d.envelope.open(row.tenant_id, { dekId: row.dek_id, nonce: row.access_nonce, ciphertext: row.access_ciphertext }, tokenAad(row.environment_id, row.user_id, 'access'))).toString('utf8');
   }
 
   /** Refreshes one user's token under a cluster-wide lock. `invalid_grant` → `refresh_failed` (user must reconnect). */

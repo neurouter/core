@@ -10,8 +10,9 @@ import { overlayEndpoints } from './overlays.js';
 import { publicEndpoints } from './public.js';
 import { opsToolEndpoints, serverEndpoints } from './servers.js';
 import {
-  configEndpoints, eventEndpoints, jobEndpoints, killSwitchEndpoints, modelProviderEndpoints, settingsEndpoints, systemEndpoints, telemetryEndpoints, userEndpoints,
+  configEndpoints, eventEndpoints, jobEndpoints, killSwitchEndpoints, modelProviderEndpoints, settingsEndpoints, systemEndpoints, telemetryEndpoints,
 } from './settings.js';
+import { inviteEndpoints, memberEndpoints, tenantEndpoints } from './members.js';
 import { buildEndpoints, specEndpoints } from './specs.js';
 import { callEndpoints, scriptEndpoints, taskEndpoints } from './tasks.js';
 import { toolEndpoints } from './tools.js';
@@ -50,7 +51,9 @@ export const api = {
   killSwitches: killSwitchEndpoints,
   config: configEndpoints,
   system: systemEndpoints,
-  users: userEndpoints,
+  tenants: tenantEndpoints,
+  members: memberEndpoints,
+  invites: inviteEndpoints,
   jobs: jobEndpoints,
   events: eventEndpoints,
   public: publicEndpoints,
@@ -89,6 +92,9 @@ export const API_KEY_ALIASES = {
   'settings.modelProviders.update': 'modelProviders.update',
   'settings.modelProviders.delete': 'modelProviders.delete',
   'settings.modelProviders.test': 'modelProviders.test',
+  // console users became the members of an organization (multi-tenancy spec §2.2)
+  'users.list': 'members.list',
+  'users.update': 'members.update',
 } as const satisfies Record<string, EndpointKey>;
 
 /**
@@ -127,6 +133,9 @@ export const BACKEND_PATHS = {
   prm: '/.well-known/oauth-protected-resource',
   /** `/.well-known/oauth-protected-resource/mcp/{server}/{env}` (RFC 9728) */
   prmMcp: '/.well-known/oauth-protected-resource/mcp/:server/:env',
+  /** `/mcp/{tenant}/{server}/{env}`: registered only on a multi-tenant deployment (spec §3.2). */
+  mcpTenantEndpoint: '/mcp/:tenant/:server/:env',
+  prmMcpTenant: '/.well-known/oauth-protected-resource/mcp/:tenant/:server/:env',
   asMetadata: '/.well-known/oauth-authorization-server',
   oidcAlias: '/.well-known/openid-configuration',
   authorize: '/oauth/authorize',
@@ -149,8 +158,12 @@ export const SPA_PATHS = {
   /** Local sign-in link target: `PUBLIC_URL/auth/link#t=<token>`. */
   link: '/auth/link',
   consent: '/auth/consent',
+  /** Invite link target: `PUBLIC_URL/invite#t=<token>` (spec §2.4). */
+  invite: '/invite',
 } as const;
 
-export function mcpPath(server: string, env: string): string {
-  return `/mcp/${encodeURIComponent(server)}/${encodeURIComponent(env)}`;
+/** `/mcp/{server}/{env}`, or `/mcp/{tenant}/{server}/{env}` when a tenant slug is given (multi-tenant deployments). */
+export function mcpPath(server: string, env: string, tenant?: string | null): string {
+  const t = tenant ? `${encodeURIComponent(tenant)}/` : '';
+  return `/mcp/${t}${encodeURIComponent(server)}/${encodeURIComponent(env)}`;
 }

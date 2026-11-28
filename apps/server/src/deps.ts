@@ -61,6 +61,7 @@ import { createGraphqlIntrospector, createSpecFetcher } from './controlplane/ser
 import { ConfigSync } from './controlplane/config-sync/reconcile.js';
 import { ApiKeysService } from './controlplane/keys/api-keys.service.js';
 import { UsersService } from './controlplane/users/users.service.js';
+import { InvitesService } from './controlplane/members/invites.service.js';
 import { ExecutorHealth } from './dataplane/code/executor-health.js';
 import { EvalsService } from './controlplane/evals/evals.service.js';
 import { MemoryMockStateStore, sampleEntities, type GraphqlMockModel, type MockStateStore, type OpenApiMockModel } from '@neurouter/compiler';
@@ -394,7 +395,8 @@ export function createServices(input: ServiceInputs) {
   const introspectGraphql = createGraphqlIntrospector(outboundFetch);
   const configSync = new ConfigSync({ db, clock, coord, servers, settings, audit, fetchSpec, tenant: async () => (await tenancy.defaultTenant())?.id ?? null });
   const apiKeys = new ApiKeysService(db, clock, config.hashPepper, audit, coord);
-  const users = new UsersService(db, clock, audit, config, async () => (await tenancy.defaultTenant())?.id ?? null);
+  const users = new UsersService(db, clock, audit, config, async () => (await tenancy.defaultTenant())?.id ?? null, !tenancy.multi);
+  const invites = new InvitesService({ db, clock, audit, users, tenancy, pepper: config.hashPepper, publicUrl: config.publicUrl });
 
   /* ---------------------------------------------------------------- MCP OAuth 2.1 AS + upstream OAuth broker (§13.3, §13.5) */
   const oauthClients = new OAuthClientsService(db, clock, new CimdResolver(outboundFetch, now), settings, config.hashPepper, audit, coord);
@@ -471,7 +473,7 @@ export function createServices(input: ServiceInputs) {
     outboundFetch, upstreamFetchFor, embedder, vectorIndex, indexer: indexer!, search,
     runtime, bus, limiter, authenticator, tracker, errors, pages, mock, mockStore, mockNamespaces, credentials, http, pipeline, ops, scripts, dispatcher,
     executor: () => executor, executorHealth, startExecutor,
-    builds, servers, fetchSpec, introspectGraphql, configSync, apiKeys, users,
+    builds, servers, fetchSpec, introspectGraphql, configSync, apiKeys, users, invites,
     oauthClients, oauthTokens, authorization, consoleSessions, upstreamOAuth,
     evals, localUrl,
     shutdown,

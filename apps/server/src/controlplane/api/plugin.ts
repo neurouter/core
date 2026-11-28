@@ -12,12 +12,13 @@ import { inboxRoutes } from './routes/inbox.js';
 import { metricsRoutes } from './routes/metrics.js';
 import { auditRoutes } from './routes/audit.js';
 import { settingsRoutes } from './routes/settings.js';
+import { memberRoutes } from './routes/members.js';
 import { publicRoutes } from './routes/public.js';
 
 /** Signature of every console route module (evals routes included). */
 export type ApiRouteModule = (app: FastifyInstance, c: ApiContext) => Promise<void>;
 
-export const ROUTE_MODULES: ApiRouteModule[] = [authRoutes, serverRoutes, toolRoutes, overlayRoutes, environmentRoutes, keyRoutes, taskRoutes, inboxRoutes, metricsRoutes, auditRoutes, settingsRoutes, publicRoutes];
+export const ROUTE_MODULES: ApiRouteModule[] = [authRoutes, serverRoutes, toolRoutes, overlayRoutes, environmentRoutes, keyRoutes, taskRoutes, inboxRoutes, metricsRoutes, auditRoutes, settingsRoutes, memberRoutes, publicRoutes];
 
 /** Optional route modules owned by other workstreams, loaded when present (keeps the build green). */
 const OPTIONAL_MODULES = [{ path: './routes/evals.js', exportName: 'evalsRoutes' }];
