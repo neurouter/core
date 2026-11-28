@@ -66,6 +66,31 @@ type EnvDraft = { add: boolean; slug: string; kind: 'dev' | 'qa' | 'prod'; baseU
 const envKey = (draft: string) => `neurouter-console-wizard-env-${draft}`;
 const DEFAULT_ENV: EnvDraft = { add: false, slug: 'dev', kind: 'dev', baseUrl: '', authType: 'header', headerName: 'X-Api-Key', secretRef: '' };
 
+/**
+ * The environment step's starting point from what the import already knows (`SpecPreview.environmentHint`).
+ * A GraphQL endpoint was just introspected from the server, so it is a live upstream: the environment starts
+ * ON with its origin and the introspection header (a reference, or just the header name for a literal value).
+ * An OpenAPI `servers[0].url` is only a declaration (often production or a placeholder): it fills the base
+ * URL, but adding the environment stays opt-in.
+ */
+export function envDraftFromHint(h: SpecPreview['environmentHint']): EnvDraft {
+  if (!h) return DEFAULT_ENV;
+  const env: EnvDraft = { ...DEFAULT_ENV, baseUrl: h.baseUrl };
+  if (h.source !== 'graphql_endpoint') return env;
+  if (!h.auth) return { ...env, add: true, authType: 'none' };
+  return { ...env, add: true, authType: h.auth.type, headerName: h.auth.type === 'header' ? h.auth.headerName : DEFAULT_ENV.headerName, secretRef: h.auth.secretRef ?? '' };
+}
+
+/** The wizard's environment draft: what the user changed (sessionStorage) over the import's prefill. */
+function loadEnvDraft(preview: SpecPreview): EnvDraft {
+  const base = envDraftFromHint(preview.environmentHint);
+  try {
+    return { ...base, ...(JSON.parse(readStorage(envKey(preview.id)) ?? '{}') as Partial<EnvDraft>) };
+  } catch {
+    return base;
+  }
+}
+
 export function toEnvironmentCreate(e: EnvDraft): EnvironmentCreate[] {
   if (!e.add || !e.baseUrl) return [];
   const auth: UpstreamAuthIn =
@@ -602,13 +627,7 @@ function ToolsStep({ preview, onBack, onNext }: { preview: SpecPreview; onBack: 
 /* ================================================================== step 4: environment */
 
 function EnvironmentStep({ preview, onBack, onNext }: { preview: SpecPreview; onBack: () => void; onNext: () => void }) {
-  const [env, setEnv] = useState<EnvDraft>(() => {
-    try {
-      return { ...DEFAULT_ENV, ...(JSON.parse(readStorage(envKey(preview.id)) ?? '{}') as Partial<EnvDraft>) };
-    } catch {
-      return DEFAULT_ENV;
-    }
-  });
+  const [env, setEnv] = useState<EnvDraft>(() => loadEnvDraft(preview));
   useEffect(() => writeStorage(envKey(preview.id), JSON.stringify(env)), [env, preview.id]);
   const test = useMutation({ mutationFn: () => apiFetch(api.environments.testDraft, { params: { id: preview.id }, body: { baseUrl: env.baseUrl, auth: toEnvironmentCreate({ ...env, add: true })[0]!.auth } }) });
   const refOk = env.authType === 'none' || env.authType === 'oauth_passthrough' || /^(env:[A-Za-z_][A-Za-z0-9_]{0,127}|secret:[A-Za-z0-9][A-Za-z0-9._-]{0,127})$/.test(env.secretRef);
@@ -616,6 +635,7 @@ function EnvironmentStep({ preview, onBack, onNext }: { preview: SpecPreview; on
   const problems = env.add ? [...(!urlOk ? ['Enter the base URL (http or https).'] : []), ...(!refOk ? ['The credential must be a reference: env:NAME or secret:NAME. Literal secrets are not stored.'] : [])] : [];
   const [showProblems, setShowProblems] = useState(false);
   const set = (patch: Partial<EnvDraft>) => setEnv((e) => ({ ...e, ...patch }));
+  const hint = preview.environmentHint;
   return (
     <>
       <StepBody title="Add an environment (optional)" description={<>Agents and evals can use the built-in <strong>mock</strong> environment right away. Add <strong>dev</strong> to call your real API.</>} errors={showProblems ? problems : undefined}>
@@ -634,7 +654,17 @@ function EnvironmentStep({ preview, onBack, onNext }: { preview: SpecPreview; on
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="env-url">Base URL</Label>
-                <Input id="env-url" type="url" placeholder="https://dev.api.example.com" value={env.baseUrl} onChange={(e) => set({ baseUrl: e.target.value })} aria-invalid={showProblems && !urlOk ? true : undefined} />
+                <Input id="env-url" type="url" placeholder="https://dev.api.example.com" value={env.baseUrl} onChange={(e) => set({ baseUrl: e.target.value })} aria-invalid={showProblems && !urlOk ? true : undefined} aria-describedby={hint ? 'env-url-help' : undefined} />
+                {hint ? (
+                  <p id="env-url-help" className="text-[12.5px] text-muted-foreground">
+                    {hint.source === 'graphql_endpoint' ? 'From the GraphQL endpoint you imported. ' : 'From the spec’s servers list. '}
+                    {hint.endpointPath ? (
+                      <>
+                        Tool calls POST to <code className="break-all">{env.baseUrl.replace(/\/+$/, '') + hint.endpointPath}</code>
+                      </>
+                    ) : null}
+                  </p>
+                ) : null}
               </div>
             </div>
             <fieldset className="flex flex-col gap-2">
@@ -721,13 +751,7 @@ function ReadinessStep({ preview, serverId, runId, onBack, onState }: { preview:
   const navigate = useNavigate();
   const qc = useQueryClient();
   const evalGate = useGate('evals:run', 'evals.createRun');
-  const env = useMemo<EnvDraft>(() => {
-    try {
-      return { ...DEFAULT_ENV, ...(JSON.parse(readStorage(envKey(preview.id)) ?? '{}') as Partial<EnvDraft>) };
-    } catch {
-      return DEFAULT_ENV;
-    }
-  }, [preview.id]);
+  const env = useMemo<EnvDraft>(() => loadEnvDraft(preview), [preview.id]); // eslint-disable-line react-hooks/exhaustive-deps -- read once per preview
   const createServer = useMutation({
     mutationFn: async () => {
       if (serverId) return serverId;

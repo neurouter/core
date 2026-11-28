@@ -17,6 +17,30 @@ test('import the sample spec → compile → hide 2 tools → skip env → preli
   await expect(page.getByRole('dialog', { name: 'Connect a client' })).toBeVisible();
 });
 
+test('GraphQL endpoint import → the environment step starts with the real endpoint (origin, header) → creates dev next to mock', async ({ page }) => {
+  await page.goto('/servers/new?tab=graphql');
+  await page.getByRole('textbox', { name: 'GraphQL endpoint' }).fill('https://api.shop.test/api/graphql');
+  await page.getByLabel('Header (optional)').fill('X-Api-Key');
+  await page.getByLabel('Value').fill('k3y');
+  await page.getByRole('button', { name: 'Fetch and compile' }).click();
+  await page.getByRole('button', { name: 'Next: Tools' }).click();
+  await page.getByRole('button', { name: 'Next: Environment' }).click();
+  await expect(page.getByRole('checkbox', { name: /Add a dev environment now/ })).toBeChecked();
+  await expect(page.getByLabel('Base URL')).toHaveValue('https://api.shop.test');
+  await expect(page.getByText('https://api.shop.test/api/graphql')).toBeVisible();
+  await expect(page.getByLabel('Header name')).toHaveValue('X-Api-Key');
+  await page.getByLabel('Credential reference').fill('env:SHOP_KEY');
+  await page.getByRole('button', { name: 'Next: Readiness' }).click();
+  await page.getByRole('button', { name: 'Finish' }).click();
+  await expect(page).toHaveURL(/\/servers\/srv_/);
+  const connect = page.getByRole('dialog', { name: 'Connect a client' });
+  await expect(connect.getByText('https://mcp.acme.test/mcp/imported-api/dev')).toBeVisible();
+  await connect.getByRole('button', { name: 'Close' }).click();
+  // in-app navigation: the mock backend lives in the page
+  await page.getByRole('link', { name: 'Environments', exact: true }).first().click();
+  await expect(page.getByText('https://api.shop.test').first()).toBeVisible();
+});
+
 test('upload YAML and GraphQL SDL; Swagger 2.0 is rejected', async ({ page }) => {
   await page.goto('/servers/new?tab=upload');
   await page.locator('input[type=file]').setInputFiles({ name: 'swagger.yaml', mimeType: 'text/yaml', buffer: Buffer.from('swagger: "2.0"\ninfo: {title: Old}\npaths: {}\n') });

@@ -1,6 +1,9 @@
 import { buildSchema, introspectionFromSchema } from 'graphql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { createTestContext, type TestContext } from '../../../test/fakes/app-context.js';
+import { injectFetch } from '../../../test/fakes/inject-fetch.js';
+import { keyFor } from '../../../test/fakes/server.js';
 
 /** A synthetic schema the size of a real business API: 120 queries, 240 mutations, nested inputs, enums, connections. */
 function bigSchemaSdl(): string {
@@ -29,6 +32,8 @@ interface Seen {
 describe('console GraphQL endpoint import (specs.preview { graphqlEndpoint })', () => {
   let t: TestContext;
   const seen: Seen[] = [];
+  /** Tool calls to the real upstream (environments other than mock). */
+  const upstream: Seen[] = [];
   beforeAll(async () => {
     const fake = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
       const url = String(input);
@@ -46,7 +51,11 @@ describe('console GraphQL endpoint import (specs.preview { graphqlEndpoint })', 
       return new Response(INTROSPECTION, { status: 200, headers: { 'content-type': 'application/json' } });
     };
     process.env.GQL_TOKEN = 'Bearer t0ken'; // env:NAME references read the process env (like upstream credentials)
-    t = await createTestContext({}, { outboundFetch: fake as never });
+    const up = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
+      upstream.push({ url: String(input), method: init.method ?? 'GET', headers: new Headers(init.headers), body: String(init.body ?? '') });
+      return new Response('{"data":{"entity0":{"id":"1","name":"one"}}}', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    t = await createTestContext({}, { outboundFetch: fake as never, upstreamFetch: up as never });
   }, 60_000);
   afterAll(async () => {
     delete process.env.GQL_TOKEN;
@@ -70,6 +79,55 @@ describe('console GraphQL endpoint import (specs.preview { graphqlEndpoint })', 
     expect(created).toMatchObject({ kind: 'graphql', specFormat: 'graphql-introspection', visibleToolCount: 480 });
     expect(created.environments.map((e: { slug: string }) => e.slug)).toEqual(['mock']);
     expect(created.specSource.url).toBe('https://api.example.test/graphql');
+  });
+
+  const draftOf = async (r: { body: string }) => t.json(t.admin, { url: `/api/spec-previews/${JSON.parse(r.body).previewId}` }, 200);
+  const callTool = async (server: string, env: string, name: string, args: Record<string, unknown>) => {
+    const token = await keyFor(t.s, server, env, ['tools:read']);
+    const client = new Client({ name: 'test-agent', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://console.test/mcp/${server}/${env}`), { fetch: injectFetch(t.s.app) as never, requestInit: { headers: { authorization: `Bearer ${token}` } } }));
+    try {
+      // 480 tools: the server lists the discovery tools, so go through call_tool
+      return await client.callTool({ name: 'call_tool', arguments: { name, arguments: args } });
+    } finally {
+      await client.close();
+    }
+  };
+
+  it('the preview suggests the endpoint as the environment: origin as base URL, its path as the GraphQL endpointPath', async () => {
+    const p = await draftOf(await preview({ graphqlEndpoint: 'https://api.example.test/api/graphql' }));
+    expect(p.environmentHint).toEqual({ source: 'graphql_endpoint', baseUrl: 'https://api.example.test', endpointPath: '/api/graphql', auth: null });
+    // the wizard's environment step sends what it prefilled from the hint
+    const created = await t.json(t.admin, { method: 'POST', url: '/api/servers', payload: { previewId: p.id, slug: 'gql-path', name: 'Path GraphQL', environments: [{ slug: 'dev', kind: 'dev', baseUrl: p.environmentHint.baseUrl, auth: { type: 'none' } }] } }, 201);
+    expect(created.environments.map((e: { slug: string }) => e.slug).sort()).toEqual(['dev', 'mock']);
+    const row = await t.s.services.dbs.main.db.selectFrom('servers').select(['spec_source']).where('id', '=', created.id).executeTakeFirstOrThrow();
+    expect(JSON.parse(String(row.spec_source))).toMatchObject({ graphqlEndpoint: 'https://api.example.test/api/graphql', graphql: { endpointPath: '/api/graphql' } });
+    // a tool call on dev goes to the endpoint the schema came from, not <origin>/graphql
+    const r = await callTool('gql-path', 'dev', 'entity0', { id: '1' });
+    expect(r.isError, JSON.stringify(r.content)).toBeFalsy();
+    expect(upstream.at(-1)).toMatchObject({ url: 'https://api.example.test/api/graphql', method: 'POST' });
+    // and the mock answers on the same path
+    const m = await callTool('gql-path', 'mock', 'entity0', { id: '1' });
+    expect(m.isError, JSON.stringify(m.content)).toBeFalsy();
+  });
+
+  it('an explicit graphql.endpointPath wins over the endpoint URL path', async () => {
+    const r = await t.as(t.admin, { method: 'POST', url: '/api/spec-previews', payload: { source: { graphqlEndpoint: 'https://api.example.test/api/graphql' }, graphql: { endpointPath: '/v1/gql' } } });
+    const p = await draftOf(r);
+    expect(p.environmentHint).toMatchObject({ baseUrl: 'https://api.example.test', endpointPath: '/v1/gql' });
+    const created = await t.json(t.admin, { method: 'POST', url: '/api/servers', payload: { previewId: p.id, slug: 'gql-explicit', name: 'Explicit GraphQL' } }, 201);
+    const row = await t.s.services.dbs.main.db.selectFrom('servers').select(['spec_source']).where('id', '=', created.id).executeTakeFirstOrThrow();
+    expect(JSON.parse(String(row.spec_source)).graphql).toEqual({ endpointPath: '/v1/gql' });
+  });
+
+  it('the preview suggests the introspection header as the environment credential (references only, never a literal value)', async () => {
+    const ref = await draftOf(await preview({ graphqlEndpoint: 'https://auth.test/v2/graphql', headerRef: { name: 'Authorization', secretRef: 'env:GQL_TOKEN' } }));
+    expect(ref.environmentHint).toEqual({ source: 'graphql_endpoint', baseUrl: 'https://auth.test', endpointPath: '/v2/graphql', auth: { type: 'header', headerName: 'Authorization', secretRef: 'env:GQL_TOKEN' } });
+    const bearer = await draftOf(await preview({ graphqlEndpoint: 'https://auth.test/graphql', headers: [{ name: 'Authorization', value: 'Bearer t0ken' }] }));
+    expect(bearer.environmentHint.auth).toEqual({ type: 'bearer', headerName: 'Authorization', secretRef: null });
+    const key = await draftOf(await preview({ graphqlEndpoint: 'https://api.example.test/graphql', headers: [{ name: 'X-Api-Key', value: 'k3y' }] }));
+    expect(key.environmentHint.auth).toEqual({ type: 'header', headerName: 'X-Api-Key', secretRef: null });
+    expect(JSON.stringify([bearer, key])).not.toMatch(/t0ken|k3y/);
   });
 
   it('sends an Accept list servers that answer 406 to plain application/json accept', async () => {

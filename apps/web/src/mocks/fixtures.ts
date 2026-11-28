@@ -191,7 +191,7 @@ const STAGE_MS = 280;
 function emptyPreview(id: string): SpecPreview {
   return {
     id, status: 'compiling', stages: STAGES.map((name) => ({ name, status: 'pending', durationMs: null })), kind: null, format: null, title: null, suggestedSlug: null, name: null, slug: null, operationCount: 0,
-    counts: { tools: 0, writeTools: 0, hiddenByDefault: 0 }, diagnostics: [], tools: [], lint: null, preliminaryScore: null, overlayDraftYaml: 'overlay: 1\ntools: {}\n', diff: null, expiresAt: iso(Date.now() + DAY),
+    counts: { tools: 0, writeTools: 0, hiddenByDefault: 0 }, diagnostics: [], tools: [], lint: null, preliminaryScore: null, overlayDraftYaml: 'overlay: 1\ntools: {}\n', diff: null, environmentHint: null, expiresAt: iso(Date.now() + DAY),
   };
 }
 
@@ -206,6 +206,8 @@ function previewFromAcme(id: string): SpecPreview {
     ],
     tools: acme.tools.map((t) => ({ name: t.name, title: t.orig, method: t.method ?? null, path: t.path ?? null, field: t.field ?? null, write: !!t.write, hidden: !!t.hidden, descriptionQuality: t.quality, suggestedHide: t.suggestHide ? [t.suggestHide] : [] })),
     lint: ACME_LINT, preliminaryScore: 48,
+    // servers[0].url of examples/acme-orders/openapi.yaml
+    environmentHint: { source: 'openapi_servers', baseUrl: 'https://api.acme.example.test/v2', endpointPath: null, auth: null },
   };
 }
 
@@ -685,7 +687,7 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
     'specs.download': () => new HttpResponse('openapi: 3.1.0\ninfo: { title: Acme Orders API, version: 2.3.0 }\npaths: {}\n', { headers: { 'content-type': 'application/yaml' } }),
     'specs.diff': () => ({ added: [], removed: [], changed: [], orphanedOverlayKeys: [] }),
     'specs.preview': async (ctx) => {
-      const b = await body<{ source?: { url?: string; content?: string; filename?: string; graphqlEndpoint?: string } }>(ctx);
+      const b = await body<{ source?: { url?: string; content?: string; filename?: string; graphqlEndpoint?: string; headers?: { name: string; value: string }[] }; graphql?: { endpointPath?: string } }>(ctx);
       const id = `pv_${++db.seq}`;
       const src = b.source ?? {};
       let pv: SpecPreview | Response;
@@ -703,6 +705,12 @@ export function contractFixtures(db: MockDb, opts: { demo?: boolean; me?: Me } =
         pv = /title:\s*Acme Orders API/.test(src.content) ? previewFromAcme(id) : previewFromContent(id, src.content, src.filename);
       } else return problem(422, 'validation_failed', 'Validation failed', 'Give a URL, a file or pasted content.');
       if (pv instanceof Response) return pv;
+      if (src.graphqlEndpoint) {
+        // like the server: the endpoint's origin and path, and the introspection header by name (never its value)
+        const u = new URL(src.graphqlEndpoint);
+        const h = src.headers?.[0];
+        pv = { ...pv, environmentHint: { source: 'graphql_endpoint', baseUrl: u.origin, endpointPath: b.graphql?.endpointPath ?? u.pathname, auth: h ? { type: /^authorization$/i.test(h.name) && /^bearer\s/i.test(h.value) ? 'bearer' : 'header', headerName: h.name, secretRef: null } : null } };
+      }
       db.previews.set(id, { preview: pv, createdMs: Date.now(), draftOps: {} });
       return { jobId: `job_${id}`, status: 'running', previewId: id };
     },

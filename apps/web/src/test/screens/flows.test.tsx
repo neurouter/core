@@ -42,6 +42,45 @@ describe('import wizard', () => {
     expect(await screen.findByText(/31 of 46 tools exposed/)).toBeInTheDocument();
   });
 
+  it('a GraphQL endpoint import prefills the real environment (on, origin, introspection header) and creates it next to mock', async () => {
+    const db = createDb({ speed: 0 });
+    const { user } = await renderRoute('/servers/new?tab=graphql', { db });
+    await user.type(await screen.findByRole('textbox', { name: 'GraphQL endpoint' }), 'https://api.shop.test/api/graphql');
+    await user.clear(screen.getByLabelText('Header (optional)'));
+    await user.type(screen.getByLabelText('Header (optional)'), 'X-Api-Key');
+    await user.type(screen.getByLabelText('Value'), 'k3y');
+    await user.click(screen.getByRole('button', { name: 'Fetch and compile' }));
+    await user.click(await screen.findByRole('button', { name: 'Next: Tools' }));
+    await user.click(await screen.findByRole('button', { name: 'Next: Environment' }));
+    expect(await screen.findByRole('checkbox', { name: /add a dev environment now/i })).toBeChecked();
+    expect(screen.getByLabelText('Base URL')).toHaveValue('https://api.shop.test');
+    expect(screen.getByText('https://api.shop.test/api/graphql')).toBeInTheDocument();
+    expect(screen.getByLabelText('Header name')).toHaveValue('X-Api-Key');
+    // the literal introspection value is never stored: the credential is a reference the user enters
+    expect(screen.getByLabelText('Credential reference')).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'Next: Readiness' }));
+    expect(await screen.findByText(/env:NAME or secret:NAME/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Credential reference'), 'env:SHOP_KEY');
+    await user.click(screen.getByRole('button', { name: 'Next: Readiness' }));
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(db.servers.at(-1)!.envs.map((e) => e.slug)).toEqual(['mock', 'dev']));
+    const dev = db.servers.at(-1)!.envs[1]!;
+    expect(dev.baseUrl).toBe('https://api.shop.test');
+    expect(dev.auth).toMatchObject({ type: 'header', headerName: 'X-Api-Key', secretRef: 'env:SHOP_KEY' });
+  });
+
+  it('an OpenAPI servers[0].url prefills the base URL, but adding the environment stays opt-in', async () => {
+    const db = createDb({ speed: 0 });
+    const { user } = await renderRoute('/servers/new', { db });
+    await user.click(await screen.findByRole('button', { name: /try the sample/i }));
+    await user.click(await screen.findByRole('button', { name: 'Next: Tools' }));
+    await user.click(await screen.findByRole('button', { name: 'Next: Environment' }));
+    const add = await screen.findByRole('checkbox', { name: /add a dev environment now/i });
+    expect(add).not.toBeChecked();
+    await user.click(add);
+    expect(screen.getByLabelText('Base URL')).toHaveValue('https://api.acme.example.test/v2');
+  });
+
   it('disables the quick eval without a model provider', async () => {
     const db = createDb({ speed: 0 });
     const { user } = await renderRoute('/servers/new', { db, me: meFixture('admin', { features: { evals: false } }) });
