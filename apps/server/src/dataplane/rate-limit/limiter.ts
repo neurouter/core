@@ -1,3 +1,4 @@
+import { DEFAULT_LIMITS, OPS_RATE_LIMIT } from '@neurouter/shared';
 import type { RateLimitStore } from '../../kernel/coordination/types.js';
 import { perMinute } from './token-bucket.js';
 
@@ -19,10 +20,10 @@ export interface RateLimitConfig {
 /** `left`: the tightest bucket after this call (calls left before the limit, its capacity), when the store reports it. */
 export type LimitResult = { allowed: true; left?: { calls: number; capacity: number } } | { allowed: false; scope: LimitScope; retryAfterMs: number };
 
-/** Defaults when an environment does not set limits (§6.2 example values). */
-export const DEFAULT_RATE_LIMIT: RateLimitConfig = { perMinute: 600, burst: 120 };
-export const DEFAULT_TOOL_RATE_LIMIT: RateLimitConfig = { perMinute: 300, burst: 60 };
-export const OPS_RATE_LIMIT: RateLimitConfig = { perMinute: 60, burst: 60 };
+/**
+ * Defaults when an environment does not set limits: the shared `DEFAULT_LIMITS` (one source of truth with the
+ * console and neurouter.yaml docs, 0.3.5). Ops tools use the shared `OPS_RATE_LIMIT`.
+ */
 
 /**
  * Per-call checks (§9.6 step 7; COPY Hub limiter): principal bucket and principal×tool bucket,
@@ -33,8 +34,8 @@ export class RateLimiter {
 
   checksFor(p: { environmentId: string; credentialKey: string; tool: string; principalLimit: RateLimitConfig | null; toolLimit: RateLimitConfig | null }): LimitCheck[] {
     return [
-      { scope: 'principal', key: `p:${p.environmentId}:${p.credentialKey}`, ...(p.principalLimit ?? DEFAULT_RATE_LIMIT) },
-      { scope: 'principal_tool', key: `pt:${p.environmentId}:${p.credentialKey}:${p.tool}`, ...(p.toolLimit ?? DEFAULT_TOOL_RATE_LIMIT) },
+      { scope: 'principal', key: `p:${p.environmentId}:${p.credentialKey}`, ...(p.principalLimit ?? DEFAULT_LIMITS.rateLimit) },
+      { scope: 'principal_tool', key: `pt:${p.environmentId}:${p.credentialKey}:${p.tool}`, ...(p.toolLimit ?? DEFAULT_LIMITS.toolRateLimit) },
     ];
   }
 

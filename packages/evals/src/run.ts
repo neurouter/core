@@ -6,7 +6,7 @@ import type { CheckResult, JudgeResult, JudgeUsage, JudgeVotes } from './types.j
 import { fallbackUsed, LlmKeyError, LlmRateLimitError, type LlmClient, type LlmMessageParam, type LlmRequest, type LlmResponse, type LlmToolResultBlock, type LlmToolUseBlock } from './llm/types.js';
 import { resultText, taskIdFromResult, type McpSession } from './mcp.js';
 import type { StateReader } from './check.js';
-import type { AgentCall, AttemptRecord, AttemptRun, EndReason, EvalMode, EvalTask, ObservedCall, TaskRunResult, TranscriptItem } from './types.js';
+import type { AgentCall, AttemptRecord, AttemptRun, EndReason, EvalMode, EvalTask, LlmRetry, ObservedCall, TaskRunResult, TranscriptItem } from './types.js';
 
 export interface RunSettings {
   effort: 'low' | 'medium' | 'high';
@@ -161,7 +161,7 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
     };
     let res: LlmResponse;
     try {
-      res = await createWithRetry(opts.llm, req, { sleep, random, signal });
+      res = await createWithRetry(opts.llm, req, { sleep, random, signal, remainingMs: () => limits.wallMs - (now() - started), onRetry: (r) => (out.llmRetries ??= []).push({ turn: out.turns + 1, ...r }) });
     } catch (err) {
       if (err instanceof LlmKeyError) {
         clearTimeout(timer);
@@ -232,16 +232,57 @@ export async function runAttempt(opts: RunAttemptOptions): Promise<AttemptRun> {
   }
 }
 
-/** RateLimitError → backoff and retry 3× with jitter (on top of the SDK's own retries). */
-export async function createWithRetry(llm: LlmClient, req: LlmRequest, o: { sleep: (ms: number) => Promise<void>; random: () => number; signal?: AbortSignal; retries?: number }): Promise<LlmResponse> {
-  const retries = o.retries ?? 3;
-  for (let i = 0; ; i++) {
+/** Transport error codes worth another try (Node/undici). */
+const TRANSIENT_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'EPIPE', 'ETIMEDOUT', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_CLOSED']);
+const TRANSIENT_MESSAGE = /^terminated$|socket hang up|other side closed|fetch failed|connection error|\bECONNRESET\b|\bETIMEDOUT\b|\bEPIPE\b|overloaded/i;
+
+/**
+ * B5 (0.3.5): an LLM error worth retrying. Rate limits; provider 5xx (incl. Anthropic's 529 overloaded) and 408;
+ * and transport failures without a status: undici's `TypeError: terminated` (a response body cut off mid-read),
+ * ECONNRESET, socket hang up, the SDKs' "Connection error.". Never 4xx validation errors, key errors or aborts.
+ */
+export function llmRetryKind(err: unknown): LlmRetry['kind'] | null {
+  if (err instanceof LlmRateLimitError) return 'rate_limit';
+  if (err instanceof LlmKeyError || !(err instanceof Error)) return null;
+  if (err.name === 'AbortError' || err.name === 'APIUserAbortError') return null;
+  const status = (err as { status?: unknown }).status;
+  if (typeof status === 'number') return status >= 500 || status === 408 ? 'transient' : null;
+  for (let e: unknown = err, depth = 0; e instanceof Error && depth < 4; e = (e as { cause?: unknown }).cause, depth++) {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string' && TRANSIENT_CODES.has(code)) return 'transient';
+    if (TRANSIENT_MESSAGE.test(e.message)) return 'transient';
+  }
+  return null;
+}
+
+/** Retries per kind (on top of the SDK's own): rate limits 3 (4 tries), transient errors 2 (3 tries). */
+export const LLM_RETRIES = { rate_limit: 3, transient: 2 } as const;
+/** Longest single backoff wait (a provider's retry-after is honoured up to this). */
+const MAX_RETRY_WAIT_MS = 30_000;
+
+/**
+ * Bounded exponential backoff with jitter: 1 s, 2 s, 4 s … (+ up to 50 %), or the provider's retry-after.
+ * `remainingMs` (the attempt's wall time left) stops a wait that would not fit; `onRetry` records each retry.
+ */
+export async function createWithRetry(
+  llm: LlmClient,
+  req: LlmRequest,
+  o: { sleep: (ms: number) => Promise<void>; random: () => number; signal?: AbortSignal; retries?: Partial<Record<LlmRetry['kind'], number>>; remainingMs?: () => number; onRetry?: (r: { kind: LlmRetry['kind']; error: string; waitMs: number }) => void },
+): Promise<LlmResponse> {
+  const used = { rate_limit: 0, transient: 0 };
+  for (;;) {
     try {
       return await llm.create(req, o.signal ? { signal: o.signal } : {});
     } catch (err) {
-      if (!(err instanceof LlmRateLimitError) || i >= retries) throw err;
-      const base = err.retryAfterMs ?? 1000 * 2 ** i;
-      await o.sleep(base + Math.floor(o.random() * 500));
+      const kind = o.signal?.aborted ? null : llmRetryKind(err);
+      if (!kind || used[kind] >= (o.retries?.[kind] ?? LLM_RETRIES[kind])) throw err;
+      const base = 1000 * 2 ** used[kind];
+      const hinted = err instanceof LlmRateLimitError ? err.retryAfterMs : null;
+      const waitMs = Math.min(MAX_RETRY_WAIT_MS, hinted ?? base + Math.floor(o.random() * base * 0.5));
+      if (o.remainingMs && waitMs >= o.remainingMs()) throw err;
+      used[kind]++;
+      o.onRetry?.({ kind, error: (err as Error).message, waitMs });
+      await o.sleep(waitMs);
     }
   }
 }
@@ -288,6 +329,7 @@ export interface RunSuiteOptions {
   settings?: Partial<RunSettings>;
   /** The run's (the suite's) limits over the defaults; a task's own `limits` win over them. */
   limits?: Partial<RunLimits>;
+  /** Attempts in flight at once (default 4; CLI `--concurrency`). */
   concurrency?: number;
   signal?: AbortSignal;
   /** Skip attempts already stored (resume). */
@@ -296,7 +338,11 @@ export interface RunSuiteOptions {
   groundTruth?: (task: EvalTask) => Promise<GroundTruth | null>;
   /** Ask the judge whether a failed answer check is stated in another form (default true). */
   equivalenceJudge?: boolean;
-  /** Hard token cap for the run (agent + judge tokens): no new attempt starts once it is reached; the run is marked incomplete. */
+  /**
+   * Hard token cap for the run (agent + judge tokens). Every attempt in flight reserves its per-attempt token limit
+   * (`maxTotalTokens`); an attempt starts only when the cap minus what was used and reserved still covers its own
+   * limit. When none fits, the run stops and is marked incomplete.
+   */
   maxRunTokens?: number | null;
   onResult?: (r: TaskRunResult) => void | Promise<void>;
   onProgress?: (done: number, total: number) => void;
@@ -341,19 +387,50 @@ export async function runSuiteDetailed(opts: RunSuiteOptions): Promise<RunSuiteO
     if (!p) gtCache.set(task.key, (p = opts.groundTruth(task).catch(() => null)));
     return p;
   };
+  // B6 (0.3.5): a real cap. Each in-flight attempt reserves its per-attempt token limit; an attempt starts only when
+  // cap − used − reserved ≥ its own limit. When it does not fit, a worker waits for an attempt in flight to finish
+  // (which frees its reservation and adds its real spend) and checks again; with none in flight the run stops.
+  let reserved = 0;
+  let inFlight = 0;
+  let notFit: { limit: number; left: number } | null = null;
+  let waiters: Array<() => void> = [];
+  const wake = () => {
+    const w = waiters;
+    waiters = [];
+    for (const f of w) f();
+  };
+  const reserve = async (limit: number): Promise<boolean> => {
+    const cap = opts.maxRunTokens;
+    if (!cap) return true;
+    for (;;) {
+      if (fatal || opts.signal?.aborted || stopped) return false;
+      if (cap - used - reserved >= limit) {
+        reserved += limit;
+        return true;
+      }
+      if (inFlight === 0) {
+        notFit = { limit, left: cap - used };
+        return false;
+      }
+      await new Promise<void>((r) => waiters.push(r));
+    }
+  };
   const worker = async () => {
     for (;;) {
-      if (fatal || opts.signal?.aborted) return;
-      if (opts.maxRunTokens && used >= opts.maxRunTokens) {
-        if (next < jobs.length) stopped = true;
-        return;
-      }
+      if (fatal || opts.signal?.aborted || stopped) return;
       const job = jobs[next++];
       if (!job) return;
       if (opts.hasResult && (await opts.hasResult(job.key))) {
         opts.onProgress?.(++done, total);
         continue;
       }
+      const limit = effectiveLimits(opts.limits, job.task.limits).maxTotalTokens;
+      if (!(await reserve(limit))) {
+        if (!fatal && !opts.signal?.aborted) stopped = true;
+        wake();
+        return;
+      }
+      inFlight++;
       try {
         const r = await runOne(opts, job, gtOf);
         ran++;
@@ -367,13 +444,20 @@ export async function runSuiteDetailed(opts: RunSuiteOptions): Promise<RunSuiteO
           return;
         }
         throw err;
+      } finally {
+        inFlight--;
+        if (opts.maxRunTokens) reserved -= limit;
+        wake();
       }
       opts.onProgress?.(++done, total);
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.concurrency ?? 4, total || 1)) }, worker));
   if (fatal) throw fatal;
-  const incomplete = stopped ? { reason: `--max-run-tokens ${opts.maxRunTokens} reached (${used} tokens used)`, attemptsRun: ran, attemptsPlanned: total } : null;
+  const why = notFit as { limit: number; left: number } | null;
+  const incomplete = stopped
+    ? { reason: `--max-run-tokens ${opts.maxRunTokens} reached (${used} tokens used${why ? `; the next attempt's per-attempt token limit ${why.limit} does not fit the ${why.left} left` : ''})`, attemptsRun: ran, attemptsPlanned: total }
+    : null;
   return { results, incomplete, tokensUsed: used, judgeUsage };
 }
 
@@ -498,6 +582,7 @@ async function runOne(opts: RunSuiteOptions, job: AttemptContext, gtOf: (task: E
       ...(check.judgeVotes ? { judgeVotes: check.judgeVotes } : {}),
       ...(run.toolsListBytes !== undefined ? { toolsListBytes: run.toolsListBytes } : {}),
       limits,
+      ...(run.llmRetries?.length ? { llmRetries: run.llmRetries } : {}),
     };
   } finally {
     await session.close?.().catch(() => {});

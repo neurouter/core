@@ -1,6 +1,6 @@
 import { DEFAULT_TENANT_ID } from '@neurouter/shared';
 import type { EvalTask } from '@neurouter/evals';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { bootServer } from '../fakes/server.js';
 import type { RunningServer } from '../../server.js';
 
@@ -112,10 +112,12 @@ describe('eval harness (calibration, redaction, run cap)', () => {
     const env = (await s.services.servers.environments(srv.id)).find((e) => e.slug === 'dev')!;
     const t = task({ key: 'pet', prompt: 'Find pet 1 (use pet_id=1)', referenceCalls: [{ tool: 'get_pet_by_id', arguments: { pet_id: 1 } }], assertions: [{ type: 'called', tool: 'get_pet_by_id' }] });
     const suite = await ev.saveSuite(DEFAULT_TENANT_ID, srv.id, null, [t], { mockDataVersion: 2 }, null, true);
-    const run = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 5, trigger: 'cli', createdBy: null, wait: true, maxRunTokens: 1 });
+    const run = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 5, trigger: 'cli', createdBy: null, wait: true, maxRunTokens: 1, concurrency: 4 });
     expect(run.status).toBe('succeeded');
-    // attempts already in flight (concurrency 4) finish; no new one starts
-    expect(ev.score(run)!.incomplete).toMatchObject({ attemptsRun: 4, attemptsPlanned: 5 });
+    // 0.3.5 (B6): a real cap. Before, the 4 attempts in flight (concurrency 4) all started and ran past it; now an
+    // attempt starts only while the cap covers its per-attempt token limit (200,000), so none does
+    expect(ev.score(run)!.incomplete).toMatchObject({ attemptsRun: 0, attemptsPlanned: 5 });
+    expect(ev.score(run)!.incomplete!.reason).toContain("per-attempt token limit 200000 does not fit the 1 left");
   }, 120_000);
 
   it('B3: suggestion LLM usage is recorded with the run, and --max-run-tokens covers it', async () => {
@@ -131,10 +133,13 @@ describe('eval harness (calibration, redaction, run cap)', () => {
     const u = ev.score(fresh)!.suggestUsage!;
     expect(u).toMatchObject({ model: await ev.model(DEFAULT_TENANT_ID), calls: 1, skipped: 0, budgetTokens: null });
     expect(u.inputTokens + u.outputTokens).toBeGreaterThan(0);
-    // the run cap: the attempt spends it all, so the suggester makes no LLM call
-    const capped = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 1, trigger: 'cli', createdBy: null, wait: true, maxRunTokens: 1 });
+    // the run cap: it covers the attempt's (suite) token limit, and what the attempt leaves is too little for a suggestion call
+    const small = await ev.saveSuite(DEFAULT_TENANT_ID, srv.id, null, [t], { mockDataVersion: 2, limits: { maxTotalTokens: 8000 } }, null, true);
+    const capped = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: small.id, environmentId: env.id, modes: ['tool'], repeats: 1, trigger: 'cli', createdBy: null, wait: true, maxRunTokens: 8000 });
+    expect(ev.score(await ev.run(DEFAULT_TENANT_ID, capped.id))!.incomplete).toBeNull();
     const cu = ev.score(await ev.run(DEFAULT_TENANT_ID, capped.id))!.suggestUsage!;
-    expect(cu).toMatchObject({ calls: 0, skipped: 1, budgetTokens: 0 });
+    const [ar] = await ev.taskResults(DEFAULT_TENANT_ID, capped.id);
+    expect(cu).toMatchObject({ calls: 0, skipped: 1, budgetTokens: 8000 - (ar!.inputTokens + ar!.cacheReadTokens + ar!.outputTokens) });
   }, 120_000);
 
   it('0.3.3: suite and task limits are stored, honored per attempt and kept with the results', async () => {
@@ -149,5 +154,37 @@ describe('eval harness (calibration, redaction, run cap)', () => {
     const run = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 1, trigger: 'cli', createdBy: null, wait: true });
     const by = Object.fromEntries((await ev.taskResults(DEFAULT_TENANT_ID, run.id)).map((r) => [r.taskKey, r.limits]));
     expect(by).toEqual({ plain: { maxTurns: 25, maxToolCalls: 60, maxTotalTokens: 200_000, wallMs: 600_000 }, big: { maxTurns: 40, maxToolCalls: 150, maxTotalTokens: 200_000, wallMs: 600_000 } });
+  }, 120_000);
+
+  it('0.3.5 (B5): a transient LLM transport error is retried and the retry is stored with the attempt', async () => {
+    const ev = s.services.evals;
+    const srv = (await s.services.servers.bySlug(DEFAULT_TENANT_ID, 'petstore'))!;
+    const env = (await s.services.servers.environments(srv.id)).find((e) => e.slug === 'dev')!;
+    const t = task({ key: 'flaky', prompt: 'Find pet 1 (use pet_id=1)', referenceCalls: [{ tool: 'get_pet_by_id', arguments: { pet_id: 1 } }], assertions: [{ type: 'called', tool: 'get_pet_by_id' }] });
+    const suite = await ev.saveSuite(DEFAULT_TENANT_ID, srv.id, null, [t], { mockDataVersion: 2 }, null, true);
+    // the first agent call's response body is cut off mid-read (undici), as in the 0.3.4 long-workflow run
+    const real = ev.llm.bind(ev);
+    let failed = false;
+    const spy = vi.spyOn(ev, 'llm').mockImplementation(async (...a) => {
+      const llm = await real(...a);
+      return Object.assign(Object.create(Object.getPrototypeOf(llm) as object), llm, {
+        create: async (...args: Parameters<typeof llm.create>) => {
+          if (!failed) {
+            failed = true;
+            throw new TypeError('terminated');
+          }
+          return llm.create(...args);
+        },
+      });
+    });
+    try {
+      const run = await ev.createRun(DEFAULT_TENANT_ID, { serverId: srv.id, suiteId: suite.id, environmentId: env.id, modes: ['tool'], repeats: 1, trigger: 'cli', createdBy: null, wait: true });
+      expect(run.status).toBe('succeeded');
+      const [r] = await ev.taskResults(DEFAULT_TENANT_ID, run.id);
+      expect(r).toMatchObject({ endReason: 'end_turn', error: null, passed: true });
+      expect(r!.llmRetries).toEqual([{ turn: 1, kind: 'transient', error: 'terminated', waitMs: expect.any(Number) }]);
+    } finally {
+      spy.mockRestore();
+    }
   }, 120_000);
 });

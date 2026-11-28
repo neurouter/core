@@ -54,6 +54,7 @@ interface EvalOpts {
   suggest?: boolean;
   embeddings?: boolean;
   maxRunTokens?: string;
+  concurrency?: string;
   calibrate?: boolean;
   calibrateWith?: string;
   calibrateOnly?: boolean;
@@ -79,6 +80,7 @@ const positiveInt = (v: string | undefined, flag: string): number | undefined =>
 export async function cmdEval(o: EvalOpts): Promise<void> {
   if (!o.config && !o.spec) throw new Error('pass --spec <file|url> or --config neurouter.yaml --server <slug>');
   const maxRunTokens = positiveInt(o.maxRunTokens, '--max-run-tokens');
+  const concurrency = positiveInt(o.concurrency, '--concurrency');
   const maxJudgeTokens = positiveInt(o.maxJudgeTokens, '--max-judge-tokens') ?? 300_000;
   if (o.regrade && !o.suite) throw new Error('--regrade <transcripts.json> needs --suite <suite.json> (the suite the transcripts ran, or its migrated version)');
   if (o.migrateSuite && o.suite) throw new Error('pass either --migrate-suite <old.json> or --suite <file>');
@@ -209,7 +211,7 @@ export async function cmdEval(o: EvalOpts): Promise<void> {
     // --transcripts writes what the agent saw and said, untrimmed (the console keeps 4,096 chars per item)
     if (o.transcriptMaxChars !== undefined && !(Number(o.transcriptMaxChars) > 0)) throw new Error('--transcript-max-chars must be a positive number');
     const transcriptMaxChars = o.transcriptMaxChars !== undefined ? Math.floor(Number(o.transcriptMaxChars)) : o.transcripts ? null : undefined;
-    const run = await s.evals.createRun(tenant, { serverId, suiteId, environmentId: envRow.id, models: o.models ? o.models.split(',').map((m) => m.trim()) : null, modes, repeats: Number(o.repeats), trigger: 'cli', createdBy: null, wait: true, ...(transcriptMaxChars !== undefined ? { transcriptMaxChars } : {}), ...(maxRunTokens ? { maxRunTokens } : {}) });
+    const run = await s.evals.createRun(tenant, { serverId, suiteId, environmentId: envRow.id, models: o.models ? o.models.split(',').map((m) => m.trim()) : null, modes, repeats: Number(o.repeats), trigger: 'cli', createdBy: null, wait: true, ...(transcriptMaxChars !== undefined ? { transcriptMaxChars } : {}), ...(maxRunTokens ? { maxRunTokens } : {}), ...(concurrency ? { concurrency } : {}) });
     if (run.status !== 'succeeded') throw new Error(`eval run ${run.status}: ${run.error ?? ''}`);
     // B3: the suggestion step's LLM usage is stored with the score; the report lists it on its own
     const { suggestUsage, ...score } = s.evals.score(run)!;

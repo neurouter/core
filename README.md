@@ -56,7 +56,8 @@ calls on the same mock data, only the arguments the prompt asks for are checked,
 meaning (booleans, numbers, minor units, dates, ids), and call budgets are soft (over budget is reported as
 efficiency, not failure). A suite is accepted only when every task's reference solution passes its own
 checks (calibration; `--calibrate-with <model>` adds a model pass that flags disagreements for review).
-`--max-run-tokens` caps a run's spend (agent, judge and fix-suggestion tokens). Per-attempt limits (turns, tool calls, tokens including cached input,
+`--max-run-tokens` caps a run's spend (agent, judge and fix-suggestion tokens): every attempt in flight reserves its
+per-attempt token limit, so attempts running at once (`--concurrency`, default 4) cannot overshoot it. Per-attempt limits (turns, tool calls, tokens including cached input,
 wall time, enforced during calls) can be overridden per suite or per task (`limits`). Exact values (numbers,
 amounts, ids) are never passed by the equivalence judge. Details, score definitions and the 0.2.1 suite converter
 (`--migrate-suite`) and offline re-grade (`--regrade`): [packages/evals/README.md](packages/evals/README.md).
@@ -112,8 +113,10 @@ reported in the inbox).
 ## Rate limits
 
 - **Gateway limits.** Neurouter limits calls per credential (`limits.rateLimit`) and per credential and tool
-  (`limits.toolRateLimit`). When an environment sets neither, the limiter applies 600/min (burst 120) and 300/min
-  (burst 60).
+  (`limits.toolRateLimit`). When an environment sets neither, the defaults are 600/min (burst 120) per credential
+  and 300/min (burst 60) per credential and tool. These are the shared `DEFAULT_LIMITS`; the limiter applies them and
+  the console shows them (one source of truth since 0.3.5). An API key's own rate limit replaces the per-credential
+  one.
 - **Mock environment.** The built-in mock (`baseUrl: "mock:"`) has no gateway rate limit unless its limits or the API
   key set one (0.3.3).
 - **Scripts.** Inside `run_script`, inner calls wait for a token (see above).
