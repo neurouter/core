@@ -2,7 +2,7 @@ import { mcpUrl, resourceMetadataUrl } from '../../../kernel/lib/mcp-url.js';
 import { gunzipSync } from 'node:zlib';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { compile, diffSpecs, parseOverlay, applyOverlayPatch, type CompileResult } from '@neurouter/compiler';
-import { api, OPS_TOOLS, parseSecretRef, SAMPLE_SPEC_URL, OPS_VISIBILITY, readinessBand, type ConnectConfig, type EnvironmentCreate, type OpsTool, type SpecPreview, type SpecSourceIn, type ToolDef } from '@neurouter/shared';
+import { api, OPS_TOOLS, parseSecretRef, SAMPLE_SPEC_URL, OPS_VISIBILITY, readinessBand, type ConnectConfig, type EnvironmentCreate, type OpsTool, type PreviewEnvironmentHint, type SpecPreview, type SpecSourceIn, type ToolDef } from '@neurouter/shared';
 import { toIso } from '../../../kernel/lib/clock.js';
 import { AppError } from '../../../kernel/lib/errors.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -135,7 +135,34 @@ interface PreviewState {
   /** Set when the spec came from introspecting a live endpoint. */
   graphqlEndpoint?: GraphqlEndpointSource;
   overlayYaml: string;
-  result: Omit<SpecPreview, 'id' | 'expiresAt' | 'name' | 'slug' | 'overlayDraftYaml'>;
+  /** Prefill for the wizard's environment step (absent on previews stored before 0.4.0). */
+  environmentHint?: PreviewEnvironmentHint | null;
+  result: Omit<SpecPreview, 'id' | 'expiresAt' | 'name' | 'slug' | 'overlayDraftYaml' | 'environmentHint'>;
+}
+
+/**
+ * The real upstream as far as the import knows it (`SpecPreview.environmentHint`): the introspected
+ * GraphQL endpoint (origin + endpointPath, and the header it was introspected with: a reference is
+ * offered as is, a literal value only by its header name), else an absolute, untemplated OpenAPI
+ * `servers[0].url`.
+ */
+export function environmentHintOf(endpoint: GraphqlEndpointSource | null, headers: ReadonlyArray<{ name: string; value: string }>, endpointPath: string | undefined, serverUrl: string | null): PreviewEnvironmentHint | null {
+  if (endpoint) {
+    const literal = headers[0];
+    const auth: PreviewEnvironmentHint['auth'] = endpoint.headerRef
+      ? { type: 'header', headerName: endpoint.headerRef.name, secretRef: endpoint.headerRef.secretRef }
+      : literal
+        ? { type: /^authorization$/i.test(literal.name) && /^bearer\s/i.test(literal.value) ? 'bearer' : 'header', headerName: literal.name, secretRef: null }
+        : null;
+    return { source: 'graphql_endpoint', baseUrl: new URL(endpoint.url).origin, endpointPath: endpointPath ?? '/graphql', auth };
+  }
+  if (!serverUrl || !/^https?:\/\/[^/]/i.test(serverUrl) || serverUrl.includes('{')) return null;
+  try {
+    const u = new URL(serverUrl);
+    return { source: 'openapi_servers', baseUrl: (u.origin + u.pathname).replace(/\/+$/, ''), endpointPath: null, auth: null };
+  } catch {
+    return null;
+  }
 }
 
 function previewFrom(r: CompileResult, slug: string | null, ms: number, diff: SpecPreview['diff']): PreviewState['result'] {
@@ -379,7 +406,7 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
   });
 
   /* ---------------------------------------------------------------- spec previews */
-  const previewOut = (id: string, expiresAt: number, st: PreviewState): SpecPreview => ({ id, expiresAt: toIso(expiresAt), name: st.name, slug: st.slug, overlayDraftYaml: st.overlayYaml, ...st.result });
+  const previewOut = (id: string, expiresAt: number, st: PreviewState): SpecPreview => ({ id, expiresAt: toIso(expiresAt), name: st.name, slug: st.slug, overlayDraftYaml: st.overlayYaml, environmentHint: st.environmentHint ?? null, ...st.result });
   const previewRow = async (req: FastifyRequest, id: string) => {
     const p = await db.selectFrom('spec_previews').selectAll().where('id', '=', id).where('tenant_id', '=', tenantOf(req)).executeTakeFirst();
     if (!p || p.expires_at <= c.clock.now()) throw AppError.notFound('Spec preview');
@@ -393,9 +420,12 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     const started = c.clock.now();
     const source = body.source;
     const endpoint: GraphqlEndpointSource | null = 'graphqlEndpoint' in source ? { url: source.graphqlEndpoint, ...(source.headerRef ? { headerRef: source.headerRef } : {}) } : null;
-    const src = endpoint ? await introspectEndpoint(c, requireTenant(req).tenant, endpoint, 'headers' in source ? source.headers : []) : await specBytes(c, source as SpecSourceIn);
+    const headers = 'headers' in source ? (source.headers ?? []) : [];
+    const src = endpoint ? await introspectEndpoint(c, requireTenant(req).tenant, endpoint, headers) : await specBytes(c, source as SpecSourceIn);
     const format = endpoint ? 'graphql-introspection' : body.format;
-    const r = await compileBytes(src.bytes, 'preview', format, body.graphql);
+    // tool calls go where the schema came from: the endpoint URL's path, unless graphql.endpointPath is set
+    const graphql = endpoint && !body.graphql?.endpointPath ? { ...body.graphql, endpointPath: new URL(endpoint.url).pathname } : body.graphql;
+    const r = await compileBytes(src.bytes, 'preview', format, graphql);
     let diff: SpecPreview['diff'] = null;
     if (body.serverId) {
       const s = await serverOr404(c, req, body.serverId);
@@ -405,7 +435,8 @@ export async function serverRoutes(app: FastifyInstance, c: ApiContext): Promise
     // an introspection result carries no API title: name the draft after the endpoint's host
     const title = endpoint && (!r.title || r.title === 'GraphQL API') ? `${new URL(endpoint.url).hostname} GraphQL` : r.title;
     const slug = slugify(title || '');
-    const st: PreviewState = { name: title || null, slug, ...(format ? { format } : {}), ...(endpoint ? { graphqlEndpoint: endpoint } : {}), ...(body.graphql ? { graphql: body.graphql } : {}), overlayYaml: '', result: previewFrom(r, slug, c.clock.now() - started, diff) };
+    const environmentHint = environmentHintOf(endpoint, headers, graphql?.endpointPath, r.serverUrl);
+    const st: PreviewState = { name: title || null, slug, ...(format ? { format } : {}), ...(endpoint ? { graphqlEndpoint: endpoint } : {}), ...(graphql ? { graphql } : {}), overlayYaml: '', environmentHint, result: previewFrom(r, slug, c.clock.now() - started, diff) };
     const id = newId();
     const expires = c.clock.now() + PREVIEW_TTL_MS;
     await db.insertInto('spec_previews').values({ id, tenant_id: tenantOf(req), server_id: body.serverId ?? null, status: st.result.status, content: Buffer.from(src.bytes), source_url: src.sourceUrl, state: toJsonColumn(st), created_by: u.id, created_at: c.clock.now(), expires_at: expires }).execute();

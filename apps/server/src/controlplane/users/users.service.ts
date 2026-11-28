@@ -76,6 +76,40 @@ export class UsersService {
       .execute();
   }
 
+  /**
+   * Boot-time first admin. With BOOTSTRAP_ADMIN_EMAIL: that user is the home tenant's owner (as
+   * `ensureBootstrapAdmin`). Without it, the local `admin@localhost` is created only on a database
+   * whose home tenant has no active owner yet (a fresh install, so the local sign-in link has someone
+   * to sign in as): never next to real owners, e.g. when the CLI boots against a deployment's database.
+   */
+  async ensureBootstrapAdminOnBoot(): Promise<void> {
+    if (!this.config.env.BOOTSTRAP_ADMIN_EMAIL) {
+      const owner = await this.db.selectFrom('memberships').select('user_id').where('tenant_id', '=', await this.home()).where('role', '=', 'owner').where('status', '=', 'active').executeTakeFirst();
+      if (owner) return;
+    }
+    await this.ensureBootstrapAdmin();
+  }
+
+  /**
+   * The user an operator-created API key belongs to (`neurouter keys create`): `email` when it is an
+   * active owner or admin of the tenant, else its oldest active owner, else its oldest active admin.
+   * Never creates a user.
+   */
+  async keyOwner(tenantId: string, email?: string): Promise<UserRowDb | null> {
+    let q = this.db
+      .selectFrom('memberships as m')
+      .innerJoin('users as u', 'u.id', 'm.user_id')
+      .select(['u.id as id', 'm.role as memberRole'])
+      .where('m.tenant_id', '=', tenantId)
+      .where('m.status', '=', 'active')
+      .where('u.status', '=', 'active')
+      .where('m.role', 'in', ['owner', 'admin']);
+    if (email) q = q.where('u.email', '=', email.toLowerCase());
+    const rows = await q.orderBy('m.created_at').orderBy('u.id').execute();
+    const pick = rows.find((r) => r.memberRole === 'owner') ?? rows[0];
+    return pick ? this.get(pick.id) : null;
+  }
+
   /** First admin (§13.1): BOOTSTRAP_ADMIN_EMAIL, else `admin@localhost` for the local sign-in link. Owner of the home tenant. */
   async ensureBootstrapAdmin(): Promise<UserRowDb> {
     const email = this.bootstrapEmail();

@@ -43,7 +43,7 @@ export async function cmdConsoleLink(o: { data: string }): Promise<void> {
 }
 
 /** `npx neurouter keys create`: an API key bound to one server + environment. Prints the token once. */
-export async function cmdKeysCreate(o: { server: string; env: string; scopes: string; name: string; data: string; tenant?: string }): Promise<void> {
+export async function cmdKeysCreate(o: { server: string; env: string; scopes: string; name: string; data: string; tenant?: string; owner?: string }): Promise<void> {
   const running = await startServer({ env: serverEnv({ data: o.data }), listen: false, jobs: false, loadDotenv: false, services: { executor: null } });
   try {
     const s = running.services;
@@ -55,11 +55,10 @@ export async function cmdKeysCreate(o: { server: string; env: string; scopes: st
     const env = (await s.servers.environments(srv.id)).find((e) => e.slug === o.env);
     if (!env) throw new Error(`unknown environment ${o.server}/${o.env}`);
     const scopes = o.scopes.split(',').map((x) => Scope.parse(x.trim()));
-    const boot = await s.users.ensureBootstrapAdmin();
-    // the key's owner is an admin of the key's tenant
-    const admin = boot.tenant_id === tenant.id ? boot : await s.dbs.main.db.selectFrom('users').select('id').where('tenant_id', '=', tenant.id).where('role', '=', 'admin').where('status', '=', 'active').orderBy('created_at').executeTakeFirst();
-    if (!admin) throw new Error(`organization ${tenant.slug} has no admin to own the key`);
-    const { token, warnings } = await s.apiKeys.create({ tenantId: tenant.id, name: o.name, serverId: srv.id, environmentId: env.id, scopes, ownerUserId: admin.id });
+    // never creates a user: the key belongs to an existing owner (else admin) of the tenant, or to --owner
+    const owner = await s.users.keyOwner(tenant.id, o.owner);
+    if (!owner) throw new Error(o.owner ? `${o.owner} is not an active owner or admin of organization ${tenant.slug}` : `organization ${tenant.slug} has no active owner or admin to own the key; sign in to the console first (or start \`neurouter serve\` once on a new local data directory)`);
+    const { token, warnings } = await s.apiKeys.create({ tenantId: tenant.id, name: o.name, serverId: srv.id, environmentId: env.id, scopes, ownerUserId: owner.id });
     for (const w of warnings) console.error(`warning: ${w}`);
     console.log(token);
   } finally {

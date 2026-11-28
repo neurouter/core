@@ -133,6 +133,22 @@ export const PreviewToolRow = z.object({
 });
 export type PreviewToolRow = z.infer<typeof PreviewToolRow>;
 
+/**
+ * What the import already knows about the real upstream, for the wizard's environment step: a GraphQL
+ * endpoint that was just introspected (origin as base URL; the URL path is the server's GraphQL
+ * `endpointPath`; the introspection header as the credential, a reference only), or an absolute
+ * OpenAPI `servers[0].url`. Null when the spec gives nothing usable.
+ */
+export const PreviewEnvironmentHint = z.object({
+  source: z.enum(['graphql_endpoint', 'openapi_servers']),
+  baseUrl: z.string(),
+  /** GraphQL: the path tool calls POST to (appended to the environment's base URL). */
+  endpointPath: z.string().nullable(),
+  /** The header the introspection request sent; `secretRef` only when it came from a reference (literal values are never kept). */
+  auth: z.object({ type: z.enum(['header', 'bearer']), headerName: z.string(), secretRef: z.string().nullable() }).nullable(),
+});
+export type PreviewEnvironmentHint = z.infer<typeof PreviewEnvironmentHint>;
+
 export const SpecPreview = z.object({
   id: Id,
   status: z.enum(['compiling', 'ready', 'failed']),
@@ -152,6 +168,7 @@ export const SpecPreview = z.object({
   preliminaryScore: z.number().int().min(0).max(100).nullable(),
   overlayDraftYaml: z.string(),
   diff: SpecChangeSummary.nullable(),
+  environmentHint: PreviewEnvironmentHint.nullable(),
   expiresAt: IsoDateTime,
 });
 export type SpecPreview = z.infer<typeof SpecPreview>;

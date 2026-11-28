@@ -3,8 +3,8 @@ import { ALL_ENDPOINTS } from '@neurouter/shared';
 import { createTestContext, type TestContext } from '../../test/fakes/app-context.js';
 
 /**
- * Keys whose handlers live in other workstreams. evals.* / suggestions.* → controlplane/api/routes/evals.ts
- * (loaded by plugin.ts when present); environments.connectUpstream → the OAuth AS (`/oauth/upstream/...`).
+ * Keys without a console route yet (none). The production bundle is checked the same way by
+ * `apps/server/scripts/check-routes.mjs` (run by smoke.mjs and the docker-smoke CI job).
  */
 export const PENDING_KEYS: readonly string[] = [];
 

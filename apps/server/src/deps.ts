@@ -488,7 +488,7 @@ export async function initServices(s: Services): Promise<void> {
   if (!(await s.settings.get('installId'))) await s.settings.setIfAbsent('installId', newId());
   const parts = await s.auditStore.maintainPartitions();
   for (const f of parts.failed) s.logger.warn({ partition: f.name, error: f.error }, 'audit partition could not be created');
-  await s.users.ensureBootstrapAdmin();
+  await s.users.ensureBootstrapAdminOnBoot();
   await s.startExecutor();
 }
 
