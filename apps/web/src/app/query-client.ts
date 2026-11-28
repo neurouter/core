@@ -38,10 +38,11 @@ export function createQueryClient(hooks: QueryClientHooks = {}): QueryClient {
       },
     }),
     mutationCache: new MutationCache({
-      onError: (err) => {
+      onError: (err, _vars, _ctx, mutation) => {
         if (!(err instanceof ApiError)) return;
         if (err.status === 401) handle401();
-        else if (err.status === 403) hooks.onMutationForbidden?.(err);
+        // `meta.handlesForbidden`: the page explains this 403 itself (e.g. an invite for another email)
+        else if (err.status === 403 && !mutation.meta?.handlesForbidden) hooks.onMutationForbidden?.(err);
       },
     }),
     defaultOptions: {

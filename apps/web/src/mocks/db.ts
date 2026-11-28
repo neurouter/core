@@ -7,12 +7,12 @@ import {
   DEFAULT_LIMITS, readinessBand, type ApiKeyRow, type AuditRow, type BuildRow, type CallDetail, type EnvironmentDetail, type EvalRunRow, type IssueRow, type MatrixCell,
   type NeedGroupRow, type NeedRow, type OverlayChange, type OverlayRevisionRow, type OverlayToolEntry, type PolicyStep, type ReadinessComponent, type ReadinessSummary, type ScriptRunDetail,
   type ServerDetail, type ServerRow, type SpecPreview, type SpecRevisionRow, type SuggestionRow, type TaskDetail, type TaskResultRow, type TaskRow, type TimelineItem, type ToolDetail, type ToolRow,
-  type UserRow,
 } from '@neurouter/shared';
 import {
   ACME_BASELINE_BREAKDOWN, ACME_BREAKDOWN, ACME_LINT, BLUEFIN_LINT, CLIENTS, DAY, ENVS, EVAL_TASK_PROMPTS, HOUR, INSTANCE, ISSUES, KEYS, LUMEN_BREAKDOWN, MIN, MODELS, NEED_GROUPS, NOW,
   PEOPLE, RUNS, SERVERS, TASK_GOALS, TOOLS_BY_SERVER, ago, iso, rng, type EnvSeed, type ServerSeed, type ToolSeed,
 } from './demo-data';
+import { createTenancy, type TenancyState } from './tenancy';
 
 export type Entry = OverlayToolEntry;
 type Mode = 'tool' | 'code';
@@ -104,7 +104,10 @@ export interface MockDb {
   suggestions: SuggestionState[];
   adminAudit: AuditRow[];
   previews: Map<string, { preview: SpecPreview; createdMs: number; draftOps: Record<string, Entry> }>;
-  users: UserRow[];
+  /** Organizations, members, invites and the mock session (`./tenancy`). */
+  tenancy: TenancyState;
+  /** Called after tenancy writes (the browser mock bundle saves to localStorage). */
+  persistTenancy?: () => void;
   killSwitches: { scope: 'global' | 'server' | 'environment' | 'tool'; target: string; kind: 'all' | 'writes' | 'code_mode'; reason: string; createdBy: { id: string; name: string } | null; createdAt: string }[];
   settings: {
     keys: Record<'openai' | 'anthropic' | 'gemini', { configured: boolean; source: 'env' | 'stored' | null; last4: string | null }>;
@@ -859,7 +862,7 @@ export function createDb(opts: { speed?: number } = {}): MockDb {
   acme.draft = { 'operationId:customersSearch': { response: { maxItems: 20 }, examples: [{ arguments: { query: 'maya@acme.test' } }, { arguments: { query: '+358 40 123 4567', limit: 5 } }], pinned: true } };
   const db: MockDb = {
     servers, tasks: [], taskDetails: new Map(), calls: new Map(), scripts: new Map(), needGroups: [], issues: [], keys: [], runs: [], suggestions: [], adminAudit: [], previews: new Map(),
-    users: Object.values(PEOPLE).map((p, i) => ({ id: p.id, email: p.email, name: p.name, role: p.role, roleSource: i === 0 ? 'bootstrap' : 'oidc', status: 'active', lastLoginAt: ago((i + 1) * 2 * HOUR), createdAt: ago((60 - i * 10) * DAY) })),
+    tenancy: createTenancy(),
     killSwitches: [{ scope: 'tool', target: 'acme-orders/prod/cancel_order', kind: 'writes', reason: 'Investigating double cancellations (INC-2231)', createdBy: ref(PEOPLE.jon), createdAt: ago(26 * HOUR) }],
     settings: { keys: { openai: { configured: true, source: 'env', last4: 'Lu6a' }, anthropic: { configured: true, source: 'stored', last4: '9fQa' }, gemini: { configured: false, source: null, last4: null } }, evalModel: 'gpt-6-luna', judgeModel: 'gpt-6-luna', generatorModel: 'gpt-6-luna', effort: 'medium', fallbacks: 'default', codeModeEnabled: true, storeOutputs: false, auditDays: 90, taskDays: 30, orgName: INSTANCE.name },
     speed: opts.speed ?? 1, nextRunNumber: 19, seq: 0, auditCache: null,

@@ -26,7 +26,7 @@ export function rng(seed: number): () => number {
 export const INSTANCE = { name: 'Acme Corp', version: '0.1.0' };
 
 export const PEOPLE = {
-  maya: { id: 'usr_maya', name: 'Maya Lindqvist', email: 'maya.lindqvist@acme.test', role: 'admin' as const },
+  maya: { id: 'usr_maya', name: 'Maya Lindqvist', email: 'maya.lindqvist@acme.test', role: 'owner' as const },
   jon: { id: 'usr_jon', name: 'Jon Okafor', email: 'jon.okafor@acme.test', role: 'admin' as const },
   priya: { id: 'usr_priya', name: 'Priya Raman', email: 'priya.raman@acme.test', role: 'viewer' as const },
 };

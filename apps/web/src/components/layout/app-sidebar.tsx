@@ -9,6 +9,7 @@ import { activeNavId, buildNav, type BadgeTone } from '@/app/nav';
 import { badgesQueryOptions } from '@/features/auth/queries';
 import { cn } from '@/lib/utils';
 import { BrandMark } from './brand-mark';
+import { TenantSwitcher } from './tenant-switcher';
 
 // The shadcn badge switches its text to sidebar-accent-foreground when the item is hovered or
 // active; keep each tone's own text colour there too, or the count vanishes.
@@ -34,12 +35,12 @@ export function AppSidebar({ me }: { me: Me }) {
     <Sidebar collapsible="icon">
       <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
         <SidebarHeader className="h-16 justify-center">
-          {/* the instance name sits in the slot a later tenant switcher takes (spec §3.4) */}
+          {/* the slot under the product name: the instance name, or the organization switcher on a multi-tenant deployment */}
           <div className="flex items-center gap-2.5 px-1 group-data-[collapsible=icon]:px-0">
             <BrandMark className="group-data-[collapsible=icon]:size-8" />
             <div className="flex min-w-0 flex-1 flex-col leading-tight group-data-[collapsible=icon]:hidden">
               <span className="text-sm font-semibold">Neurouter</span>
-              <span className="truncate text-[12.5px] text-muted-foreground">{me.instance.name}</span>
+              {me.tenancy.multi ? <TenantSwitcher me={me} /> : <span className="truncate text-[12.5px] text-muted-foreground">{me.instance.name}</span>}
             </div>
             <span className="rounded-full border px-1.5 py-px font-mono text-[11px] text-muted-foreground group-data-[collapsible=icon]:hidden">v{me.instance.version}</span>
           </div>

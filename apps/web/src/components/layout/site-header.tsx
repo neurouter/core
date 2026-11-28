@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { CommandPalette, usePaletteShortcut } from '@/features/search/command-palette';
+import { isViewer } from '@/lib/permissions';
 import { useCrumbs } from './crumbs';
 import { DemoPill, IS_DEMO } from './demo-banner';
 import { ServerSwitcher } from './server-switcher';
@@ -21,7 +22,7 @@ export function SiteHeader({ me }: { me: Me }) {
   const staticCrumbs = [...matches].reverse().find((m) => m.staticData?.crumbs)?.staticData?.crumbs ?? [];
   const dynamic = useCrumbs();
   const crumbs: { label: string; to?: string }[] = dynamic ?? staticCrumbs.map((label) => ({ label }));
-  const viewer = me.user.role === 'viewer' && !IS_DEMO;
+  const viewer = isViewer(me) && !me.instance.demoReadOnly && !IS_DEMO;
   return (
     <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-3 md:px-5">
       <SidebarTrigger className="size-8 text-muted-foreground" aria-label="Toggle sidebar (Ctrl+B)" />

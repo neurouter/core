@@ -8,8 +8,7 @@ import {
 import { apiFetch } from '@/lib/api-client';
 import { browserNavigation } from '@/lib/navigation';
 import { initials } from '@/lib/initials';
-
-const ROLE_LABEL = { admin: 'Admin', viewer: 'Viewer' } as const;
+import { ROLE_LABEL } from '@/lib/permissions';
 
 export async function signOut(queryClient: { clear: () => void }, navigate: (url: string) => void = (u) => browserNavigation.assign(u)) {
   let redirectTo = '/auth/logged-out';
@@ -38,7 +37,7 @@ export function UserMenu({ me }: { me: Me }) {
           <DropdownMenuLabel className="flex flex-col gap-0.5 font-normal">
             <span className="text-sm font-semibold text-foreground">{me.user.name || me.user.email}</span>
             <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
-            <span className="text-xs text-muted-foreground">{me.user.anonymous ? 'Demo visitor' : ROLE_LABEL[me.user.role]}</span>
+            <span className="text-xs text-muted-foreground">{me.user.anonymous ? 'Demo visitor' : me.tenant ? (me.tenancy.multi ? `${ROLE_LABEL[me.tenant.role]} · ${me.tenant.name}` : ROLE_LABEL[me.tenant.role]) : 'No organization'}</span>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />

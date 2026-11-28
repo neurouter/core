@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { FileTextIcon, FileUpIcon, GaugeIcon, InboxIcon, KeyRoundIcon, LayoutDashboardIcon, ListTreeIcon, PlugIcon, ServerIcon, SlidersHorizontalIcon } from 'lucide-react';
+import { FileTextIcon, FileUpIcon, GaugeIcon, InboxIcon, KeyRoundIcon, LayoutDashboardIcon, ListTreeIcon, PlugIcon, ServerIcon, SlidersHorizontalIcon, UsersIcon } from 'lucide-react';
 import type { Capability } from '@neurouter/shared';
 import type { Badges, Me } from '@/contract';
 import { can, isViewer } from '@/lib/permissions';
@@ -66,7 +66,10 @@ export const NAV: readonly NavGroupDef[] = [
   {
     id: 'settings',
     label: 'Settings',
-    items: [{ id: 'settings', title: 'Settings', to: '/settings', icon: SlidersHorizontalIcon, capability: 'settings:read' }],
+    items: [
+      { id: 'settings', title: 'Settings', to: '/settings', icon: SlidersHorizontalIcon, capability: 'settings:read' },
+      { id: 'members', title: 'Members', to: '/settings/members', icon: UsersIcon, capability: 'members:read' },
+    ],
   },
 ];
 
